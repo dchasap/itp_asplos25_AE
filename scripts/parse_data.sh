@@ -15,13 +15,13 @@ for BENCHSUITE in ${BENCHSUITES}; do
 		source ${ROOT_DIR}/scripts/benchmarks.sh
 
 		if [[ "${BENCHSUITE}" == *"spec"* ]]; then
-			BENCHNAMES=${BENCHMARKS}
-			BENCHMARKS=${SIMPOINTS}
-			SIMPOINTS=${SIMPOINTS}
+			export BENCHNAMES=${BENCHMARKS}
+			export BENCHMARKS=${SIMPOINTS}
+			export SIMPOINTS=${SIMPOINTS}
 		else
-			BENCHNAMES=""
-			BENCHMARKS=${SIMPOINTS}
-			SIMPOINTS=""
+			export BENCHNAMES=""
+			export BENCHMARKS=${SIMPOINTS}
+			export SIMPOINTS=""
 		fi
 		
 		echo "Preparing ${BENCHSUITE}${TAG}..."
@@ -29,7 +29,8 @@ for BENCHSUITE in ${BENCHSUITES}; do
 		if [ "${GENERATE_STATS}" == "True" ]; then 
 			echo "Parsing raw ChampSim data..."
 			for bench in ${BENCHMARKS}; do
-				status=`python3 ${ROOT_DIR}/scripts/convert_champsim2csv.py --input-file ${ROOT_DIR}/dump/${bench}${TAG}_run.out \
+				#echo "*** " $bench
+				status=`python3 ${ROOT_DIR}/scripts/convert_champsim2csv.py --input-file ${DUMP_DIR}/${bench}${TAG}_run.out \
 																																		--output ${ROOT_DIR}/stats/${bench}${TAG}.csv`
 				if [[ ${status} ]]; then
 					echo "Failed parsing ${bench}"
@@ -38,7 +39,6 @@ for BENCHSUITE in ${BENCHSUITES}; do
 				fi
 
 			done
-
 			# Apply weights in case benchmarks use simpoints 
 			if [[ "${BENCHNAMES}" ]]; then
 				echo "Apply simpoint weights..."
@@ -96,6 +96,19 @@ for BENCHSUITE in ${BENCHSUITES}; do
 																													--benchmarks ${BENCHMARKS} \
 																													--output-file=${ROOT_DIR}/stats/${BENCHSUITE}${TAG}_page_access_stats.csv
 
+		fi
+
+		if [ "${GENERATE_REUSE_DISTANCE_STATS}" == "True" ]; then
+			
+			echo "Processing reuse distance stats..."
+			files=''
+			for bench in ${BENCHMARKS}; do 
+				files="${files} ${ROOT_DIR}/dump/${bench}${TAG}_${REUSE_DIST_FILENAME_PREFIX}_cpu0_L1D_VC.csv"
+			done
+
+			python3 ${ROOT_DIR}/scripts/average_data.py 	--input-files ${files} \
+																										--benchmarks ${BENCHMARKS} \
+																										--output-file=${ROOT_DIR}/stats/${BENCHSUITE}${TAG}_${REUSE_DIST_FILENAME_PREFIX}_L1D_VC.csv
 		fi
 
 	done

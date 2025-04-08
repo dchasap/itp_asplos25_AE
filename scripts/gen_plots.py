@@ -563,7 +563,6 @@ def gen_plot(figure_name):
 
 
 
-
 ### Command Line Arguments ###
 parser = argparse.ArgumentParser()
 parser.add_argument('--figure', dest='figure_name', required=False, default="all", help="Name of figure to generate.")

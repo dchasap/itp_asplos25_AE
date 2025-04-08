@@ -77,6 +77,10 @@ public:
 		uint64_t page_crossing = 0; 
 #endif
 
+#if defined VICTIM_CACHE
+	bool is_doa = true;
+#endif
+
 };
 
 template <>

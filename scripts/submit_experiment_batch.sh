@@ -29,7 +29,7 @@ for benchsuite in ${BENCHSUITES}; do
 			echo "Generating ${ROOT_DIR}/sim_conf/champsim_${base_conf}.json..."
 			${ROOT_DIR}/scripts/gen_champsim_conf.py ${CHAMPSIM_DIR}/champsim_fdip_baseline.json ${base_conf} ${smt}
 			cd ${CHAMPSIM_DIR}
-			${CHAMPSIM_DIR}/config.sh ${ROOT_DIR}/sim_conf/champsim_${base_conf}.json
+			${CHAMPSIM_DIR}/config.sh --compile-all-modules ${ROOT_DIR}/sim_conf/champsim_${base_conf}.json
 			make
 			cd ${ROOT_DIR}
 		fi

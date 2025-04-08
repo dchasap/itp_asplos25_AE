@@ -25,6 +25,7 @@
 #include "champsim_constants.h"
 #include "instruction.h"
 #include "util.h"
+#include <bits/range_access.h>
 
 				//#if defined FORCE_HIT
 				//#define HIT_CONDITION (force_hit && handle_pkt.is_instr) 
@@ -34,29 +35,29 @@
 				//#define HIT_CONDITION (force_hit && !handle_pkt.is_instr && handle_pkt.type == TRANSLATION) 
 				//#endif
 
-				#if defined PTP_REPLACEMENT_POLICY
+#if defined PTP_REPLACEMENT_POLICY
 				extern uint64_t RETIRED_INSTRS;
 				extern double STLB_MPKI;
-				#endif
+#endif
 
 				bool CACHE::handle_fill(const PACKET& fill_mshr)
 				{
 					cpu = fill_mshr.cpu;
 
 					// find victim
-				#if defined (SPLIT_STLB)
+#if defined (SPLIT_STLB)
 					auto [set_begin, set_end] = get_set_span(fill_mshr.address, fill_mshr.is_instr);
 					auto way = std::find_if_not(set_begin, set_end, [](auto x) { return x.valid; });
 					if (way == set_end)
 						way = std::next(set_begin, impl_find_victim(fill_mshr.cpu, fill_mshr.instr_id, get_set_index(fill_mshr.address, fill_mshr.is_instr), &*set_begin, fill_mshr.ip,
 																												fill_mshr.address, fill_mshr.type));
-				#else
+#else
 					auto [set_begin, set_end] = get_set_span(fill_mshr.address);
 					auto way = std::find_if_not(set_begin, set_end, [](auto x) { return x.valid; });
 					if (way == set_end)
 						way = std::next(set_begin, impl_find_victim(fill_mshr.cpu, fill_mshr.instr_id, get_set_index(fill_mshr.address), &*set_begin, fill_mshr.ip,
 																												fill_mshr.address, fill_mshr.type));
-				#endif
+#endif
 					assert(set_begin <= way);
 					assert(way <= set_end);
 					const auto way_idx = static_cast<std::size_t>(std::distance(set_begin, way)); // cast protected by earlier assertion
@@ -66,11 +67,11 @@
 						std::cout << " instr_id: " << fill_mshr.instr_id << " address: " << std::hex << (fill_mshr.address >> OFFSET_BITS);
 						std::cout << " full_addr: " << fill_mshr.address;
 						std::cout << " full_v_addr: " << fill_mshr.v_address << std::dec;
-				#if defined (SPLIT_STLB)
+#if defined (SPLIT_STLB)
 						std::cout << " set: " << get_set_index(fill_mshr.address, fill_mshr.is_instr);
-				#else 
+#else 
 						std::cout << " set: " << get_set_index(fill_mshr.address);
-				#endif
+#endif
 						std::cout << " way: " << way_idx;
 						std::cout << " type: " << +fill_mshr.type;
 						std::cout << " cycle_enqueued: " << fill_mshr.cycle_enqueued;
@@ -92,32 +93,87 @@
 							writeback_packet.type = WRITE;
 							writeback_packet.pf_metadata = way->pf_metadata;
 
-				#if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT
+#if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT
 							writeback_packet.is_instr = way->is_instr;
 							writeback_packet.is_pte = way->is_pte;
-				#endif	
+#endif	
 
-				#if defined(MULTIPLE_PAGE_SIZE)
-						writeback_packet.page_size = writeback_packet.page_size;
-						writeback_packet.base_vpn = writeback_packet.base_vpn;
-				#endif
+#if defined(MULTIPLE_PAGE_SIZE)
+							writeback_packet.page_size = writeback_packet.page_size;
+							writeback_packet.base_vpn = writeback_packet.base_vpn;
+#endif
 
+//FIXME: Should we skip writebacks for victim cache (??) - ptes are never written/dirty
+#if defined(VICTIM_CACHE)
+							bool vc_entry_cond;
+							if (enable_instr_only)
+								vc_entry_cond = writeback_packet.is_pte && writeback_packet.is_instr;
+							else 
+								vc_entry_cond = writeback_packet.is_pte;
+
+							//if (enable_victim_cache && vc_entry_cond && !way.is_doa) {
+							if (enable_victim_cache && vc_entry_cond) {
+								success = victim_cache->add_wq(writeback_packet);
+							} else { 
+								success = lower_level->add_wq(writeback_packet);
+							}
+#else
 							success = lower_level->add_wq(writeback_packet);
+#endif
 						}
+
+#if defined VICTIM_CACHE
+						//FIXME: This is probably the ONLY point we should move something to the victim cache
+						if (enable_victim_cache) {
+
+							PACKET victim_packet;
+
+							victim_packet.cpu = fill_mshr.cpu;
+							victim_packet.address = way->address;
+							victim_packet.data = way->data;
+							victim_packet.instr_id = fill_mshr.instr_id;
+							victim_packet.ip = 0;
+							victim_packet.type = fill_mshr.type;
+							victim_packet.pf_metadata = way->pf_metadata;
+
+#if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT
+							victim_packet.is_instr = way->is_instr;
+							victim_packet.is_pte = way->is_pte;
+#endif	
+
+#if defined MULTIPLE_PAGE_SIZE
+							victim_packet.page_size = way->page_size;
+							victim_packet.base_vpn = way->base_vpn;
+#endif
+							bool vc_entry_cond;
+							if (enable_instr_only)
+								vc_entry_cond = way->is_pte && way->is_instr;
+							else 
+								vc_entry_cond = way->is_pte;
+
+							//if (vc_entry_cond && !way.is_doa) {
+							if (vc_entry_cond) {
+								//success = victim_cache->add_wq(writeback_packet);
+								victim_cache->add_wq(victim_packet); // it's probably ok if we skip some, not that critical
+							}
+
+							way->is_doa = true; // reset doa flag
+						}
+#endif
 
 						if (success) {
 							auto evicting_address = (ever_seen_data ? way->address : way->v_address) & ~champsim::bitmask(match_offset_bits ? 0 : OFFSET_BITS);
 
 
-				#if defined FORCE_HIT // check if evicted entry is a PTE
+#if defined FORCE_HIT // check if evicted entry is a PTE
 							if (NAME.find("L1D") != std::string::npos) {
-								if (force_hit && way->is_pte && !way->is_instr) {
+								if (force_hit && (way->is_pte)) {
 									// should use address or v_address
 									cached_PTEs[way->address] = *way;
 								}
 							}
 							//TODO: we don't handle really writes, writebacks because pte are never written to
-				#endif	
+#endif	
 
 							if (way->prefetch)
 								sim_stats.back().pf_useless++;
@@ -132,6 +188,7 @@
 								way->page_crossing = fill_mshr.page_crossing;
 							}
 #endif
+
 							way->valid = true;
 							way->prefetch = fill_mshr.prefetch_from_this;
 							way->dirty = (fill_mshr.type == WRITE);
@@ -139,109 +196,86 @@
 							way->v_address = fill_mshr.v_address;
 							way->data = fill_mshr.data;
 							//FIXME: should we have the type passed as well?
-				#if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT
+#if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT || defined VICTIM_CACHE
 							way->is_instr = fill_mshr.is_instr;
 							way->is_pte = fill_mshr.is_pte;
-				#endif
+#endif
 
-				#if defined(MULTIPLE_PAGE_SIZE)
+#if defined(MULTIPLE_PAGE_SIZE)
 							way->page_size = fill_mshr.page_size;
 							way->base_vpn = fill_mshr.base_vpn;
-				#endif
+#endif
 
-				#if defined (SPLIT_STLB)
+#if defined (SPLIT_STLB)
 							metadata_thru =
 									impl_prefetcher_cache_fill(pkt_address, get_set_index(fill_mshr.address, fill_mshr.is_instr), way_idx, fill_mshr.type == PREFETCH, evicting_address, metadata_thru);
-				#else 
+#else 
 							metadata_thru =
 									impl_prefetcher_cache_fill(pkt_address, get_set_index(fill_mshr.address), way_idx, fill_mshr.type == PREFETCH, evicting_address, metadata_thru);
-				#endif
+#endif
 
-				#if defined ENABLE_TRANSLATION_AWARE_REPLACEMENT
-				/*
-							if (NAME.compare("cpu0_STLB") == 0)
-								impl_update_replacement_state(fill_mshr.cpu, get_set_index(fill_mshr.address), way_idx, fill_mshr.address, fill_mshr.ip, evicting_address, fill_mshr.type, false, (uint32_t)(fill_mshr.is_instr?1:0),
-																						false);
-							else if (NAME.compare("cpu0_L1D") == 0 || NAME.compare("cpu0_L2C") || NAME.compare("LLC")) {
-								impl_update_replacement_state(fill_mshr.cpu, get_set_index(fill_mshr.address), way_idx, fill_mshr.address, fill_mshr.ip, evicting_address, fill_mshr.type, false, (uint32_t)(fill_mshr.is_instr?1:0),
-																						(fill_mshr.is_pte?1:0));
-							}
-							else 
-								impl_update_replacement_state(fill_mshr.cpu, get_set_index(fill_mshr.address), way_idx, fill_mshr.address, fill_mshr.ip, evicting_address, fill_mshr.type,
-																						false, false, false);
-				*/
+	#if defined ENABLE_TRANSLATION_AWARE_REPLACEMENT
 							REP_POL_XARGS xargs;
 							xargs.is_instr = fill_mshr.is_instr;
 							xargs.is_pte = fill_mshr.is_pte;
 							xargs.is_replay = !fill_mshr.is_translated;
 							xargs.translation_level = fill_mshr.translation_level;
-				#if defined (SPLIT_STLB)
+	#if defined (SPLIT_STLB)
 							impl_update_replacement_state(fill_mshr.cpu, get_set_index(fill_mshr.address, fill_mshr.is_instr), way_idx, 
 																						fill_mshr.address, fill_mshr.ip, evicting_address, 
 																						fill_mshr.type, false, xargs);
-				#else
-					impl_update_replacement_state(fill_mshr.cpu, get_set_index(fill_mshr.address), way_idx, 
+	#else
+							impl_update_replacement_state(fill_mshr.cpu, get_set_index(fill_mshr.address), way_idx, 
 																						fill_mshr.address, fill_mshr.ip, evicting_address, 
 																						fill_mshr.type, false, xargs);
 
-				#endif
+	#endif
 
-				#else
+#else
 							impl_update_replacement_state(fill_mshr.cpu, get_set_index(fill_mshr.address), way_idx, fill_mshr.address, fill_mshr.ip, evicting_address, fill_mshr.type,
 																						false);
-				#endif
-
+#endif
 							way->pf_metadata = metadata_thru;
 						}
 					} else {
 						// Bypass
 						assert(fill_mshr.type != WRITE);
 
-				#if defined (SPLIT_STLB)
+#if defined (SPLIT_STLB)
 						metadata_thru = impl_prefetcher_cache_fill(pkt_address, get_set_index(fill_mshr.address, fill_mshr.is_instr), way_idx, fill_mshr.type == PREFETCH, 0, metadata_thru);
-				#else 
+#else 
 						metadata_thru = impl_prefetcher_cache_fill(pkt_address, get_set_index(fill_mshr.address), way_idx, fill_mshr.type == PREFETCH, 0, metadata_thru);
-				#endif 
+#endif 
 
-				#if defined ENABLE_TRANSLATION_AWARE_REPLACEMENT
-				/*
-							if (NAME.compare("cpu0_STLB") == 0)
-								impl_update_replacement_state(fill_mshr.cpu, get_set_index(fill_mshr.address), way_idx, fill_mshr.address, fill_mshr.ip, 0, fill_mshr.type, false, (uint32_t)(fill_mshr.is_instr?1:0), false);
-							else if (NAME.compare("cpu0_L1D") == 0 || NAME.compare("cpu0_L2C") || NAME.compare("LLC")) {
-								impl_update_replacement_state(fill_mshr.cpu, get_set_index(fill_mshr.address), way_idx, fill_mshr.address, fill_mshr.ip, 0, fill_mshr.type, false, (uint32_t)(fill_mshr.is_instr?1:0),
-																						(fill_mshr.is_pte?1:0));
-							}
-							else 
-								impl_update_replacement_state(fill_mshr.cpu, get_set_index(fill_mshr.address), way_idx, fill_mshr.address, fill_mshr.ip, 0, fill_mshr.type, false, false, false);
-				*/
+#if defined ENABLE_TRANSLATION_AWARE_REPLACEMENT
 						REP_POL_XARGS xargs;
 						xargs.is_instr = fill_mshr.is_instr;
 						xargs.is_pte = fill_mshr.is_pte;
 						xargs.is_replay = !fill_mshr.is_translated;
 						xargs.translation_level = fill_mshr.translation_level;
-				#if defined (SPLIT_STLB)
+	#if defined (SPLIT_STLB)
 						impl_update_replacement_state(fill_mshr.cpu, get_set_index(fill_mshr.address, fill_mshr.is_instr), way_idx, 
 																					fill_mshr.address, fill_mshr.ip, 0, 
 																					fill_mshr.type, false, xargs);
-				#else
-				impl_update_replacement_state(fill_mshr.cpu, get_set_index(fill_mshr.address), way_idx, 
+	#else
+						impl_update_replacement_state(fill_mshr.cpu, get_set_index(fill_mshr.address), way_idx, 
 																					fill_mshr.address, fill_mshr.ip, 0, 
 																					fill_mshr.type, false, xargs);
-				#endif
+	#endif
 
-				#else
+#else
 
-				#if defined (SPLIT_STLB)
+	#if defined (SPLIT_STLB)
 						impl_update_replacement_state(fill_mshr.cpu, get_set_index(fill_mshr.address, fill_mshr.is_instr), way_idx, fill_mshr.address, fill_mshr.ip, 0, fill_mshr.type, false);
-				#else 
+	#else 
 						impl_update_replacement_state(fill_mshr.cpu, get_set_index(fill_mshr.address), way_idx, fill_mshr.address, fill_mshr.ip, 0, fill_mshr.type, false);
-				#endif 
+	#endif 
 
-				#endif
+#endif
 					}
 
 					if (success) {
-				#if defined ENABLE_EXTRA_CACHE_STATS
+#if defined ENABLE_EXTRA_CACHE_STATS
 						if (fill_mshr.is_instr && !fill_mshr.is_pte) {
 							sim_stats.back().total_imiss_latency += current_cycle - (fill_mshr.cycle_enqueued + 1);
 						} else if (!fill_mshr.is_instr && !fill_mshr.is_pte) {
@@ -257,7 +291,7 @@
 							std::cout << "\tis_instr:" << (fill_mshr.is_instr?"true":"false") << std::endl;
 							assert(false);
 						}
-				#endif
+#endif
 
 						// COLLECT STATS
 						sim_stats.back().total_miss_latency += current_cycle - (fill_mshr.cycle_enqueued + 1);
@@ -277,20 +311,20 @@
 					cpu = handle_pkt.cpu;
 
 #if defined(ENABLE_PAGE_CROSSING_STATS)
-if (((NAME.find("L1I") != std::string::npos) || (NAME.find("L1D") != std::string::npos))
-		&& (handle_pkt.type == PREFETCH) && (handle_pkt.page_crossing > 0)) {
+					if (((NAME.find("L1I") != std::string::npos) || (NAME.find("L1D") != std::string::npos))
+							&& (handle_pkt.type == PREFETCH) && (handle_pkt.page_crossing > 0)) {
 
-		if (handle_pkt.page_crossing == 1) sim_stats.back().pf_crossing_pages_tlb_hit++;
-		else if (handle_pkt.page_crossing == 2) sim_stats.back().pf_crossing_pages_tlb_miss++;
-	}
+						if (handle_pkt.page_crossing == 1) sim_stats.back().pf_crossing_pages_tlb_hit++;
+						else if (handle_pkt.page_crossing == 2) sim_stats.back().pf_crossing_pages_tlb_miss++;
+					}
 #endif
 
 					// access cache
-				#if defined (SPLIT_STLB)
+#if defined (SPLIT_STLB)
 					auto [set_begin, set_end] = get_set_span(handle_pkt.address, handle_pkt.is_instr);
-				#else 
+#else 
 					auto [set_begin, set_end] = get_set_span(handle_pkt.address);
-				#endif
+#endif
 					auto way = std::find_if(set_begin, set_end, eq_addr<BLOCK>(handle_pkt.address, OFFSET_BITS));
 					const auto hit = (way != set_end);
 
@@ -317,9 +351,10 @@ if (((NAME.find("L1I") != std::string::npos) || (NAME.find("L1D") != std::string
 					}
 
 					if (hit) {
+
 						sim_stats.back().hits[handle_pkt.type][handle_pkt.cpu]++;
 
-				#if defined ENABLE_EXTRA_CACHE_STATS
+#if defined ENABLE_EXTRA_CACHE_STATS
 						if (handle_pkt.is_instr && !handle_pkt.is_pte) {
 							sim_stats.back().ihits[handle_pkt.type][handle_pkt.cpu]++;
 						} else if (!handle_pkt.is_instr && !handle_pkt.is_pte) {
@@ -337,54 +372,42 @@ if (((NAME.find("L1I") != std::string::npos) || (NAME.find("L1D") != std::string
 						}
 
 						pageAddressStatsMon->add_access(handle_pkt.address, handle_pkt.is_instr);
-						recallDistMon->add_access(handle_pkt.address);
-				#endif
+						reuseDistMon->add_access(handle_pkt.address);
+#endif
 
 						// update replacement policy
 						const auto way_idx = static_cast<std::size_t>(std::distance(set_begin, way)); // cast protected by earlier assertion
-				#if defined ENABLE_TRANSLATION_AWARE_REPLACEMENT
-				/*
-						if (NAME.compare("cpu0_STLB") == 0)
-							impl_update_replacement_state(handle_pkt.cpu, get_set_index(handle_pkt.address), way_idx, way->address, handle_pkt.ip, 0, handle_pkt.type, true, (uint32_t)(handle_pkt.is_instr?1:0), true);
-						else if (NAME.compare("cpu0_L1D") == 0 || NAME.compare("cpu0_L2C") || NAME.compare("LLC")) {
-							impl_update_replacement_state(handle_pkt.cpu, get_set_index(handle_pkt.address), way_idx, way->address, handle_pkt.ip, 0, handle_pkt.type, true, (uint32_t)(handle_pkt.is_instr?1:0),
-																						(handle_pkt.is_pte?1:0));
-						}
-						else 
-							impl_update_replacement_state(handle_pkt.cpu, get_set_index(handle_pkt.address), way_idx, way->address, handle_pkt.ip, 0, handle_pkt.type, true, false, false);
-				*/
+#if defined ENABLE_TRANSLATION_AWARE_REPLACEMENT
 						REP_POL_XARGS xargs;
 						xargs.is_instr = handle_pkt.is_instr;
 						xargs.is_pte = handle_pkt.is_pte;
 						xargs.is_replay = !handle_pkt.is_translated;
 						xargs.translation_level = handle_pkt.translation_level;
-				#if defined (SPLIT_STLB)
+	#if defined (SPLIT_STLB)
 						impl_update_replacement_state(handle_pkt.cpu, get_set_index(handle_pkt.address, handle_pkt.is_instr), way_idx, 
 																					handle_pkt.address, handle_pkt.ip, 0, 
 																					handle_pkt.type, false, xargs);
-				#else
+	#else
 						impl_update_replacement_state(handle_pkt.cpu, get_set_index(handle_pkt.address), way_idx, 
 																					handle_pkt.address, handle_pkt.ip, 0, 
 																					handle_pkt.type, false, xargs);
-				#endif
+	#endif
 
-				#else
+#else
 
-				#if defined (SPLIT_STLB)
+	#if defined (SPLIT_STLB)
 						impl_update_replacement_state(handle_pkt.cpu, get_set_index(handle_pkt.address, handle_pkt.is_instr), way_idx, way->address, handle_pkt.ip, 0, handle_pkt.type, true);
-				#else
+	#else
 						impl_update_replacement_state(handle_pkt.cpu, get_set_index(handle_pkt.address), way_idx, way->address, handle_pkt.ip, 0, handle_pkt.type, true);
-				#endif 
+	#endif 
 
-				#endif
+#endif
 
 						auto copy{handle_pkt};
 						copy.data = way->data;
 						copy.pf_metadata = metadata_thru;
 
-#if defined(ENABLE_PAGE_CROSSING_STATS)
-//						if (((NAME.find("STLB") != std::string::npos) || (NAME.find("ITLB") != std::string::npos)
-//								|| (NAME.find("DTLB") != std::string::npos)) && (handle_pkt.page_crossing == 2)) {
+#if defined ENABLE_PAGE_CROSSING_STATS
 						if ((NAME.find("STLB") != std::string::npos) && (handle_pkt.page_crossing == 2)) {
 
 							copy.page_crossing = 1;
@@ -395,7 +418,6 @@ if (((NAME.find("L1I") != std::string::npos) || (NAME.find("L1D") != std::string
 							ret->return_data(copy);
 
 						way->dirty = (handle_pkt.type == WRITE);
-
 						// update prefetch stats and reset prefetch bit
 						if (way->prefetch && !handle_pkt.prefetch_from_this) {
 							sim_stats.back().pf_useful++;
@@ -405,8 +427,17 @@ if (((NAME.find("L1I") != std::string::npos) || (NAME.find("L1D") != std::string
 //							else if (way->page_crossing == 1) sim_stats.back().pf_crossing_pages_tlb_hit++;
 //#endif
 						}
+
+#if defined VICTIM_CACHE
+						// If we have a hit, we need to change doa status at the block in the cache
+						if (enable_victim_cache) {
+							way->is_doa = false;
+						}
+#endif
+
 					} else {
-				#if defined FORCE_HIT
+
+#if defined FORCE_HIT
 						// Dimitrios: updating replacement policy doesn't really matter at this point
 						// update replacement policy
 				/*
@@ -431,7 +462,7 @@ if (((NAME.find("L1I") != std::string::npos) || (NAME.find("L1D") != std::string
 						}
 
 						if (NAME.find("L1D") != std::string::npos) {
-							if (force_hit && !handle_pkt.is_instr && handle_pkt.is_pte) {
+							if (force_hit && (handle_pkt.is_pte)) {
 								//copy.data = vmem->get_pte_pa(handle_pkt.cpu, handle_pkt.v_address, handle_pkt.translation_level).first;
 								auto it = cached_PTEs.find(handle_pkt.address);
 								if (it != cached_PTEs.end()) {
@@ -445,7 +476,7 @@ if (((NAME.find("L1I") != std::string::npos) || (NAME.find("L1D") != std::string
 
 							sim_stats.back().hits[handle_pkt.type][handle_pkt.cpu]++;
 
-				#if defined ENABLE_EXTRA_CACHE_STATS
+	#if defined ENABLE_EXTRA_CACHE_STATS
 							if (handle_pkt.is_instr && !handle_pkt.is_pte) {
 								sim_stats.back().ihits[handle_pkt.type][handle_pkt.cpu]++;
 							} else if (!handle_pkt.is_instr && !handle_pkt.is_pte) {
@@ -462,28 +493,31 @@ if (((NAME.find("L1I") != std::string::npos) || (NAME.find("L1D") != std::string
 							}
 						
 							pageAddressStatsMon->add_access(handle_pkt.address, handle_pkt.is_instr);
-							recallDistMon->add_access(handle_pkt.address);
-				#endif
-
+							reuseDistMon->add_access(handle_pkt.address);
+	#endif
+							
 							copy.pf_metadata = metadata_thru;
 							for (auto ret : copy.to_return)
 								ret->return_data(copy);
-				/*
-						// Dimitrios: not necessary for TLBs and PTEs, but we can leave it, it should always be false
-						way->dirty = (handle_pkt.type == WRITE);
 
-						// Dimitrios: useless too 
-						// update prefetch stats and reset prefetch bit
-						if (way->prefetch && !handle_pkt.prefetch_from_this) {
-							sim_stats.back().pf_useful++;
-							way->prefetch = false;
-						}
-				*/
+							/*
+								* Dimitrios: not necessary for TLBs and PTEs, but we can leave it, it should always be false
+								* way->dirty = (handle_pkt.type == WRITE);
+								*
+								*	// Dimitrios: useless too 
+								*	// update prefetch stats and reset prefetch bit
+								*	if (way->prefetch && !handle_pkt.prefetch_from_this) {
+								*		sim_stats.back().pf_useful++;
+								*		way->prefetch = false;
+								*	}
+								*
+								*/
+								
 							return true; //forcing hit
 						}
-				#endif
+#endif				
 
-				#if defined(MULTIPLE_PAGE_SIZE)
+#if defined(MULTIPLE_PAGE_SIZE)
 						//TODO: Lookup entire TLB in case of large pages
 						// 			Ignore caches for now
 						if (NAME.find("STLB") != std::string::npos 
@@ -507,7 +541,7 @@ if (((NAME.find("L1I") != std::string::npos) || (NAME.find("L1D") != std::string
 										assert(handle_pkt.translation_level == 0);
 
 										sim_stats.back().hits[handle_pkt.type][handle_pkt.cpu]++;
-				#if defined ENABLE_EXTRA_CACHE_STATS
+	#if defined ENABLE_EXTRA_CACHE_STATS
 										if (handle_pkt.is_instr && !handle_pkt.is_pte) {
 											sim_stats.back().ihits[handle_pkt.type][handle_pkt.cpu]++;
 										} else if (!handle_pkt.is_instr && !handle_pkt.is_pte) {
@@ -522,7 +556,7 @@ if (((NAME.find("L1I") != std::string::npos) || (NAME.find("L1D") != std::string
 											//std::cout << "\tis_instr:" << (handle_pkt.is_instr?"true":"false") << std::endl;
 											assert(false);
 										}
-				#endif
+	#endif
 
 										copy.pf_metadata = metadata_thru;
 										for (auto ret : copy.to_return)
@@ -536,11 +570,11 @@ if (((NAME.find("L1I") != std::string::npos) || (NAME.find("L1D") != std::string
 								//std::cout << "Yet another small pen...page, I meant page!" << std::endl;
 							}
 						}
-				#endif
+#endif
 
 						sim_stats.back().misses[handle_pkt.type][handle_pkt.cpu]++;
 
-				#if defined PTP_REPLACEMENT_POLICY
+#if defined PTP_REPLACEMENT_POLICY
 						if (NAME.find("STLB") != std::string::npos) {
 							//uint32_t total_accesses = sim_stats.back().misses[handle_pkt.type][handle_pkt.cpu] + sim_stats.back().hits[handle_pkt.type][handle_pkt.cpu];
 							uint32_t total_misses = sim_stats.back().misses[handle_pkt.type][handle_pkt.cpu];
@@ -552,9 +586,9 @@ if (((NAME.find("L1I") != std::string::npos) || (NAME.find("L1D") != std::string
 							//std::cout << "STLB_MPKI:" << STLB_MPKI << std::endl; 
 							//std::cout << "STLB_MISS_RATE:" << vmem->STLB_MISS_RATE << std::endl; 
 						}
-				#endif
+#endif
 
-				#if defined ENABLE_EXTRA_CACHE_STATS
+#if defined ENABLE_EXTRA_CACHE_STATS
 						if (handle_pkt.is_instr && !handle_pkt.is_pte) {
 							sim_stats.back().imisses[handle_pkt.type][handle_pkt.cpu]++;
 						} else if (!handle_pkt.is_instr && !handle_pkt.is_pte) {
@@ -569,10 +603,10 @@ if (((NAME.find("L1I") != std::string::npos) || (NAME.find("L1D") != std::string
 							std::cout << "\tis_instr:" << (handle_pkt.is_instr?"true":"false") << std::endl;
 							assert(false);
 						}
-						
+
 						pageAddressStatsMon->add_access(handle_pkt.address, handle_pkt.is_instr);
-						recallDistMon->add_access(handle_pkt.address);
-				#endif
+						reuseDistMon->add_access(handle_pkt.address);
+#endif
 
 					}
 
@@ -642,9 +676,26 @@ if (((NAME.find("L1I") != std::string::npos) || (NAME.find("L1D") != std::string
 						fwd_pkt.prefetch_from_this = false;
 
 						bool success;
-						if (prefetch_as_load || handle_pkt.type != PREFETCH)
+						if (prefetch_as_load || handle_pkt.type != PREFETCH) {
+//#if defined VICTIM_CACHE
+#if 0
+							bool vc_entry_cond;
+							if (enable_instr_only)
+								vc_entry_cond = fwd_pkt.is_pte && fwd_pkt.is_instr;
+							else 
+								vc_entry_cond = fwd_pkt.is_pte;
+
+							//if (enable_victim_cache && vc_entry_cond && !fwd_pkt.is_doa) {
+							if (enable_victim_cache && vc_entry_cond) {
+								fwd_pkt.is_doa = true;
+								success = victim_cache->add_rq(fwd_pkt); 
+							} else {
+								success = lower_level->add_rq(fwd_pkt);
+							}
+#else
 							success = lower_level->add_rq(fwd_pkt);
-						else
+#endif
+						} else
 							success = lower_level->add_pq(fwd_pkt);
 
 						if (!success)
@@ -697,6 +748,16 @@ if (((NAME.find("L1I") != std::string::npos) || (NAME.find("L1D") != std::string
 
 				void CACHE::operate()
 				{
+
+#if defined VICTIM_CACHE
+					//std::cout << "operate" << std::endl;
+					//FIXME: Not sure if we should operate the cache_queue as well
+					if (enable_victim_cache) {
+						victim_cache->queues.operate(); //FIXME: Not sure about this line
+						victim_cache->operate();
+					}
+#endif
+
 					auto tag_bw = MAX_TAG;
 					auto fill_bw = MAX_FILL;
 
@@ -723,11 +784,13 @@ if (((NAME.find("L1I") != std::string::npos) || (NAME.find("L1D") != std::string
 						// Treat writes (that is, writebacks) like fills
 						tag_bw -= operate_queue(queues.WQ, tag_bw, operate_writelike);
 
-						for (auto q : {std::ref(queues.PTWQ), std::ref(queues.RQ), std::ref(queues.PQ)})
+						for (auto q : {std::ref(queues.PTWQ), std::ref(queues.RQ), std::ref(queues.PQ)}) {
 							tag_bw -= operate_queue(q.get(), tag_bw, operate_readlike);
+						}
 					}
 
 					impl_prefetcher_cycle_operate();
+
 				}
 
 				#if defined (SPLIT_STLB)
@@ -1020,10 +1083,20 @@ void CACHE::initialize()
 {
   impl_prefetcher_initialize();
   impl_initialize_replacement();
+#if defined VICTIM_CACHE
+	if (enable_victim_cache)
+		victim_cache->initialize();
+#endif
 }
 
 void CACHE::begin_phase()
 {
+#if defined VICTIM_CACHE
+	if (enable_victim_cache) {
+		victim_cache->queues.begin_phase();
+		victim_cache->begin_phase();
+	}
+#endif 
   roi_stats.emplace_back();
   sim_stats.emplace_back();
 
@@ -1033,6 +1106,14 @@ void CACHE::begin_phase()
 
 void CACHE::end_phase(unsigned finished_cpu)
 {
+
+#if defined VICTIM_CACHE
+	if (enable_victim_cache) {
+		victim_cache->queues.end_phase(finished_cpu);
+		victim_cache->end_phase(finished_cpu);
+	}
+#endif 
+
   for (auto type : {LOAD, RFO, PREFETCH, WRITE, TRANSLATION}) {
     roi_stats.back().hits.at(type).at(finished_cpu) = sim_stats.back().hits.at(type).at(finished_cpu);
     roi_stats.back().misses.at(type).at(finished_cpu) = sim_stats.back().misses.at(type).at(finished_cpu);

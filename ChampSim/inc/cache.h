@@ -31,7 +31,7 @@
 #include "memory_class.h"
 #include "operable.h"
 
-#if defined FORCE_HIT || defined FORCE_PTE_HIT || defined MULTIPLE_PAGE_SIZE
+#if defined FORCE_HIT || defined MULTIPLE_PAGE_SIZE || defined VICTIM_CACHE
 #include "vmem.h"
 #endif
 
@@ -81,7 +81,7 @@ struct cache_stats {
 	uint64_t total_dtmiss_latency = 0;
 #endif
 
-#if defined(ENABLE_PAGE_CROSSING_STATS)
+#if defined ENABLE_PAGE_CROSSING_STATS
 	uint64_t pf_crossing_pages_tlb_hit = 0;
 	uint64_t pf_crossing_pages_tlb_miss = 0;
 #endif  
@@ -131,19 +131,23 @@ class CACHE : public champsim::operable, public MemoryRequestConsumer, public Me
 
     uint32_t pf_metadata = 0;
 
-#if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT
+#if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT || defined VICTIM_CACHE
 		bool is_instr = false;
 		bool is_pte = false;
 #endif
 
-#if defined(MULTIPLE_PAGE_SIZE) 
+#if defined MULTIPLE_PAGE_SIZE
 		uint32_t page_size = 0;
 		uint64_t base_vpn = 0;
 #endif
 
-#if defined(ENABLE_PAGE_CROSSING_STATS)
+#if defined ENABLE_PAGE_CROSSING_STATS
 		uint64_t page_crossing = 0; 
 #endif
+
+#if defined VICTIM_CACHE
+		bool is_doa = true;
+#endif 
 
 /*
 #if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT || defined FORCE_PTE_HIT
@@ -163,7 +167,7 @@ class CACHE : public champsim::operable, public MemoryRequestConsumer, public Me
 	};
 #endif
 
-#if defined (SPLIT_STLB)
+#if defined SPLIT_STLB
   std::pair<set_type::iterator, set_type::iterator> get_set_span(uint64_t address, uint8_t type);
  	std::pair<set_type::const_iterator, set_type::const_iterator> get_set_span(uint64_t address, uint8_t type) const;
   std::size_t get_set_index(uint64_t address, uint8_t type) const;
@@ -211,6 +215,8 @@ public:
     void begin_phase() override;
     void end_phase(unsigned cpu) override;
 
+		void test() { std::cout << "Testing..." << std::endl; sim_stats.back().RQ_ACCESS++; }
+
   private:
     void check_collision();
   };
@@ -252,14 +258,20 @@ public:
   std::vector<stats_type> sim_stats{}, roi_stats{};
 
 #if defined ENABLE_EXTRA_CACHE_STATS
-//		ReuseDistanceCalculator* reuseDist;
-			PageAddressStatsHanlder* pageAddressStatsMon;
-			RecallDistanceMonitor* recallDistMon;
+	ReuseDistanceMonitor* reuseDistMon;
+	PageAddressStatsHanlder* pageAddressStatsMon;
 #endif
 
   NonTranslatingQueues& queues;
   std::deque<PACKET> MSHR;
   std::deque<PACKET> inflight_writes;
+
+#if defined VICTIM_CACHE
+	//NonTranslatingQueues *victim_cache_queues; 
+	CACHE *victim_cache;
+	bool enable_victim_cache;
+	bool enable_instr_only;
+#endif
 
   // functions
   bool add_rq(const PACKET& packet) override final;
@@ -300,7 +312,7 @@ public:
   const std::bitset<NUM_REPLACEMENT_MODULES> repl_type;
   const std::bitset<NUM_PREFETCH_MODULES> pref_type;
 
-#if defined FORCE_HIT || defined FORCE_PTE_HIT || defined MULTIPLE_PAGE_SIZE
+#if defined FORCE_HIT || defined MULTIPLE_PAGE_SIZE
 	std::map<uint64_t, BLOCK> cached_PTEs;
 	bool force_hit = false; 
 	bool force_mon = false;
@@ -343,6 +355,82 @@ public:
 		}
 #endif 
 
+#if defined VICTIM_CACHE
+
+		enable_victim_cache = false; //FIXME:
+
+		if (NAME.find("L1D") != std::string::npos 
+				&& NAME.find("_VC") == std::string::npos) {
+
+			if (getenv("ENABLE_VICTIM_CACHE")) {
+				enable_victim_cache = true;
+			}
+
+			if (enable_victim_cache) {
+
+			
+				//FIXME: Not sure we should use braces for constructor - but maybe we need to (???)
+				// Create and connect a new victim cache between L1D and L2C
+				uint32_t num_set = 64;
+				uint32_t num_way = 8;
+				uint32_t mshr_size = 64;
+				NonTranslatingQueues* victim_cache_queues = new NonTranslatingQueues(1.0, num_set, num_way, mshr_size, 5, 4, champsim::lg2(64), 0);
+				// Only first level caches should enable match_offset_bits
+/*
+				victim_cache = new CACHE(NAME+"_VC", 1.0, 64, 12, 16, 1, 2, 2, champsim::lg2(64), 0, 0, 0, 
+																	(1 << LOAD) | (1 << PREFETCH), *l1dv_queues, ll, 
+																	pref_type, repl_type, 0, 0, vmem);
+*/
+				uint32_t vc_num_set = 64;
+				uint32_t vc_num_way = 8;
+				uint32_t vc_latency = 1;
+				uint32_t vc_mshr_size = 64;
+			
+				if (getenv("VC_LATENCY")) {
+					vc_latency = std::stoull(getenv("VC_LATENCY"));
+				} else {
+					std::cerr << "VC_LATENCY not set!" << std::endl;
+					exit(0);
+				}
+
+				if (getenv("VC_NUM_SET")) {
+					vc_num_set = std::stoull(getenv("VC_NUM_SET"));
+				} else {
+					std::cerr << "VC_NUM_SET not set!" << std::endl;
+					exit(0);
+				}
+
+				if (getenv("VC_NUM_WAY")) {
+					vc_num_way = std::stoull(getenv("VC_NUM_WAY"));
+				} else {
+					std::cerr << "VC_NUM_WAY not set!" << std::endl;
+					exit(0);
+				}
+
+				if (getenv("VC_INSTR_ONLY")) {
+					uint32_t instr_only_flag = std::stoull(getenv("VC_INSTR_ONLY"));
+					if (instr_only_flag == 1) {
+						enable_instr_only = true;
+					}
+				}
+
+				std::cout << NAME << ": Using pte victim cache." << std::endl;
+				std::cout << "\t\tLATENCY: " << vc_latency << std::endl;
+				std::cout << "\t\tSETS: " << vc_num_set << std::endl;
+				std::cout << "\t\tWAYS: " << vc_num_way << std::endl;
+				if (enable_instr_only) 
+					std::cout << "\t\tAllowing only instuction PTEs.\n" << std::endl;
+				else 
+					std::cout << "\t\tAllowing both instuction and data PTEs.\n" << std::endl;
+
+				victim_cache = new CACHE(NAME+"_VC", 1.0, vc_num_set, vc_num_way, vc_mshr_size, vc_latency, 2, 2, champsim::lg2(64), 0, 0, 0, 
+																	(1 << LOAD) | (1 << PREFETCH), *victim_cache_queues, ll, 
+																	CACHE::pprefetcherDno, CACHE::rreplacementDlfu, 0, 0, vmem);
+
+			}
+		}
+#endif
+
 #if defined ENABLE_EXTRA_CACHE_STATS
 		if (NAME.find("STLB") != std::string::npos) {
 			std::string page_address_stats_file_prefix = getenv("PAGE_ADDRESS_STATS_FILENAME_PREFIX");
@@ -355,23 +443,26 @@ public:
 			pageAddressStatsMon = new PageAddressStatsHanlder(OFFSET_BITS, "", false);
 		}
 
-		std::string recall_dist_filename_prefix = getenv("RECALL_DIST_FILENAME_PREFIX");
+		std::string reuse_dist_filename_prefix = getenv("REUSE_DIST_FILENAME_PREFIX");
 
-		bool enable_recallDistMon = false;
+		bool enable_reuseDistMon = false;
 		if (NAME.find("STLB") != std::string::npos) {
-			enable_recallDistMon = false;
-		} else if ((NAME.find("L1D") != std::string::npos)) {
-			enable_recallDistMon = false;
+			enable_reuseDistMon = false;
+		} else if (NAME.find("L1D") != std::string::npos) {
+			enable_reuseDistMon = true;
+			if (NAME.find("VC") != std::string::npos) {
+				std::cout << NAME << " enabled reuse distance monitor." << std::endl;
+				enable_reuseDistMon = true;
+			}
 		} else if ((NAME.find("L2C") != std::string::npos)) {
-			enable_recallDistMon = false;
+			enable_reuseDistMon = false;
 		} else if ((NAME.compare("LLC") == 0)) {
-			enable_recallDistMon = false;	
+			enable_reuseDistMon = false;	
 		}
 
-		recallDistMon = new RecallDistanceMonitor(NUM_SET, NUM_WAY, OFFSET_BITS,
-																							recall_dist_filename_prefix + "_" + NAME + ".csv",
-																							true, enable_recallDistMon);
-
+		reuseDistMon = new ReuseDistanceMonitor(NUM_SET, NUM_WAY, OFFSET_BITS,
+																						reuse_dist_filename_prefix + "_" + NAME + ".csv",
+																						false, enable_reuseDistMon);
 #endif
   }
 

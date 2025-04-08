@@ -208,6 +208,14 @@ int main(int argc, char** argv)
 	for (O3_CPU& cpu : ooo_cpu)
 		cpu.finalize();
 
+#if defined VICTIM_CACHE
+	for (CACHE& cache: caches) {
+		if (cache.enable_victim_cache) {
+			caches.push_back(*cache.victim_cache);
+		}
+	}
+#endif
+
 #if defined ENABLE_PTW_STATS
   auto phase_stats = zip_phase_stats(phases, ooo_cpu, caches, DRAM, ptws);
 #else
@@ -219,8 +227,8 @@ int main(int argc, char** argv)
 #if defined ENABLE_EXTRA_CACHE_STATS
   for (CACHE& cache : caches) {
     cache.pageAddressStatsMon->dump();
-    cache.recallDistMon->dump();
-		delete cache.recallDistMon;
+    cache.reuseDistMon->dump();
+		delete cache.reuseDistMon;
 	}
 #endif
 

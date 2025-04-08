@@ -13,11 +13,9 @@ mkdir -p ${DUMP_DIR}
 
 TRACES_batch=(${TRACES})
 
-echo $TRACES_batch
+DEBUG='gdb -batch -ex "run" -ex "bt" --args'
 
 for (( ti=0; ti < ${#TRACES_batch[@]}; ti++ )) ; do
-
-	echo $ti
 
 echo "#!/bin/bash
 
@@ -25,11 +23,12 @@ echo "#!/bin/bash
 #SBATCH -J chmpS_${BENCHSUITE}_${ti}${DESCR_TAG}_run
 #SBATCH -A bsc18
 #SBATCH --qos=gp_bsccs
-#SBATCH --time=12:00:00
+##SBATCH --qos=gp_debug
+#SBATCH --time=${SIM_TIME}
 
 traces=(${TRACES})
 
-for i in {${ti}..${BATCH_SIZE}}; do
+for i in {${ti}..$(( ti+BATCH_SIZE ))};do
 
 	trace=\${traces[\$i]}
 
@@ -39,20 +38,31 @@ for i in {${ti}..${BATCH_SIZE}}; do
 	fi
 
 	export suffix=.champsimtrace.xz 
-  export bench=\${traces}%\$suffix}
+	if [ \"${BENCHSUITE}\" == \"google_srv\" ]; then
+		export suffix=.champsimtrace.gz
+	fi
+
+  export bench=\${trace%\$suffix}
+
 
 	export PTP_EXTRA_STATS_FILE=${DUMP_DIR}/\${bench}_${DESCR_TAG}_access_rate.csv
-	export RECALL_DIST_FILENAME_PREFIX=${DUMP_DIR}/\${bench}_${DESCR_TAG}_recall_dist
 	export INSTR_PAGE_DIST_FILENAME=${DUMP_DIR}/\${bench}${INSTR_PAGE_DIST_FILENAME_SUFFIX}.pdst
 	export DATA_PAGE_DIST_FILENAME=${DUMP_DIR}/\${bench}${DATA_PAGE_DIST_FILENAME_SUFFIX}.pdst
 	export PAGE_ADDRESS_STATS_FILENAME_PREFIX=${DUMP_DIR}/\${bench}${DESCR_TAG}_page_access_stats
 
-	${CHAMPSIM_DIR}/bin/${BIN} 	--warmup_instructions ${SIM_WARMUP_INSTR} \
-															--simulation_instructions ${SIM_RUN_INSTR} \
-															${TRACE_DIR}/\${trace} > ${DUMP_DIR}/\${bench}${DESCR_TAG}_run.out 
+	if [[ -v REUSE_DIST_FILENAME_PREFIX ]]; then
+		export REUSE_DIST_FILENAME_PREFIX=${DUMP_DIR}/\${bench}${DESCR_TAG}_${REUSE_DIST_FILENAME_PREFIX}
+	fi
+
+time ${DEBUG} ${CHAMPSIM_DIR}/bin/${BIN} \
+																		--warmup_instructions ${SIM_WARMUP_INSTR} \
+																		--simulation_instructions ${SIM_RUN_INSTR} \
+																		${TRACE_DIR}/\${trace} > ${DUMP_DIR}/\${bench}${DESCR_TAG}_run.out 
 done
 " >	simr_${BENCHSUITE}_${ti}${DESCR_TAG}_job.run
 		sbatch simr_${BENCHSUITE}_${ti}${DESCR_TAG}_job.run
+		#chmod +x simr_${BENCHSUITE}_${ti}${DESCR_TAG}_job.run
+		#./simr_${BENCHSUITE}_${ti}${DESCR_TAG}_job.run
 		#chmod +x simt_${bench}_job.run
 		#./simt_${bench}_job.run
 		rm simr_${BENCHSUITE}_${ti}${DESCR_TAG}_job.run

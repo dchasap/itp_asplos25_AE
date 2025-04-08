@@ -25,6 +25,8 @@
 #include "msl/bits.h"
 #include "msl/lru_table.h"
 
+#include <iostream>
+
 template <typename T>
 struct is_valid {
   using argument_type = T;
@@ -65,7 +67,7 @@ std::pair<It, It> get_span(It begin, It end, typename std::iterator_traits<It>::
 {
   assert(std::distance(begin, end) >= 0);
   assert(sz >= 0);
-  auto distance = std::min(std::distance(begin, end), sz);
+	auto distance = std::min(std::distance(begin, end), sz);
   return {begin, std::next(begin, distance)};
 }
 
