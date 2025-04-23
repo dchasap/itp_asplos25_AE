@@ -98,13 +98,17 @@
 							writeback_packet.is_pte = way->is_pte;
 #endif	
 
-#if defined(MULTIPLE_PAGE_SIZE)
+#if defined MULTIPLE_PAGE_SIZE
 							writeback_packet.page_size = writeback_packet.page_size;
 							writeback_packet.base_vpn = writeback_packet.base_vpn;
 #endif
 
 //FIXME: Should we skip writebacks for victim cache (??) - ptes are never written/dirty
-#if defined(VICTIM_CACHE)
+#if 0
+							std::cout << "Victim cache enabled - writeback." << std::endl;
+							if (!enable_victim_cache && !enable_translation_cache) {
+/*
+							if (enable_victim_cache && false) { 
 							bool vc_entry_cond;
 							if (enable_instr_only)
 								vc_entry_cond = writeback_packet.is_pte && writeback_packet.is_instr;
@@ -117,7 +121,12 @@
 							} else { 
 								success = lower_level->add_wq(writeback_packet);
 							}
+*/
+							} else {
+								success = lower_level->add_wq(writeback_packet);
+							}
 #else
+							std::cout << "writeback_packet: " << std::hex << writeback_packet.address << std::dec << std::endl;
 							success = lower_level->add_wq(writeback_packet);
 #endif
 						}
@@ -125,6 +134,7 @@
 #if defined VICTIM_CACHE
 						//FIXME: This is probably the ONLY point we should move something to the victim cache
 						if (enable_victim_cache) {
+							std::cout << "Victim cache enabled." << std::endl;
 
 							PACKET victim_packet;
 
@@ -151,13 +161,15 @@
 							else 
 								vc_entry_cond = way->is_pte;
 
-							//if (vc_entry_cond && !way.is_doa) {
-							if (vc_entry_cond) {
-								//success = victim_cache->add_wq(writeback_packet);
-								victim_cache->add_wq(victim_packet); // it's probably ok if we skip some, not that critical
+							if (enable_doa_filtering) {
+								vc_entry_cond = vc_entry_cond && !way->is_doa;
+								way->is_doa = true; // reset doa flag
 							}
 
-							way->is_doa = true; // reset doa flag
+							if (vc_entry_cond) {
+								//success = victim_cache->add_wq(writeback_packet);
+								victim_cache->add_rq(victim_packet);
+							}
 						}
 #endif
 
@@ -201,12 +213,12 @@
 							way->is_pte = fill_mshr.is_pte;
 #endif
 
-#if defined(MULTIPLE_PAGE_SIZE)
+#if defined MULTIPLE_PAGE_SIZE
 							way->page_size = fill_mshr.page_size;
 							way->base_vpn = fill_mshr.base_vpn;
 #endif
 
-#if defined (SPLIT_STLB)
+#if defined SPLIT_STLB
 							metadata_thru =
 									impl_prefetcher_cache_fill(pkt_address, get_set_index(fill_mshr.address, fill_mshr.is_instr), way_idx, fill_mshr.type == PREFETCH, evicting_address, metadata_thru);
 #else 
@@ -220,7 +232,7 @@
 							xargs.is_pte = fill_mshr.is_pte;
 							xargs.is_replay = !fill_mshr.is_translated;
 							xargs.translation_level = fill_mshr.translation_level;
-	#if defined (SPLIT_STLB)
+	#if defined SPLIT_STLB
 							impl_update_replacement_state(fill_mshr.cpu, get_set_index(fill_mshr.address, fill_mshr.is_instr), way_idx, 
 																						fill_mshr.address, fill_mshr.ip, evicting_address, 
 																						fill_mshr.type, false, xargs);
@@ -320,7 +332,7 @@
 #endif
 
 					// access cache
-#if defined (SPLIT_STLB)
+#if defined SPLIT_STLB
 					auto [set_begin, set_end] = get_set_span(handle_pkt.address, handle_pkt.is_instr);
 #else 
 					auto [set_begin, set_end] = get_set_span(handle_pkt.address);
@@ -373,6 +385,8 @@
 
 						pageAddressStatsMon->add_access(handle_pkt.address, handle_pkt.is_instr);
 						reuseDistMon->add_access(handle_pkt.address);
+
+						hit_hook();
 #endif
 
 						// update replacement policy
@@ -430,7 +444,7 @@
 
 #if defined VICTIM_CACHE
 						// If we have a hit, we need to change doa status at the block in the cache
-						if (enable_victim_cache) {
+						if (enable_victim_cache && enable_doa_filtering) {
 							way->is_doa = false;
 						}
 #endif
@@ -494,6 +508,8 @@
 						
 							pageAddressStatsMon->add_access(handle_pkt.address, handle_pkt.is_instr);
 							reuseDistMon->add_access(handle_pkt.address);
+
+							hit_hook();
 	#endif
 							
 							copy.pf_metadata = metadata_thru;
@@ -517,7 +533,7 @@
 						}
 #endif				
 
-#if defined(MULTIPLE_PAGE_SIZE)
+#if defined MULTIPLE_PAGE_SIZE
 						//TODO: Lookup entire TLB in case of large pages
 						// 			Ignore caches for now
 						if (NAME.find("STLB") != std::string::npos 
@@ -533,7 +549,7 @@
 										// Need to handle this as a hit
 										//std::cout << "Found it!" << std::endl;
 										
-										auto copy{handle_pkt};
+										auto copy{handle_pkt}; // the warning related to line 454 is not important, we can shadow the variable here
 
 										if (handle_pkt.translation_level == 0) {
 											copy.data = vmem->va_to_pa(handle_pkt.cpu, handle_pkt.v_address).first;
@@ -556,6 +572,11 @@
 											//std::cout << "\tis_instr:" << (handle_pkt.is_instr?"true":"false") << std::endl;
 											assert(false);
 										}
+
+										pageAddressStatsMon->add_access(handle_pkt.address, handle_pkt.is_instr);
+										reuseDistMon->add_access(handle_pkt.address);
+
+										hit_hook();
 	#endif
 
 										copy.pf_metadata = metadata_thru;
@@ -570,7 +591,7 @@
 								//std::cout << "Yet another small pen...page, I meant page!" << std::endl;
 							}
 						}
-#endif
+#endif // MULTIPLE_PAGE_SIZE
 
 						sim_stats.back().misses[handle_pkt.type][handle_pkt.cpu]++;
 
@@ -606,6 +627,8 @@
 
 						pageAddressStatsMon->add_access(handle_pkt.address, handle_pkt.is_instr);
 						reuseDistMon->add_access(handle_pkt.address);
+
+						miss_hook();
 #endif
 
 					}
@@ -675,22 +698,24 @@
 						fwd_pkt.fill_this_level = true; // We will always fill the lower level
 						fwd_pkt.prefetch_from_this = false;
 
-						bool success;
+						bool success = false;
 						if (prefetch_as_load || handle_pkt.type != PREFETCH) {
-//#if defined VICTIM_CACHE
-#if 0
-							bool vc_entry_cond;
-							if (enable_instr_only)
-								vc_entry_cond = fwd_pkt.is_pte && fwd_pkt.is_instr;
-							else 
-								vc_entry_cond = fwd_pkt.is_pte;
+#if defined VICTIM_CACHE
+//#if 0 // we should only place something in the victim cache when evicted, misses go through normally
+							if (enable_translation_cache) {
+								std::cout << "Translation cache enabled." << std::endl;
+								bool vc_entry_cond;
+								if (enable_instr_only)
+									vc_entry_cond = fwd_pkt.is_pte && fwd_pkt.is_instr;
+								else 
+									vc_entry_cond = fwd_pkt.is_pte;
 
-							//if (enable_victim_cache && vc_entry_cond && !fwd_pkt.is_doa) {
-							if (enable_victim_cache && vc_entry_cond) {
-								fwd_pkt.is_doa = true;
-								success = victim_cache->add_rq(fwd_pkt); 
-							} else {
-								success = lower_level->add_rq(fwd_pkt);
+								if (vc_entry_cond) {
+									std::cout << "Adding to victim cache: " << std::hex << fwd_pkt.v_address << std::dec << std::endl;
+									success = victim_cache->add_rq(fwd_pkt); 
+								} else {
+									success = lower_level->add_rq(fwd_pkt);
+								}
 							}
 #else
 							success = lower_level->add_rq(fwd_pkt);
@@ -707,7 +732,7 @@
 							mshr_entry->pf_metadata = fwd_pkt.pf_metadata;
 							mshr_entry->cycle_enqueued = current_cycle;
 							mshr_entry->event_cycle = std::numeric_limits<uint64_t>::max();
-#if defined (ENABLE_PAGE_CROSSING_STATS)
+#if defined ENABLE_PAGE_CROSSING_STATS
 							mshr_entry->page_crossing = fwd_pkt.page_crossing;
 #endif
 						}
@@ -752,7 +777,7 @@
 #if defined VICTIM_CACHE
 					//std::cout << "operate" << std::endl;
 					//FIXME: Not sure if we should operate the cache_queue as well
-					if (enable_victim_cache) {
+					if (enable_victim_cache || enable_translation_cache) {
 						victim_cache->queues.operate(); //FIXME: Not sure about this line
 						victim_cache->operate();
 					}
@@ -793,7 +818,7 @@
 
 				}
 
-				#if defined (SPLIT_STLB)
+#if defined SPLIT_STLB
 
 				uint64_t CACHE::get_set(uint64_t address, uint8_t type) const { return get_set_index(address, type); }
 
@@ -966,7 +991,7 @@ int CACHE::prefetch_line(uint64_t pf_addr, bool fill_this_level, uint32_t prefet
 	//pf_packet.is_instr = xx;
 	// this is a fix for getting the is_instr value, but this doesn't work for
 	// prefetches which are issued by L2C (we don't care for them however, since 
-	// they go to main memory
+	// they go to main memory)
 	pf_packet.is_pte = false;
 
 	if (NAME.find("L1I") != std::string::npos) {
@@ -1084,15 +1109,17 @@ void CACHE::initialize()
   impl_prefetcher_initialize();
   impl_initialize_replacement();
 #if defined VICTIM_CACHE
-	if (enable_victim_cache)
+	if (enable_victim_cache || enable_translation_cache) {
 		victim_cache->initialize();
+	}
 #endif
 }
 
 void CACHE::begin_phase()
 {
 #if defined VICTIM_CACHE
-	if (enable_victim_cache) {
+	if (enable_victim_cache || enable_translation_cache) {
+		std::cout << "begin_phase" << std::endl;
 		victim_cache->queues.begin_phase();
 		victim_cache->begin_phase();
 	}
@@ -1108,7 +1135,7 @@ void CACHE::end_phase(unsigned finished_cpu)
 {
 
 #if defined VICTIM_CACHE
-	if (enable_victim_cache) {
+	if (enable_victim_cache || enable_translation_cache) {
 		victim_cache->queues.end_phase(finished_cpu);
 		victim_cache->end_phase(finished_cpu);
 	}
@@ -1199,3 +1226,13 @@ void CACHE::print_deadlock()
     std::cout << NAME << " PQ empty" << std::endl;
   }
 }
+
+#if defined ENABLE_EXTRA_CACHE_STATS
+	void CACHE::hit_hook() {
+
+	}
+
+	void CACHE::miss_hook() {
+
+	}
+#endif

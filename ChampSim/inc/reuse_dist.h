@@ -55,14 +55,19 @@ class ReuseDistanceMonitor
 			accessStack.push_front(address);
 
 			// this is to maintain a smaller stack and speedup things
-			//if (accessStack.size() >= cache_size) accessStack.pop_front();
+			// we count discarded entries at the last bucket
+			if (accessStack.size() >= cache_size) {
+				reuseDistanceHistogram[cache_size]++;
+				//accessStack.pop_front();
+				accessStack.pop_back();
+			}
 
 			// Step 4.	Add reuse_dist to histogram
-			if (reuse_distance > 0 && reuse_distance < cache_size) {
+			if (reuse_distance > 0 && reuse_distance <= cache_size) {
 				//std::cout << accesses << "#found addr:" << address;
 				reuseDistanceHistogram[reuse_distance]++;
 				//std::cout << "-> " << reuseDistanceHistogram[reuse_distance] << std::endl;
-			} else if (reuse_distance > 0 && reuse_distance >= cache_size) {
+			} else if (reuse_distance > 0 && reuse_distance > cache_size) {
 				//std::cout << accesses << "#found addr:" << address;
 				reuseDistanceHistogram[cache_size]++;
 				//std::cout << "-> " << reuseDistanceHistogram[cache_size-1] << std::endl;

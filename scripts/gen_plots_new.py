@@ -362,7 +362,7 @@ def gen_plot(figure_name, benchsuite, data_files, file_type):
 		plotting.plot_stat(data_df, tags, 'IPC_IMPROVEMENT', output_file)
 
 
-	if (figure_name == "reuse_distance"):
+	if (figure_name == "plot_reuse_dist"):
 		
 		input_data_files = []
 		data_files = data_files.replace('\t', '')
@@ -372,7 +372,7 @@ def gen_plot(figure_name, benchsuite, data_files, file_type):
 
 			if (data_file == ""): continue
 			print(data_file)	
-			input_data_files.append("./stats/" + benchsuite + "_" + data_file + "_recall_dist_L1D_VC.csv")	
+			input_data_files.append("./stats/" + benchsuite + "_" + data_file + "_reuse_dist_MERGED_L1D_VC.csv")	
 
 		tags = 	[
 							"L1D_VC",
@@ -392,8 +392,8 @@ def gen_plot(figure_name, benchsuite, data_files, file_type):
 		plotting.plot_conf['legend_yoffset'] = 0.5
 		plotting.plot_conf['legend_xoffset'] = 1.2
 
-		output_file = FIGURES_DIR + "/fig_recall_distance_l1d_" + benchsuite + "." + file_type
-		print(FIGURES_DIR + "/fig_recall_distance_" + benchsuite + "." + file_type)
+		output_file = FIGURES_DIR + "/fig_reuse_distance_3d_" + benchsuite + "." + file_type
+		print(FIGURES_DIR + "/fig_reuse_distance_" + benchsuite + "." + file_type)
 		plotting.plot_reuse_distance(data_df, tags, output_file)
 
 ## end gen_plot

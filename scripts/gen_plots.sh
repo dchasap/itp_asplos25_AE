@@ -6,7 +6,7 @@ source $CONFIG_FILE
 
 
 python3 ${ROOT_DIR}/scripts/gen_plots_new.py	\
-																							--figure "plot_ipc" \
+																							--figure "plot_reuse_dist" \
 																							--benchsuites ${BENCHSUITES} \
 																							--data_files "${CONFIGURATION_TAGS}" \
 																							--file_type "${PLOT_FILE_TYPE}"

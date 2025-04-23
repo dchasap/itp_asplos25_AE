@@ -158,16 +158,64 @@ def plot_reuse_distance(df, tags, output_file):
     #ax = plot(df, x='reuse_distance', y='frequency', hue='tag', axes=axes)
 
     #ax.fill_between(df['reuse_distance'], df['frequency'] alpha=0.2)
+    last_bucket_freq = round(df.tail(1)['frequency'].item(), 2)
+    df = df[:-1]
 
-    ax = df.loc[df['tag'] == "L1D_VC"].plot.area(x='reuse_distance', y='frequency', color='blue', alpha=0.3, label='L1D_VC')
-    ax = df.loc[df['tag'] == "L1D_IVC"].plot.area(x='reuse_distance', y='frequency', color='red', alpha=0.3, label='L1D_IVC', ax = ax)
+    ax = df.loc[df['tag'] == "L1D_VC"].plot.area(x='reuse_distance', y='frequency', z='benchmark', color='blue', alpha=0.3, label='L1D_VC')
+    #ax = df.loc[df['tag'] == "L1D_IVC"].plot.area(x='reuse_distance', y='frequency', color='red', alpha=0.3, label='L1D_IVC', ax = ax)
     ax.set_ylabel('Frequency')    
     ax.set_label('Reuse Distance')    
+
+    #ax.set_yscale('log')
+
+    ax.text(512, 1, last_bucket_freq, fontsize=11, color='red', rotation=90)
 
     fig = ax.get_figure()
 
     fig.savefig(output_file, bbox_inches='tight')
  
+def plot_reuse_distance_3d(df, tags, output_file):
+
+    plot_width = plot_conf['plot_width']
+    plot_height = plot_conf['plot_height']
+    fig = plt.figure( figsize=(plot_width, plot_height))
+		
+    ax = fig.add_subplot(111, projection='3d')
+
+    #sns.set_palette(sns.color_palette(['#999999', '#777777', '#555555', '#333333']))
+
+    #ax = plot(df, x='reuse_distance', y='frequency', hue='tag', axes=axes)
+
+    #ax.fill_between(df['reuse_distance'], df['frequency'] alpha=0.2)
+    last_bucket_freq = round(df.tail(1)['frequency'].item(), 2)
+    df = df[:-1]
+
+    #ax = df.loc[df['tag'] == "L1D_VC"].plot.area(x='reuse_distance', y='frequency', zdir='benchmark', color='blue', alpha=0.3, label='L1D_VC')
+    #ax = df.loc[df['tag'] == "L1D_IVC"].plot.area(x='reuse_distance', y='frequency', color='red', alpha=0.3, label='L1D_IVC', ax = ax)
+    print(pd.factorize(df['benchmarks'])[0])
+    df['benchmarks'] = pd.factorize(df['benchmarks'])[0]
+
+    df = df.loc[df['reuse_distance'] != 512] 
+    df = df.loc[df['tag'] == "L1D_VC"] 
+    benchmarks = df['benchmarks'].unique()
+    colors = ['blue', 'red', 'green', 'orange', 'purple', 'brown', 'pink', 'gray']
+    i = 0
+    for bench in benchmarks:
+      curr_df = df.loc[df['benchmarks'] == bench]
+      plt.plot(ys=curr_df['reuse_distance'], zs=curr_df['frequency'], xs=curr_df['benchmarks'], color=colors[i%8])
+      i += 1
+
+    print(ax)
+    ax.set_ylabel('Frequency')    
+    ax.set_zlabel('Reuse Distance')    
+    ax.set_xlabel('Benchmark')
+    #ax.set_yscale('log')
+
+    #ax.text(512, 1, 0, last_bucket_freq, fontsize=11, color='red', rotation=90)
+
+    #fig = ax.get_figure()
+    plt.show()
+    fig.savefig(output_file, bbox_inches='tight')
 
 def plot_average_single_cache(	input_baseline_files, means_df, input_tags, cache_types, 
 																op_type, stat_names, output_file):

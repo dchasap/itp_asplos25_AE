@@ -62,7 +62,7 @@ public:
   std::size_t init_translation_level = 0;
 
 
-#if defined(MULTIPLE_PAGE_SIZE)
+#if defined MULTIPLE_PAGE_SIZE
 	uint32_t page_size = 0;
 	uint64_t base_vpn = 0;
 #endif
@@ -73,7 +73,7 @@ public:
 	bool is_pte = false;
 #endif
 
-#if defined(ENABLE_PAGE_CROSSING_STATS)
+#if defined ENABLE_PAGE_CROSSING_STATS
 		uint64_t page_crossing = 0; 
 #endif
 

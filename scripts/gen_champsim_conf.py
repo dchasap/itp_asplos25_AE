@@ -10,12 +10,10 @@ import re
 
 #dictionary for translating attributes from short to long names
 attr_names = {  'bp':'branch_predictor', 'if': 'ifetch_buffer_size',
-                                's':'sets', 'w':'ways', 'r':'replacement', 'p':'prefetcher', 
-                                'h':'force_hit', 'm':'force_mon'}
+                's':'sets', 'w':'ways', 'r':'replacement', 'p':'prefetcher', 
+                'h':'force_hit', 'm':'force_mon'}
 
 def load_config(filename):
-  #config_file = open(filename)
-    #config = json.load(config_file, 'r')
     config_file = open(filename)
     config = json.load(config_file)
     return config

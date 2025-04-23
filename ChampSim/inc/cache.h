@@ -25,6 +25,7 @@
 #include <list>
 #include <string>
 #include <vector>
+#include <string.h>
 
 #include "champsim.h"
 #include "champsim_constants.h"
@@ -219,6 +220,7 @@ public:
 
   private:
     void check_collision();
+  
   };
 
   struct TranslatingQueues : public NonTranslatingQueues, public MemoryRequestProducer {
@@ -269,8 +271,10 @@ public:
 #if defined VICTIM_CACHE
 	//NonTranslatingQueues *victim_cache_queues; 
 	CACHE *victim_cache;
-	bool enable_victim_cache;
-	bool enable_instr_only;
+	bool enable_victim_cache = false;
+  bool enable_translation_cache = false;
+	bool enable_instr_only = false;
+  bool enable_doa_filtering = false;
 #endif
 
   // functions
@@ -357,16 +361,23 @@ public:
 
 #if defined VICTIM_CACHE
 
-		enable_victim_cache = false; //FIXME:
-
 		if (NAME.find("L1D") != std::string::npos 
 				&& NAME.find("_VC") == std::string::npos) {
 
-			if (getenv("ENABLE_VICTIM_CACHE")) {
+      char* victim_cache_flag = getenv("ENABLE_VICTIM_CACHE");
+			if (strcmp(victim_cache_flag, "true") == 0) {
 				enable_victim_cache = true;
 			}
 
-			if (enable_victim_cache) {
+      char*  translation_cache_flag = getenv("ENABLE_TRANSLATION_CACHE");
+			if (strcmp(translation_cache_flag, "true") == 0) {
+				enable_translation_cache = true;
+			}
+
+      assert((enable_victim_cache != enable_translation_cache) || (!enable_victim_cache && !enable_translation_cache));
+      assert((enable_translation_cache && !enable_doa_filtering) || !enable_translation_cache); // This does not work at the moment so check before proceeding
+
+			if (enable_victim_cache || enable_translation_cache) {
 
 			
 				//FIXME: Not sure we should use braces for constructor - but maybe we need to (???)
@@ -408,20 +419,28 @@ public:
 				}
 
 				if (getenv("VC_INSTR_ONLY")) {
-					uint32_t instr_only_flag = std::stoull(getenv("VC_INSTR_ONLY"));
-					if (instr_only_flag == 1) {
+					char* instr_only_flag = getenv("VC_INSTR_ONLY");
+					if (strcmp(instr_only_flag, "true") == 0) {
 						enable_instr_only = true;
 					}
 				}
 
-				std::cout << NAME << ": Using pte victim cache." << std::endl;
+				if (getenv("VC_DOA_FILTERING")) {
+					char* doa_filtering_flag = getenv("VC_DOA_FILTERING");
+					if (strcmp(doa_filtering_flag, "true") == 0) {
+						enable_doa_filtering = true;
+					}
+				}
+				std::cout << NAME << ": Using PTE " << (enable_victim_cache?"victim":"translation")  << " cache." << std::endl;
 				std::cout << "\t\tLATENCY: " << vc_latency << std::endl;
 				std::cout << "\t\tSETS: " << vc_num_set << std::endl;
 				std::cout << "\t\tWAYS: " << vc_num_way << std::endl;
 				if (enable_instr_only) 
-					std::cout << "\t\tAllowing only instuction PTEs.\n" << std::endl;
+					std::cout << "\t\tAllowing only instuction PTEs." << std::endl;
 				else 
-					std::cout << "\t\tAllowing both instuction and data PTEs.\n" << std::endl;
+					std::cout << "\t\tAllowing both instuction and data PTEs." << std::endl;
+        
+        std::cout << "\t\tDOA filtering: " << (enable_doa_filtering?"enabled":"disabled") << std::endl;
 
 				victim_cache = new CACHE(NAME+"_VC", 1.0, vc_num_set, vc_num_way, vc_mshr_size, vc_latency, 2, 2, champsim::lg2(64), 0, 0, 0, 
 																	(1 << LOAD) | (1 << PREFETCH), *victim_cache_queues, ll, 
@@ -465,6 +484,11 @@ public:
 																						false, enable_reuseDistMon);
 #endif
   }
+
+#if defined ENABLE_EXTRA_CACHE_STATS
+  void hit_hook();
+  void miss_hook();
+#endif
 
 	//~CACHE() { std::cout << "***** CACHE DESTROYER *****" << std::endl; };
 };

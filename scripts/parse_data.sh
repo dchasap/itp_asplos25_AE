@@ -109,6 +109,10 @@ for BENCHSUITE in ${BENCHSUITES}; do
 			python3 ${ROOT_DIR}/scripts/average_data.py 	--input-files ${files} \
 																										--benchmarks ${BENCHMARKS} \
 																										--output-file=${ROOT_DIR}/stats/${BENCHSUITE}${TAG}_${REUSE_DIST_FILENAME_PREFIX}_L1D_VC.csv
+
+			python3 ${ROOT_DIR}/scripts/merge_champsim_data.py	--input-files ${files} \
+																													--benchmarks ${BENCHMARKS} \
+																													--output-file=${ROOT_DIR}/stats/${BENCHSUITE}${TAG}_${REUSE_DIST_FILENAME_PREFIX}_MERGED_L1D_VC.csv
 		fi
 
 	done
