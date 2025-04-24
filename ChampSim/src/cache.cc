@@ -700,8 +700,8 @@
 
 						bool success = false;
 						if (prefetch_as_load || handle_pkt.type != PREFETCH) {
+							
 #if defined VICTIM_CACHE
-//#if 0 // we should only place something in the victim cache when evicted, misses go through normally
 							if (enable_translation_cache) {
 								std::cout << "Translation cache enabled." << std::endl;
 								bool vc_entry_cond;
@@ -716,6 +716,8 @@
 								} else {
 									success = lower_level->add_rq(fwd_pkt);
 								}
+							} else {
+								success = lower_level->add_rq(fwd_pkt);
 							}
 #else
 							success = lower_level->add_rq(fwd_pkt);

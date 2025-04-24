@@ -374,8 +374,9 @@ public:
 				enable_translation_cache = true;
 			}
 
-      assert((enable_victim_cache != enable_translation_cache) || (!enable_victim_cache && !enable_translation_cache));
-      assert((enable_translation_cache && !enable_doa_filtering) || !enable_translation_cache); // This does not work at the moment so check before proceeding
+      assert(!enable_victim_cache || !enable_translation_cache);
+      //assert((enable_victim_cache != enable_translation_cache) || (!enable_victim_cache && !enable_translation_cache));
+      //assert((enable_translation_cache && !enable_doa_filtering) || !enable_translation_cache); // This does not work at the moment so check before proceeding
 
 			if (enable_victim_cache || enable_translation_cache) {
 
