@@ -27,13 +27,6 @@
 #include "util.h"
 #include <bits/range_access.h>
 
-				//#if defined FORCE_HIT
-				//#define HIT_CONDITION (force_hit && handle_pkt.is_instr) 
-				//#define HIT_CONDITION (force_hit && !handle_pkt.is_instr) 
-				//#define HIT_CONDITION (force_hit) 
-				//#elif defined FORCE_PTE_HIT
-				//#define HIT_CONDITION (force_hit && !handle_pkt.is_instr && handle_pkt.type == TRANSLATION) 
-				//#endif
 
 #if defined PTP_REPLACEMENT_POLICY
 				extern uint64_t RETIRED_INSTRS;
@@ -45,7 +38,7 @@
 					cpu = fill_mshr.cpu;
 
 					// find victim
-#if defined (SPLIT_STLB)
+#if defined SPLIT_STLB
 					auto [set_begin, set_end] = get_set_span(fill_mshr.address, fill_mshr.is_instr);
 					auto way = std::find_if_not(set_begin, set_end, [](auto x) { return x.valid; });
 					if (way == set_end)
@@ -67,7 +60,7 @@
 						std::cout << " instr_id: " << fill_mshr.instr_id << " address: " << std::hex << (fill_mshr.address >> OFFSET_BITS);
 						std::cout << " full_addr: " << fill_mshr.address;
 						std::cout << " full_v_addr: " << fill_mshr.v_address << std::dec;
-#if defined (SPLIT_STLB)
+#if defined SPLIT_STLB
 						std::cout << " set: " << get_set_index(fill_mshr.address, fill_mshr.is_instr);
 #else 
 						std::cout << " set: " << get_set_index(fill_mshr.address);
@@ -105,7 +98,6 @@
 
 //FIXME: Should we skip writebacks for victim cache (??) - ptes are never written/dirty
 #if 0
-							std::cout << "Victim cache enabled - writeback." << std::endl;
 							if (!enable_victim_cache && !enable_translation_cache) {
 /*
 							if (enable_victim_cache && false) { 
@@ -126,7 +118,6 @@
 								success = lower_level->add_wq(writeback_packet);
 							}
 #else
-							std::cout << "writeback_packet: " << std::hex << writeback_packet.address << std::dec << std::endl;
 							success = lower_level->add_wq(writeback_packet);
 #endif
 						}
@@ -134,10 +125,8 @@
 #if defined VICTIM_CACHE
 						//FIXME: This is probably the ONLY point we should move something to the victim cache
 						if (enable_victim_cache) {
-							std::cout << "Victim cache enabled." << std::endl;
 
 							PACKET victim_packet;
-
 							victim_packet.cpu = fill_mshr.cpu;
 							victim_packet.address = way->address;
 							victim_packet.data = way->data;
@@ -162,8 +151,19 @@
 								vc_entry_cond = way->is_pte;
 
 							if (enable_doa_filtering) {
-								vc_entry_cond = vc_entry_cond && !way->is_doa;
-								way->is_doa = true; // reset doa flag
+
+#if defined SPLIT_STLB
+								uint64_t set_idx = get_set_index(victim_packet.address, fill_mshr.is_instr);
+#else 
+								uint64_t set_idx = get_set_index(victim_packet.address);
+#endif
+								//set_idx = 0;
+								if (victim_packet.is_pte && last_pte_entry[set_idx] == victim_packet.address) {
+									vc_entry_cond = vc_entry_cond; // force doa
+								} else {
+									vc_entry_cond = vc_entry_cond && !way->is_doa;
+								}
+								way->is_doa = true; // reset the flag
 							}
 
 							if (vc_entry_cond) {
@@ -322,7 +322,7 @@
 
 					cpu = handle_pkt.cpu;
 
-#if defined(ENABLE_PAGE_CROSSING_STATS)
+#if defined ENABLE_PAGE_CROSSING_STATS
 					if (((NAME.find("L1I") != std::string::npos) || (NAME.find("L1D") != std::string::npos))
 							&& (handle_pkt.type == PREFETCH) && (handle_pkt.page_crossing > 0)) {
 
@@ -362,6 +362,19 @@
 						metadata_thru = impl_prefetcher_cache_operate(pf_base_addr, handle_pkt.ip, hit, handle_pkt.type, metadata_thru);
 					}
 
+#if defined VICTIM_CACHE
+					if (enable_doa_filtering && handle_pkt.is_pte) {
+						// we should also store the evicting address to last_pte_entry in the set (if it's pte)
+#if defined SPLIT_STLB
+						uint64_t set_idx = get_set_index(handle_pkt.address, fill_mshr.is_instr);
+#else 
+						uint64_t set_idx = get_set_index(handle_pkt.address);
+#endif
+						//set_idx = 0;
+						last_pte_entry[set_idx] = handle_pkt.address;
+					}
+#endif
+
 					if (hit) {
 
 						sim_stats.back().hits[handle_pkt.type][handle_pkt.cpu]++;
@@ -397,7 +410,7 @@
 						xargs.is_pte = handle_pkt.is_pte;
 						xargs.is_replay = !handle_pkt.is_translated;
 						xargs.translation_level = handle_pkt.translation_level;
-	#if defined (SPLIT_STLB)
+	#if defined SPLIT_STLB
 						impl_update_replacement_state(handle_pkt.cpu, get_set_index(handle_pkt.address, handle_pkt.is_instr), way_idx, 
 																					handle_pkt.address, handle_pkt.ip, 0, 
 																					handle_pkt.type, false, xargs);
@@ -409,7 +422,7 @@
 
 #else
 
-	#if defined (SPLIT_STLB)
+	#if defined SPLIT_STLB
 						impl_update_replacement_state(handle_pkt.cpu, get_set_index(handle_pkt.address, handle_pkt.is_instr), way_idx, way->address, handle_pkt.ip, 0, handle_pkt.type, true);
 	#else
 						impl_update_replacement_state(handle_pkt.cpu, get_set_index(handle_pkt.address), way_idx, way->address, handle_pkt.ip, 0, handle_pkt.type, true);
@@ -677,7 +690,7 @@
 							mshr_entry->event_cycle = prior_event_cycle;
 							mshr_entry->cycle_enqueued = current_cycle;
 							mshr_entry->to_return = std::move(to_return);
-#if defined(ENABLE_PAGE_CROSSING_STATS)
+#if defined ENABLE_PAGE_CROSSING_STATS
 							mshr_entry->page_crossing = 0;
 #endif 
 						}
@@ -703,7 +716,7 @@
 							
 #if defined VICTIM_CACHE
 							if (enable_translation_cache) {
-								std::cout << "Translation cache enabled." << std::endl;
+								
 								bool vc_entry_cond;
 								if (enable_instr_only)
 									vc_entry_cond = fwd_pkt.is_pte && fwd_pkt.is_instr;
@@ -711,7 +724,6 @@
 									vc_entry_cond = fwd_pkt.is_pte;
 
 								if (vc_entry_cond) {
-									std::cout << "Adding to victim cache: " << std::hex << fwd_pkt.v_address << std::dec << std::endl;
 									success = victim_cache->add_rq(fwd_pkt); 
 								} else {
 									success = lower_level->add_rq(fwd_pkt);
@@ -1121,7 +1133,6 @@ void CACHE::begin_phase()
 {
 #if defined VICTIM_CACHE
 	if (enable_victim_cache || enable_translation_cache) {
-		std::cout << "begin_phase" << std::endl;
 		victim_cache->queues.begin_phase();
 		victim_cache->begin_phase();
 	}

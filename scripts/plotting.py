@@ -158,17 +158,25 @@ def plot_reuse_distance(df, tags, output_file):
     #ax = plot(df, x='reuse_distance', y='frequency', hue='tag', axes=axes)
 
     #ax.fill_between(df['reuse_distance'], df['frequency'] alpha=0.2)
-    last_bucket_freq = round(df.tail(1)['frequency'].item(), 2)
-    df = df[:-1]
+    last_bucket_freq_1 = round(df.loc[df['tag'] == "L1D_VC"].tail(1)['frequency'].item(), 2)
+    last_index = df.loc[df['tag'] == "L1D_VC"].index[-1]
+    df = df.drop(index=last_index)
+		#last_bucket_freq_2 = round(df.tail(1)['frequency'].item(), 2)
+    #df = df[:-1]
+    last_bucket_freq_2 = round(df.loc[df['tag'] == "L1D_VC"].tail(1)['frequency'].item(), 2)
+    last_index = df.loc[df['tag'] == "L1D_VC-DOA"].index[-1]
+    df = df.drop(index=last_index)
 
-    ax = df.loc[df['tag'] == "L1D_VC"].plot.area(x='reuse_distance', y='frequency', z='benchmark', color='blue', alpha=0.3, label='L1D_VC')
-    #ax = df.loc[df['tag'] == "L1D_IVC"].plot.area(x='reuse_distance', y='frequency', color='red', alpha=0.3, label='L1D_IVC', ax = ax)
+    ax = df.loc[df['tag'] == "L1D_VC"].plot.area(x='reuse_distance', y='frequency', color='blue', alpha=0.3, label='L1D_VC')
+    ax = df.loc[df['tag'] == "L1D_VC-DOA"].plot.area(x='reuse_distance', y='frequency', color='red', alpha=0.3, label='L1D_VC-DOA', ax = ax)
+    #ax = df.loc[df['tag'] == "L1D_TC"].plot.area(x='reuse_distance', y='frequency', color='green', alpha=0.3, label='L2C', ax = ax)
     ax.set_ylabel('Frequency')    
     ax.set_label('Reuse Distance')    
 
     #ax.set_yscale('log')
 
-    ax.text(512, 1, last_bucket_freq, fontsize=11, color='red', rotation=90)
+    ax.text(512, 1, last_bucket_freq_1, fontsize=11, color='blue', rotation=90)
+    ax.text(532, 1, last_bucket_freq_2, fontsize=11, color='red', rotation=90)
 
     fig = ax.get_figure()
 

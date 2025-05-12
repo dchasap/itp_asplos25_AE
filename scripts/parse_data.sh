@@ -1,5 +1,6 @@
 
 source env.sh
+source ${ROOT_DIR}/scripts/unpack_tags.sh
 
 CONFIG_FILE=$1
 source $CONFIG_FILE
@@ -7,11 +8,17 @@ source $CONFIG_FILE
 
 mkdir -p ${ROOT_DIR}/stats
 
+#UNPACKED_CONFIGURATION_TAGS="$(get_tags "${TAG}" "${VAR_DECLARATIONS[@]}")"
+
+UNPACKED_CONFIGURATION_TAGS=$(unpack_tags ${CONFIG_FILE} "${CONFIGURATION_TAGS}")
+#echo "get_tag returns: ${UNPACKED_CONFIGURATION_TAGS}"	
+
 for BENCHSUITE in ${BENCHSUITES}; do
 
-	for TAG in ${CONFIGURATION_TAGS}; do	
-		TAG="_${TAG}"
+	for TAG in ${UNPACKED_CONFIGURATION_TAGS}; do	
 
+		TAG="_${TAG}"
+		
 		source ${ROOT_DIR}/scripts/benchmarks.sh
 
 		if [[ "${BENCHSUITE}" == *"spec"* ]]; then

@@ -10,13 +10,13 @@ mkdir -p ${ROOT_DIR}/sim_conf
 export_confs=""
 for benchsuite in ${BENCHSUITES}; do
 
-	echo ${benchsuite}
+	#echo ${benchsuite}
 	index=0
 	for conf in ${CONFIGURATION_TAGS}; do
 
 		base_conf=$(echo $conf | sed "s/:{.*}//g")
-		echo $conf
-		echo ${base_conf}
+		#echo $conf
+		#echo ${base_conf}
 
 		smt="false"
 		if [[ ${benchsuite} == smt_* ]]; then

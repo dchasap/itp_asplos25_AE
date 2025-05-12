@@ -275,6 +275,7 @@ public:
   bool enable_translation_cache = false;
 	bool enable_instr_only = false;
   bool enable_doa_filtering = false;
+  std::vector<uint64_t> last_pte_entry;  // one entry per set
 #endif
 
   // functions
@@ -374,20 +375,11 @@ public:
 				enable_translation_cache = true;
 			}
 
-      assert(!enable_victim_cache || !enable_translation_cache);
+      //assert(!enable_victim_cache || !enable_translation_cache);
       //assert((enable_victim_cache != enable_translation_cache) || (!enable_victim_cache && !enable_translation_cache));
       //assert((enable_translation_cache && !enable_doa_filtering) || !enable_translation_cache); // This does not work at the moment so check before proceeding
 
 			if (enable_victim_cache || enable_translation_cache) {
-
-			
-				//FIXME: Not sure we should use braces for constructor - but maybe we need to (???)
-				// Create and connect a new victim cache between L1D and L2C
-				uint32_t num_set = 64;
-				uint32_t num_way = 8;
-				uint32_t mshr_size = 64;
-				NonTranslatingQueues* victim_cache_queues = new NonTranslatingQueues(1.0, num_set, num_way, mshr_size, 5, 4, champsim::lg2(64), 0);
-				// Only first level caches should enable match_offset_bits
 /*
 				victim_cache = new CACHE(NAME+"_VC", 1.0, 64, 12, 16, 1, 2, 2, champsim::lg2(64), 0, 0, 0, 
 																	(1 << LOAD) | (1 << PREFETCH), *l1dv_queues, ll, 
@@ -397,7 +389,7 @@ public:
 				uint32_t vc_num_way = 8;
 				uint32_t vc_latency = 1;
 				uint32_t vc_mshr_size = 64;
-			
+
 				if (getenv("VC_LATENCY")) {
 					vc_latency = std::stoull(getenv("VC_LATENCY"));
 				} else {
@@ -430,8 +422,10 @@ public:
 					char* doa_filtering_flag = getenv("VC_DOA_FILTERING");
 					if (strcmp(doa_filtering_flag, "true") == 0) {
 						enable_doa_filtering = true;
+            last_pte_entry.reserve(vc_num_set);
 					}
-				}
+        }
+
 				std::cout << NAME << ": Using PTE " << (enable_victim_cache?"victim":"translation")  << " cache." << std::endl;
 				std::cout << "\t\tLATENCY: " << vc_latency << std::endl;
 				std::cout << "\t\tSETS: " << vc_num_set << std::endl;
@@ -443,10 +437,16 @@ public:
         
         std::cout << "\t\tDOA filtering: " << (enable_doa_filtering?"enabled":"disabled") << std::endl;
 
+        //FIXME: Not sure we should use braces for constructor - but maybe we need to (???)
+				// Create and connect a new victim cache between L1D and L2C
+				uint32_t num_set = 64;
+				uint32_t num_way = 8;
+				uint32_t mshr_size = 64;
+				NonTranslatingQueues* victim_cache_queues = new NonTranslatingQueues(1.0, vc_num_set, vc_num_way, mshr_size, 5, 4, champsim::lg2(64), 0);
+				// Only first level caches should enable match_offset_bits
 				victim_cache = new CACHE(NAME+"_VC", 1.0, vc_num_set, vc_num_way, vc_mshr_size, vc_latency, 2, 2, champsim::lg2(64), 0, 0, 0, 
 																	(1 << LOAD) | (1 << PREFETCH), *victim_cache_queues, ll, 
 																	CACHE::pprefetcherDno, CACHE::rreplacementDlfu, 0, 0, vmem);
-
 			}
 		}
 #endif

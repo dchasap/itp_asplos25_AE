@@ -1,17 +1,17 @@
+#!/bin/bash
 
 source env.sh
+source ${ROOT_DIR}/scripts/unpack_tags.sh
 
-CONFIG_FILE=$1
-source $CONFIG_FILE
+export CONFIG_FILE=$1
+source ${CONFIG_FILE}
 
+UNPACKED_CONFIGURATION_TAGS=$(unpack_tags ${CONFIG_FILE} "${CONFIGURATION_TAGS}")
+echo "get_tag returns: ${UNPACKED_CONFIGURATION_TAGS}"	
 
 python3 ${ROOT_DIR}/scripts/gen_plots_new.py	\
-																							--figure "plot_reuse_dist" \
+																							--figure "plot_ipc" \
 																							--benchsuites ${BENCHSUITES} \
-																							--data_files "${CONFIGURATION_TAGS}" \
+																							--data_files ${UNPACKED_CONFIGURATION_TAGS} \
 																							--file_type "${PLOT_FILE_TYPE}"
 
-
-
-#																							--figure "plot_pte_cache_eval" \
-#																							--figure "plot_pte_mpki_impact" \

@@ -39,7 +39,7 @@ for input_file in input_files:
 #	print(df.head(5))
 	final_df = pd.concat([final_df, df], axis=0)
 #	print("-------   merged   ---------")	
-	print(final_df.head(50))
+#	print(final_df.head(50))
 
 
 final_df.to_csv(args.output_file, index=False)

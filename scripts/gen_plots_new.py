@@ -48,12 +48,12 @@ def gen_plot(figure_name, benchsuite, data_files, file_type):
 		input_baseline_files =	[ "./stats/" + benchsuite  + "_fdip_baseline_llc-s.1537-w.16.csv" ]
 	
 		input_data_files = []
-		data_files = data_files.replace('\t', '')
-		data_files = data_files.split('\n')
+		#data_files = data_files.replace('\t', '')
+		#data_files = data_files.split('\n')
 
 		for data_file in data_files:
 
-			if (data_file == ""): continue
+			#if (data_file == ""): continue
 			
 			input_data_files.append("./stats/" + benchsuite + "_" + data_file + ".csv")	
 
@@ -104,16 +104,17 @@ def gen_plot(figure_name, benchsuite, data_files, file_type):
 	if (figure_name == "plot_ipc"): 
 
 		input_baseline_files =	[ "./stats/" + benchsuite  + "_fdip_baseline_llc-s.1537-w.16.csv" ]
+		input_baseline_files =	[ "./stats/" + benchsuite  + "_fdip_xcache-vc.false-tc.false-i.false-doa.false-l.0-s.64-w.8-r.lfu_llc-s.1537-w.16.csv" ]
 		#input_baseline_files =	[ "./stats/" + benchsuite  + "_fdip_baseline.csv" ]
 	
 		input_data_files = []
-		data_files = data_files.replace('\t', '')
-		data_files = data_files.split('\n')
+		#data_files = data_files.replace('\t', '')
+		#data_files = data_files.split('\n')
 
 		for data_file in data_files:
-
+			print("data_file: " + data_file)
 			if (data_file == ""): continue
-			print(data_file)	
+	
 			input_data_files.append("./stats/" + benchsuite + "_" + data_file + ".csv")	
 
 		tags = [ 	"LRU",
@@ -155,9 +156,26 @@ def gen_plot(figure_name, benchsuite, data_files, file_type):
 					]
 
 		tags = [
+							"iTP",
+							"xPTP",
+							"iTP+xPTP",
+							"L1D-TC-32KB",
+							"L1D-TC-32KB+xPTP",
+							"L1D-TC-PERFECT",
+							"L1D-TC-PERFECT+xPTP",
 							"L1D-VC",
-							"L1D-IVC"
+							"L1D-VC-DOA",
+							"L1D-VC-DOA'",
+							"L1D-TC",
+							"L1D-VC-DOA+TC"
 					]
+		
+		tags = [
+							"64" ,
+							"128",
+							"256",
+							 "512"
+		]    
 
 		cache_type = "cpu0_STLB"
 		op_type = "TOTAL"
@@ -185,16 +203,16 @@ def gen_plot(figure_name, benchsuite, data_files, file_type):
 		plotting.plot_conf['legend_xoffset'] = 1.2
 		#plotting.plot_cols[']
 	
-		output_file = FIGURES_DIR + "/fig_l1dvc_ipc_" + benchsuite + "." + file_type
-		print(FIGURES_DIR + "/fig_l1dvc_ipc_" + benchsuite + "." + file_type)
+		output_file = FIGURES_DIR + "/fig_vc_cache_eval_" + benchsuite + "." + file_type
+		print(FIGURES_DIR + "/fig_vc_cache_eval_" + benchsuite + "." + file_type)
 		plotting.plot_stat(data_df, tags, 'IPC_IMPROVEMENT', output_file)
 	
 
 	if (figure_name == "plot_mpki"):
 	
 		input_data_files = []
-		data_files = data_files.replace('\t', '')
-		data_files = data_files.split('\n')
+		#data_files = data_files.replace('\t', '')
+		#data_files = data_files.split('\n')
 
 		for data_file in data_files:
 
@@ -321,8 +339,8 @@ def gen_plot(figure_name, benchsuite, data_files, file_type):
 		input_baseline_files =	[ "./stats/" + benchsuite  + "_fdip_baseline_llc-s.1537-w.16.csv" ]
 	
 		input_data_files = []
-		data_files = data_files.replace('\t', '')
-		data_files = data_files.split('\n')
+		#data_files = data_files.replace('\t', '')
+		#data_files = data_files.split('\n')
 
 		for data_file in data_files:
 
@@ -365,18 +383,18 @@ def gen_plot(figure_name, benchsuite, data_files, file_type):
 	if (figure_name == "plot_reuse_dist"):
 		
 		input_data_files = []
-		data_files = data_files.replace('\t', '')
-		data_files = data_files.split('\n')
+		#data_files = data_files.replace('\t', '')
+		#data_files = data_files.split('\n')
 
 		for data_file in data_files:
 
 			if (data_file == ""): continue
 			print(data_file)	
-			input_data_files.append("./stats/" + benchsuite + "_" + data_file + "_reuse_dist_MERGED_L1D_VC.csv")	
+			input_data_files.append("./stats/" + benchsuite + "_" + data_file + "_reuse_dist_L1D_VC.csv")	
 
 		tags = 	[
 							"L1D_VC",
-							"L1D_IVC"
+							"L1D_VC-DOA"
 						]
 
 		data_df = stats.load_reuse_dist_df(input_data_files, tags)
@@ -392,8 +410,8 @@ def gen_plot(figure_name, benchsuite, data_files, file_type):
 		plotting.plot_conf['legend_yoffset'] = 0.5
 		plotting.plot_conf['legend_xoffset'] = 1.2
 
-		output_file = FIGURES_DIR + "/fig_reuse_distance_3d_" + benchsuite + "." + file_type
-		print(FIGURES_DIR + "/fig_reuse_distance_" + benchsuite + "." + file_type)
+		output_file = FIGURES_DIR + "/fig_reuse_distance_doa3_" + benchsuite + "." + file_type
+		print(FIGURES_DIR + "/fig_reuse_distance_doa3_" + benchsuite + "." + file_type)
 		plotting.plot_reuse_distance(data_df, tags, output_file)
 
 ## end gen_plot
@@ -404,7 +422,7 @@ def gen_plot(figure_name, benchsuite, data_files, file_type):
 parser = argparse.ArgumentParser()
 parser.add_argument('--figure', dest='figure_name', required=True, default=None, help="Name of figure to generate.")
 parser.add_argument('--benchsuites', dest='benchsuites', required=True, default=None, nargs='+', help="Name of benchmarksuite to use.")
-parser.add_argument('--data_files', dest='data_files', required=True, default=None, help="List of experiments configuration names.")
+parser.add_argument('--data_files', dest='data_files', required=True, default=None, nargs='+', help="List of experiments configuration names.")
 parser.add_argument('--file_type', dest='file_type', required=False, default="pdf", help="Filetype of the figure.")
 
 
@@ -417,7 +435,8 @@ if __name__ == "__main__":
 		os.makedirs(FIGURES_DIR)
 	
 	for benchsuite in args.benchsuites:
-		print(args.benchsuites)
+		#print(args.benchsuites)
+		#print(args.data_files)
 		gen_plot(args.figure_name, benchsuite, args.data_files, args.file_type)	
 
 
