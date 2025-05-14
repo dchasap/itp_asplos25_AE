@@ -91,7 +91,19 @@ def parse_champsim_stats(input_file, output_file):
         #print(cache + ":" + page_cross_misses)
         PAGE_CROSSING[cache]['PAGE_CROSS_MISSES'] = page_cross_misses
     
-
+   # Get average occupancy
+    AVG_OCCUPANCY = {}
+    for cache in CACHES:
+        AVG_OCCUPANCY[cache] = {}
+        line = re.search(cache + '\sMAX OCCUPANCY:\s+\d+', data)
+        #print(line.group())
+        if (line==None):
+            avg_occupancy = 'N/A'
+        else:
+            avg_occupancy = line.group().split()[3]
+        #print(cache + ":" + avg_occupancy)
+        AVG_OCCUPANCY[cache] = avg_occupancy
+      	
 
     # Get IPC
     lines = re.findall('CPU 0 cumulative IPC:\s+\d+[\.]?\d*', data)

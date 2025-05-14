@@ -80,7 +80,54 @@ public:
 #if defined VICTIM_CACHE
 	bool is_doa = true;
 #endif
-
+/*
+PACKET() = default;
+PACKET(const PACKET& x) 
+{ 
+  std::cout << "PACKET copy constructor called!" << std::endl;
+  scheduled = x.scheduled;
+  forward_checked = x.forward_checked;
+  translate_issued = x.translate_issued;
+  prefetch_from_this = x.prefetch_from_this;
+  fill_this_level = x.fill_this_level;
+  is_translated = x.is_translated;
+  std::cout << "copying asid" << std::endl;
+  std::copy(std::begin(x.asid), std::end(x.asid), std::begin(asid));
+  std::cout << "copyied asid" << std::endl;
+  type = x.type;
+  pf_metadata = x.pf_metadata;
+  cpu = x.cpu;
+  address = x.address;
+  v_address = x.v_address;
+  data = x.data;
+  instr_id = x.instr_id;
+  ip = x.ip;
+  event_cycle = x.event_cycle;
+  cycle_enqueued = x.cycle_enqueued;
+  std::cout << "copying instr_depend_on_me" << std::endl;
+  instr_depend_on_me = x.instr_depend_on_me;
+  std::cout << "copying to_return" << std::endl;
+  to_return = x.to_return;
+  std::cout << "copying to_return finished" << std::endl;
+  translation_level = x.translation_level;
+  init_translation_level = x.init_translation_level;
+#if defined MULTIPLE_PAGE_SIZE
+  page_size = x.page_size;
+  base_vpn = x.base_vpn;
+#endif
+#if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT || defined FORCE_PTE_HIT
+  is_instr = x.is_instr;
+  is_pte = x.is_pte;
+#endif
+#if defined ENABLE_PAGE_CROSSING_STATS
+  page_crossing = x.page_crossing;
+#endif
+#if defined VICTIM_CACHE
+  is_doa = x.is_doa;
+#endif
+  std::cout << "PACKET copy constructor finished!" << std::endl;
+};
+*/
 };
 
 template <>

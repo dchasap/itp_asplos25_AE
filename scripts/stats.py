@@ -138,7 +138,7 @@ def compute_mean(df, tags, stat_name, mean_func, inplace=False):
  
 	means = []
 	for tag in tags:
-		if (mean_func == "gmean"):
+		if (mean_func == "geomean"):
 			mean = gmean(abs(df.loc[(df['tag'] == tag)][stat_name]))
 		elif (mean_func == "mean"):
 			mean = df.loc[(df['tag'] == tag)][stat_name].mean()
@@ -158,4 +158,37 @@ def compute_mean(df, tags, stat_name, mean_func, inplace=False):
 
 	return means_df
 
-
+def compute_means(df, cache_types, tags, stat_names, mean_func, inplace=False):
+	
+	means = {}
+	for stat in stat_names:		
+		means[stat] = []
+		  
+	caches = []
+	confs = []
+	for cache in cache_types: 
+		for tag in tags:
+			for stat in stat_names:
+				if (mean_func == "geomean"):
+					mean = gmean(abs(df.loc[(df['tag'] == tag)][stat]))
+				elif (mean_func == "mean"):
+					mean = df.loc[(df['tag'] == tag)][stat].mean()
+				elif (mean_func == "median"):
+					mean = df.loc[(df['tag'] == tag)][stat].median()
+				else:
+					print(mean_func + " is not a valid mean function!")
+		
+				means[stat].append(mean)
+			
+			caches.append(cache)
+			confs.append(tag)	
+	    
+			debug_print(tag + ":" + stat + ":" + str(mean))	
+		
+	means_df = pd.DataFrame({'benchmarks':'geomean', 'cache':caches, 'tag': confs, 'mean':means['MPKI']})
+	for stat in stat_names:
+		means_df[stat] = means[stat]
+	
+	debug_print(means_df)
+	
+	return means_df

@@ -171,11 +171,14 @@ def gen_plot(figure_name, benchsuite, data_files, file_type):
 					]
 		
 		tags = [
+							"8",
+							"16",
+							"32",
 							"64" ,
 							"128",
 							"256",
 							 "512"
-		]    
+						]    
 
 		cache_type = "cpu0_STLB"
 		op_type = "TOTAL"
@@ -203,8 +206,8 @@ def gen_plot(figure_name, benchsuite, data_files, file_type):
 		plotting.plot_conf['legend_xoffset'] = 1.2
 		#plotting.plot_cols[']
 	
-		output_file = FIGURES_DIR + "/fig_vc_cache_eval_" + benchsuite + "." + file_type
-		print(FIGURES_DIR + "/fig_vc_cache_eval_" + benchsuite + "." + file_type)
+		output_file = FIGURES_DIR + "/fig_vc_cache_eval2_" + benchsuite + "." + file_type
+		print(FIGURES_DIR + "/fig_vc_cache_eval2_" + benchsuite + "." + file_type)
 		plotting.plot_stat(data_df, tags, 'IPC_IMPROVEMENT', output_file)
 	
 
@@ -333,6 +336,150 @@ def gen_plot(figure_name, benchsuite, data_files, file_type):
 																					cache_types, op_type, stat_names, 
 																					output_file)
 	
+	if (figure_name == "plot_ipc"): 
+
+		input_baseline_files =	[ "./stats/" + benchsuite  + "_fdip_baseline_llc-s.1537-w.16.csv" ]
+		input_baseline_files =	[ "./stats/" + benchsuite  + "_fdip_xcache-vc.false-tc.false-i.false-doa.false-l.0-s.64-w.8-r.lfu_llc-s.1537-w.16.csv" ]
+		#input_baseline_files =	[ "./stats/" + benchsuite  + "_fdip_baseline.csv" ]
+	
+		input_data_files = []
+		#data_files = data_files.replace('\t', '')
+		#data_files = data_files.split('\n')
+
+		for data_file in data_files:
+			print("data_file: " + data_file)
+			if (data_file == ""): continue
+	
+			input_data_files.append("./stats/" + benchsuite + "_" + data_file + ".csv")	
+
+		tags = [ 	"LRU",
+							"iTP",
+							"xPTP",
+							"iTP+xPTP",
+							"L1D-VC",
+							"iTP+L1D-VC",
+							"xPTP+L1D-VC",
+							"iTP+L1D-VC+xPTP"
+					]
+	
+		tags = [ 	
+							"xPTP+L1D-VC",
+							"iTP+L1D-VC+xPTP",
+							"xPTP+L1D-VC-PERFECT",
+							"iTP+L1D-VC-PERFECT+xPTP"
+					]
+	
+		tags = [ 	
+							"iTP",
+							"xPTP",
+							"iTP+xPTP",
+							"L1D-VC-PERFECT",
+							"L1D-VC-PERFECT+xPTP",
+							"L1D-VC-256KB",
+							"L1D-VC-256KB+xPTP",
+							"L1D-VC-32KB",
+							"L1D-VC-32KB+xPTP",
+							"L1D-VC-8KB",
+							"L1D-VC-8KB+xPTP"
+					]
+	
+		tags = [ 	
+							"L1D-VC-256KB+xPTP",
+							"L1D-iVC-256KB+xPTP",
+							"L1D-VC-32KB+xPTP",
+							"L1D-iVC-32KB+xPTP",
+					]
+
+		tags = [
+							"iTP",
+							"xPTP",
+							"iTP+xPTP",
+							"L1D-TC-32KB",
+							"L1D-TC-32KB+xPTP",
+							"L1D-TC-PERFECT",
+							"L1D-TC-PERFECT+xPTP",
+							"L1D-VC",
+							"L1D-VC-DOA",
+							"L1D-VC-DOA'",
+							"L1D-TC",
+							"L1D-VC-DOA+TC"
+					]
+		
+		tags = [
+							"8",
+							"16",
+							"32",
+							"64" ,
+							"128",
+							"256",
+							 "512"
+						]    
+
+		cache_type = "cpu0_STLB"
+		op_type = "TOTAL"
+
+		baseline_df = stats.load_df(input_baseline_files, tags, cache_type, op_type)
+		data_df = stats.load_df(input_data_files, tags, cache_type, op_type)
+
+
+		data_df = stats.compute_variation(baseline_df, data_df, tags, 'IPC', 'IPC_IMPROVEMENT')
+		#means_df = stats.compute_mean(data_df, tags, 'IPC_IMPROVEMENT', 'mean')
+
+
+		print(data_df['benchmarks'].str.split('.').str[0])
+		data_df['benchmarks'] = data_df['benchmarks'].str.split('.').str[0]
+	
+		plotting.plot_conf['plot_type'] = 'box'
+		plotting.plot_conf['xlabel'] = xlabels[benchsuite]
+		plotting.plot_conf['ylabel'] = "IPC Improvement (%)"
+		plotting.plot_conf['plot_width'] = 9
+		plotting.plot_conf['plot_height'] = 3
+		plotting.plot_conf['rotation'] = 20
+		plotting.plot_conf['show_legend'] = True
+		plotting.plot_conf['legend_cols'] = 5
+		plotting.plot_conf['legend_yoffset'] = 0.5
+		plotting.plot_conf['legend_xoffset'] = 1.2
+		#plotting.plot_cols[']
+	
+		output_file = FIGURES_DIR + "/fig_vc_cache_eval2_" + benchsuite + "." + file_type
+		print(FIGURES_DIR + "/fig_vc_cache_eval2_" + benchsuite + "." + file_type)
+		plotting.plot_stat(data_df, tags, 'IPC_IMPROVEMENT', output_file)
+	
+
+	if (figure_name == "plot_occupancy"):
+	
+		input_data_files = []
+
+		for data_file in data_files:
+
+			if (data_file == ""): continue
+			print(data_file)	
+			input_data_files.append("./stats/" + benchsuite + "_" + data_file + ".csv")	
+
+		tags = [
+							"8",
+							"64",
+							"512"
+					]
+		
+		cache_types=["cpu0_L1D_VC", "cpu0_L1D", "cpu0_L2C", "LLC"]
+		op_type = "TOTAL"
+
+		df = stats.load_df(input_data_files, tags, cache_types, op_type)
+
+
+		plotting.plot_conf['plot_type'] = 'barplot'
+		plotting.plot_conf['plot_width'] = 9
+		plotting.plot_conf['plot_height'] = 3
+		plotting.plot_conf['fontsize'] = 11
+		plotting.plot_conf['ylabel'] = "OCCUPANCY (%)"
+		plotting.plot_conf['show_legend'] = True
+		#plotting.plot_conf['extra_xlabels'] = False
+
+		output_file = FIGURES_DIR + "/fig_vc_occupancy_" + benchsuite + ".pdf"
+		print(FIGURES_DIR + "/fig_vc_occupancy_" + benchsuite + ".pdf")
+		plotting.plot_stat(data_df, tags, 'MAX_OCCUPANCY', output_file)
+
 
 	if (figure_name == "plot_l2c_eval"): 
 

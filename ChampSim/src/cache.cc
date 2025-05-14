@@ -74,6 +74,7 @@
 					bool success = true;
 					auto metadata_thru = fill_mshr.pf_metadata;
 					auto pkt_address = (virtual_prefetch ? fill_mshr.v_address : fill_mshr.address) & ~champsim::bitmask(match_offset_bits ? 0 : OFFSET_BITS);
+
 					if (way != set_end) {
 						if (way->valid && way->dirty) {
 							PACKET writeback_packet;
@@ -123,6 +124,7 @@
 						}
 
 #if defined VICTIM_CACHE
+
 						//FIXME: This is probably the ONLY point we should move something to the victim cache
 						if (enable_victim_cache) {
 
@@ -193,7 +195,7 @@
 							if (fill_mshr.type == PREFETCH)
 								sim_stats.back().pf_fill++;
 
-#if defined(ENABLE_PAGE_CROSSING_STATS)
+#if defined ENABLE_PAGE_CROSSING_STATS 
 							if ((NAME.find("ITLB") != std::string::npos) && (NAME.find("DTLB") != std::string::npos)
 									&& (NAME.find("STLB")) && fill_mshr.prefetch_from_this) {
 				
@@ -307,13 +309,24 @@
 
 						// COLLECT STATS
 						sim_stats.back().total_miss_latency += current_cycle - (fill_mshr.cycle_enqueued + 1);
-
+						//std::cout << NAME << ":checkpoint 8" << std::endl;
+						try {
 						auto copy{fill_mshr};
+						//std::cout << "checkpoint 8.1" << std::endl;
 						copy.pf_metadata = metadata_thru;
-						for (auto ret : copy.to_return)
+						for (auto ret : copy.to_return) {
+						//std::cout << "checkpoint 8.2" << std::endl;
 							ret->return_data(copy);
-					}
+							//std::cout << "checkpoint 8.3" << std::endl;
+						}
+					
+						}
+						catch (const std::bad_array_new_length& e) {
+							std::cout << "Error: " << e.what() << std::endl;
+						}
 
+					}
+					//std::cout << "checkpoint 9" << std::endl;
 					return success;
 				}
 
@@ -830,6 +843,23 @@
 
 					impl_prefetcher_cycle_operate();
 
+#if defined ENABLE_EXTRA_CACHE_STATS
+					// Measure cache occupancy
+					unsigned int occupied_elements = 0;
+					for (unsigned int set_idx = 0; set_idx < NUM_SET; set_idx++) {
+						for (unsigned int way_idx = 0; way_idx < NUM_WAY; way_idx++) {
+							if (block[set_idx * NUM_WAY + way_idx].valid) {
+								occupied_elements++;
+							}
+						}
+					}
+					//std::cout << NAME << ":occupied_elements:" << occupied_elements << std::endl;
+					double occupancy = double(occupied_elements * 100) / double(NUM_SET * NUM_WAY);
+					//std::cout << NAME << ":occupancy:" << occupancy << std::endl;
+					if (occupancy > sim_stats.back().max_cache_occupancy) {
+						sim_stats.back().max_cache_occupancy = occupancy;
+					}	
+#endif
 				}
 
 #if defined SPLIT_STLB
