@@ -45,9 +45,6 @@ public:
   std::vector<MemoryRequestProducer*> to_return;
 
   uint8_t translation_level = 0, init_translation_level = 0;
-
-  PACKET() = default;
-  PACKET(const PACKET&) { std::cout << "PACKET copy constructor called!" << std::endl; };
 };
 
 template <>

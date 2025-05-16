@@ -16,11 +16,11 @@ def parse_champsim_stats(input_file, output_file):
     #print(args.input_file)
     # Get Cache and TLB statistics
 
-    CACHES = ['cpu0_DTLB', 'cpu0_ITLB', 'cpu0_STLB', 'cpu0_L1I', 'cpu0_L1D', 'cpu0_L2C', 'LLC']
+    CACHES = ['cpu0_DTLB', 'cpu0_ITLB', 'cpu0_STLB', 'cpu0_L1I', 'cpu0_L1D', 'cpu0_L2C', 'LLC', 'cpu0_L1D_VC']
     OPERATIONS = ['TOTAL', 'LOAD', 'RFO', 'PREFETCH', 'WRITEBACK', 'TRANSLATION']
-    STATS = ['ACCESS', 'HIT', 'MISS', 'dACCESS', 'dHIT', 'dMISS', 'iACCESS', 'iHIT', 'iMISS', 
-                 'dtHIT', 'dtMISS', 'itHIT', 'itMISS', 'itACCESS', 'dtACCESS',
-         'REQUESTED', 'ISSUED', 'USEFUL', 'USELESS']
+    STATS = [   'ACCESS', 'HIT', 'MISS', 'dACCESS', 'dHIT', 'dMISS', 'iACCESS', 'iHIT', 'iMISS', 
+                'dtHIT', 'dtMISS', 'itHIT', 'itMISS', 'itACCESS', 'dtACCESS',
+                'REQUESTED', 'ISSUED', 'USEFUL', 'USELESS']
 
     CACHE_STATS = {}
     for cache in CACHES:
@@ -125,6 +125,8 @@ def parse_champsim_stats(input_file, output_file):
     header.insert(0, 'OP')
     header.insert(0, 'CACHE')
 
+    header.append('MAX_OCCUPANCY')
+
     header.append('AVERAGE_MISS_LATENCY')
     header.append('AVERAGE_iMISS_LATENCY')
     header.append('AVERAGE_dMISS_LATENCY')
@@ -144,6 +146,7 @@ def parse_champsim_stats(input_file, output_file):
             for stat in CACHE_STATS[cache][op]:
                 new_row.append(str(CACHE_STATS[cache][op][stat]))
 
+            new_row.append(AVG_OCCUPANCY[cache])
             new_row.append(AVG_MISS_LATENCIES[cache]['AVERAGE_MISS_LATENCY'])
             new_row.append(AVG_MISS_LATENCIES[cache]['AVERAGE_iMISS_LATENCY'])
             new_row.append(AVG_MISS_LATENCIES[cache]['AVERAGE_dMISS_LATENCY'])

@@ -146,7 +146,7 @@ void champsim::plain_printer::print(CACHE::stats_type stats)
     stream << "USELESS: " << std::setw(10) << stats.pf_useless << std::endl;
 
 #if defined ENABLE_EXTRA_CACHE_STATS
-    stream << stats.name << " MAX OCCUPANCY: " << std::ceil(stats.max_cache_occupancy) << std::endl;
+    stream << stats.name << " MAX OCCUPANCY: " << stats.max_cache_occupancy << std::endl;
     stream << stats.name << " AVERAGE iMISS LATENCY: " << std::ceil(stats.total_imiss_latency) / std::ceil(TOTAL_MISS) << " cycles" << std::endl;
     stream << stats.name << " AVERAGE dMISS LATENCY: " << std::ceil(stats.total_dmiss_latency) / std::ceil(TOTAL_MISS) << " cycles" << std::endl;
     stream << stats.name << " AVERAGE itMISS LATENCY: " << std::ceil(stats.total_itmiss_latency) / std::ceil(TOTAL_MISS) << " cycles" << std::endl;
@@ -160,7 +160,7 @@ void champsim::plain_printer::print(CACHE::stats_type stats)
 
     stream << stats.name << " AVERAGE MISS LATENCY: " << std::ceil(stats.total_miss_latency) / std::ceil(TOTAL_MISS) << " cycles" << std::endl;
 
-    // stream << " AVERAGE MISS LATENCY: " << (stats.total_miss_latency)/TOTAL_MISS << " cycles " << stats.total_miss_latency << "/" << TOTAL_MISS<< std::endl;
+    //stream << " AVERAGE MISS LATENCY: " << (stats.total_miss_latency)/TOTAL_MISS << " cycles " << stats.total_miss_latency << "/" << TOTAL_MISS<< std::endl;
   }
 }
 

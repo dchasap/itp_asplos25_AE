@@ -263,6 +263,7 @@ public:
 #if defined ENABLE_EXTRA_CACHE_STATS
 	ReuseDistanceMonitor* reuseDistMon;
 	PageAddressStatsHanlder* pageAddressStatsMon;
+  bool cache_is_full = false;
 #endif
 
   NonTranslatingQueues& queues;
@@ -294,7 +295,7 @@ public:
 
   std::size_t get_occupancy(uint8_t queue_type, uint64_t address) override final;
   std::size_t get_size(uint8_t queue_type, uint64_t address) override final;
-#if defined (SPLIT_STLB)
+#if defined SPLIT_STLB
   [[deprecated("Use get_set_index() instead.")]] uint64_t get_set(uint64_t address, uint8_t type) const;
   [[deprecated("This function should not be used to access the blocks directly.")]] uint64_t get_way(uint64_t address, uint8_t type, uint64_t set) const;
   uint64_t invalidate_entry(uint64_t inval_addr, uint8_t type);
@@ -398,7 +399,7 @@ public:
 				uint32_t vc_num_set = 64;
 				uint32_t vc_num_way = 8;
 				uint32_t vc_latency = 1;
-				uint32_t vc_mshr_size = 8;//64;
+				uint32_t vc_mshr_size = 8; //64;
 
 				if (getenv("VC_LATENCY")) {
 					vc_latency = std::stoull(getenv("VC_LATENCY"));

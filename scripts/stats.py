@@ -17,8 +17,8 @@ def load_df(input_data_files, tags, cache_type, op_type, sort = False, sorted_in
 		df = pd.DataFrame()
 		i = 0
 		for input_file in input_data_files:
-				print(input_file)
-				print(tags)
+				#print(input_file)
+				#print(tags)
 				tag = tags[i] #.pop(0) 
 				new_df = pd.read_csv(input_file, sep=',', index_col='benchmarks')
 
@@ -33,6 +33,7 @@ def load_df(input_data_files, tags, cache_type, op_type, sort = False, sorted_in
 				new_df['dMPKI'] = (new_df['dMISS'] * 1000) / new_df['INSTRUCTIONS']
 				new_df['itMPKI'] = (new_df['itMISS'] * 1000) / new_df['INSTRUCTIONS']
 				new_df['dtMPKI'] = (new_df['dtMISS'] * 1000) / new_df['INSTRUCTIONS']
+		
 
 				if df.empty:
 						if (sort):
@@ -53,6 +54,7 @@ def load_df(input_data_files, tags, cache_type, op_type, sort = False, sorted_in
 
 				i += 1 # that's for tags' list
 
+		#df.to_csv("data.csv", sep=',', index=False)
 		return df
 
 def load_reuse_dist_df(input_data_files, tags):
@@ -157,6 +159,7 @@ def compute_mean(df, tags, stat_name, mean_func, inplace=False):
 	debug_print(means_df)
 
 	return means_df
+
 
 def compute_means(df, cache_types, tags, stat_names, mean_func, inplace=False):
 	

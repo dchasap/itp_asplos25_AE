@@ -155,9 +155,9 @@
 							if (enable_doa_filtering) {
 
 #if defined SPLIT_STLB
-								uint64_t set_idx = get_set_index(victim_packet.address, fill_mshr.is_instr);
+								uint64_t set_idx = victim_cache->get_set_index(victim_packet.address, fill_mshr.is_instr);
 #else 
-								uint64_t set_idx = get_set_index(victim_packet.address);
+								uint64_t set_idx = victim_cache->get_set_index(victim_packet.address);
 #endif
 								//set_idx = 0;
 								if (victim_packet.is_pte && last_pte_entry[set_idx] == victim_packet.address) {
@@ -326,6 +326,31 @@
 						}
 
 					}
+										
+#if defined ENABLE_EXTRA_CACHE_STATS
+					// Measure cache occupancy
+					if (NAME.find("L1D_VC") != std::string::npos) {
+					
+						unsigned int occupied_elements = 0;
+						for (unsigned int set_idx = 0; set_idx < NUM_SET; set_idx++) {
+							for (unsigned int way_idx = 0; way_idx < NUM_WAY; way_idx++) {
+								if (block[set_idx * NUM_WAY + way_idx].valid) {
+									occupied_elements++;
+								}
+							}
+						}
+
+						double occupancy = double(occupied_elements * 100) / double(NUM_SET * NUM_WAY);
+						if (occupancy > sim_stats.back().max_cache_occupancy) {
+							sim_stats.back().max_cache_occupancy = occupancy;
+						}
+
+						if (occupancy >= 100 && !cache_is_full) {
+							cache_is_full = true;
+							std::cout << "Cache full@" << current_cycle << " cycle!" << std::endl;
+						}
+					}	
+#endif
 					//std::cout << "checkpoint 9" << std::endl;
 					return success;
 				}
@@ -358,11 +383,11 @@
 						std::cout << " instr_id: " << handle_pkt.instr_id << " address: " << std::hex << (handle_pkt.address >> OFFSET_BITS);
 						std::cout << " full_addr: " << handle_pkt.address;
 						std::cout << " full_v_addr: " << handle_pkt.v_address << std::dec;
-				#if defined (SPLIT_STLB)
+#if defined SPLIT_STLB
 						std::cout << " set: " << get_set_index(handle_pkt.address, handle_pkt.is_instr);
-				#else
+#else
 						std::cout << " set: " << get_set_index(handle_pkt.address);
-				#endif
+#endif
 						std::cout << " way: " << std::distance(set_begin, way) << " (" << (hit ? "HIT" : "MISS") << ")";
 						std::cout << " type: " << +handle_pkt.type;
 						std::cout << " cycle: " << current_cycle << std::endl;
@@ -379,9 +404,9 @@
 					if (enable_doa_filtering && handle_pkt.is_pte) {
 						// we should also store the evicting address to last_pte_entry in the set (if it's pte)
 #if defined SPLIT_STLB
-						uint64_t set_idx = get_set_index(handle_pkt.address, fill_mshr.is_instr);
+						uint64_t set_idx = victim_cache->get_set_index(handle_pkt.address, fill_mshr.is_instr);
 #else 
-						uint64_t set_idx = get_set_index(handle_pkt.address);
+						uint64_t set_idx = victim_cache->get_set_index(handle_pkt.address);
 #endif
 						//set_idx = 0;
 						last_pte_entry[set_idx] = handle_pkt.address;
@@ -843,23 +868,6 @@
 
 					impl_prefetcher_cycle_operate();
 
-#if defined ENABLE_EXTRA_CACHE_STATS
-					// Measure cache occupancy
-					unsigned int occupied_elements = 0;
-					for (unsigned int set_idx = 0; set_idx < NUM_SET; set_idx++) {
-						for (unsigned int way_idx = 0; way_idx < NUM_WAY; way_idx++) {
-							if (block[set_idx * NUM_WAY + way_idx].valid) {
-								occupied_elements++;
-							}
-						}
-					}
-					//std::cout << NAME << ":occupied_elements:" << occupied_elements << std::endl;
-					double occupancy = double(occupied_elements * 100) / double(NUM_SET * NUM_WAY);
-					//std::cout << NAME << ":occupancy:" << occupancy << std::endl;
-					if (occupancy > sim_stats.back().max_cache_occupancy) {
-						sim_stats.back().max_cache_occupancy = occupancy;
-					}	
-#endif
 				}
 
 #if defined SPLIT_STLB
@@ -1024,12 +1032,12 @@ int CACHE::prefetch_line(uint64_t pf_addr, bool fill_this_level, uint32_t prefet
   pf_packet.address = pf_addr;
   pf_packet.v_address = virtual_prefetch ? pf_addr : 0;
 
-#if defined(ENABLE_PAGE_CROSSING_STATS)
+#if defined ENABLE_PAGE_CROSSING_STATS
 	pf_packet.page_crossing = prefetch_metadata ? 2 : 0;
 #endif
 
 
-#ifdef ENABLE_EXTRA_CACHE_STATS
+#if defined ENABLE_EXTRA_CACHE_STATS
 	//FIXME: This works only without prefetchers, otherwise all PREFETCH accesses 
 	// cannot be accounted as instr or not
 	//pf_packet.is_instr = xx;
@@ -1201,6 +1209,7 @@ void CACHE::end_phase(unsigned finished_cpu)
 		roi_stats.back().total_dmiss_latency = sim_stats.back().total_dmiss_latency;
 		roi_stats.back().total_itmiss_latency = sim_stats.back().total_itmiss_latency;
 		roi_stats.back().total_dtmiss_latency = sim_stats.back().total_dtmiss_latency;
+		roi_stats.back().max_cache_occupancy = sim_stats.back().max_cache_occupancy;
 #endif
   }
 
@@ -1211,7 +1220,7 @@ void CACHE::end_phase(unsigned finished_cpu)
   roi_stats.back().pf_fill = sim_stats.back().pf_fill;
   roi_stats.back().pf_crossed = sim_stats.back().pf_crossed;
 
-#if defined(ENABLE_PAGE_CROSSING_STATS)
+#if defined ENABLE_PAGE_CROSSING_STATS
 	roi_stats.back().pf_crossing_pages_tlb_hit = sim_stats.back().pf_crossing_pages_tlb_hit;
 	roi_stats.back().pf_crossing_pages_tlb_miss = sim_stats.back().pf_crossing_pages_tlb_miss;
 #endif

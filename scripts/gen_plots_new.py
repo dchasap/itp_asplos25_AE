@@ -453,31 +453,32 @@ def gen_plot(figure_name, benchsuite, data_files, file_type):
 		for data_file in data_files:
 
 			if (data_file == ""): continue
-			print(data_file)	
+
 			input_data_files.append("./stats/" + benchsuite + "_" + data_file + ".csv")	
 
 		tags = [
-							"8",
-							"64",
-							"512"
+							"32KB",
+							"256KB"
 					]
 		
-		cache_types=["cpu0_L1D_VC", "cpu0_L1D", "cpu0_L2C", "LLC"]
+		cache_types=["cpu0_L1D_VC"]
 		op_type = "TOTAL"
+		
+		data_df = stats.load_df(input_data_files, tags, cache_types, op_type)
 
-		df = stats.load_df(input_data_files, tags, cache_types, op_type)
+		means_df = stats.compute_mean(data_df, tags, 'MAX_OCCUPANCY', 'geomean')
 
-
-		plotting.plot_conf['plot_type'] = 'barplot'
+		plotting.plot_conf['plot_type'] = 'bar'
 		plotting.plot_conf['plot_width'] = 9
 		plotting.plot_conf['plot_height'] = 3
 		plotting.plot_conf['fontsize'] = 11
 		plotting.plot_conf['ylabel'] = "OCCUPANCY (%)"
 		plotting.plot_conf['show_legend'] = True
-		#plotting.plot_conf['extra_xlabels'] = False
+		plotting.plot_conf['show_xticks'] = False
 
 		output_file = FIGURES_DIR + "/fig_vc_occupancy_" + benchsuite + ".pdf"
 		print(FIGURES_DIR + "/fig_vc_occupancy_" + benchsuite + ".pdf")
+		#plotting.plot_stat(means_df, tags, 'mean', output_file)
 		plotting.plot_stat(data_df, tags, 'MAX_OCCUPANCY', output_file)
 
 
