@@ -99,22 +99,23 @@
 
 //FIXME: Should we skip writebacks for victim cache (??) - ptes are never written/dirty
 #if 0
-							if (!enable_victim_cache && !enable_translation_cache) {
+							if (!enable_tx_cache && !enable_tx_victim_cache) {
 /*
-							if (enable_victim_cache && false) { 
+							if (enable_TRANSLATION_EXCLUSIVE_CACHE && false) { 
 							bool vc_entry_cond;
 							if (enable_instr_only)
 								vc_entry_cond = writeback_packet.is_pte && writeback_packet.is_instr;
 							else 
 								vc_entry_cond = writeback_packet.is_pte;
 
-							//if (enable_victim_cache && vc_entry_cond && !way.is_doa) {
-							if (enable_victim_cache && vc_entry_cond) {
-								success = victim_cache->add_wq(writeback_packet);
+							//if (enable_TRANSLATION_EXCLUSIVE_CACHE && vc_entry_cond && !way.is_doa) {
+							if (enable_TRANSLATION_EXCLUSIVE_CACHE && vc_entry_cond) {
+								success = TRANSLATION_EXCLUSIVE_CACHE->add_wq(writeback_packet);
 							} else { 
 								success = lower_level->add_wq(writeback_packet);
 							}
 */
+								success = lower_level->add_wq(writeback_packet);
 							} else {
 								success = lower_level->add_wq(writeback_packet);
 							}
@@ -123,61 +124,67 @@
 #endif
 						}
 
-#if defined VICTIM_CACHE
-
-						//FIXME: This is probably the ONLY point we should move something to the victim cache
-						if (enable_victim_cache) {
-
-							PACKET victim_packet;
-							victim_packet.cpu = fill_mshr.cpu;
-							victim_packet.address = way->address;
-							victim_packet.data = way->data;
-							victim_packet.instr_id = fill_mshr.instr_id;
-							victim_packet.ip = 0;
-							victim_packet.type = fill_mshr.type;
-							victim_packet.pf_metadata = way->pf_metadata;
-
-#if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT
-							victim_packet.is_instr = way->is_instr;
-							victim_packet.is_pte = way->is_pte;
-#endif	
-
-#if defined MULTIPLE_PAGE_SIZE
-							victim_packet.page_size = way->page_size;
-							victim_packet.base_vpn = way->base_vpn;
-#endif
-							bool vc_entry_cond;
-							if (enable_instr_only)
-								vc_entry_cond = way->is_pte && way->is_instr;
-							else 
-								vc_entry_cond = way->is_pte;
-
-							if (enable_doa_filtering) {
-
-#if defined SPLIT_STLB
-								uint64_t set_idx = victim_cache->get_set_index(victim_packet.address, fill_mshr.is_instr);
-#else 
-								uint64_t set_idx = victim_cache->get_set_index(victim_packet.address);
-#endif
-								//set_idx = 0;
-								if (victim_packet.is_pte && last_pte_entry[set_idx] == victim_packet.address) {
-									vc_entry_cond = vc_entry_cond; // force doa
-								} else {
-									vc_entry_cond = vc_entry_cond && !way->is_doa;
-								}
-								way->is_doa = true; // reset the flag
-							}
-
-							if (vc_entry_cond) {
-								//success = victim_cache->add_wq(writeback_packet);
-								victim_cache->add_rq(victim_packet);
-							}
-						}
-#endif
-
 						if (success) {
 							auto evicting_address = (ever_seen_data ? way->address : way->v_address) & ~champsim::bitmask(match_offset_bits ? 0 : OFFSET_BITS);
 
+
+#if defined TRANSLATION_EXCLUSIVE_CACHE
+							//FIXME: This is probably the ONLY point we should move something to the victim cache
+							if (enable_tx_victim_cache) {
+
+								assert(NAME.find("_TXC") == std::string::npos);
+
+								PACKET victim_packet;
+								victim_packet.cpu = fill_mshr.cpu;
+								victim_packet.address = way->address;
+								victim_packet.data = way->data;
+								victim_packet.instr_id = fill_mshr.instr_id;
+								victim_packet.ip = 0;
+								victim_packet.type = fill_mshr.type;
+								victim_packet.pf_metadata = way->pf_metadata;
+
+#if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT
+								victim_packet.is_instr = way->is_instr;
+								victim_packet.is_pte = way->is_pte;
+#endif	
+
+#if defined MULTIPLE_PAGE_SIZE
+								victim_packet.page_size = way->page_size;
+								victim_packet.base_vpn = way->base_vpn;
+#endif
+								bool vc_entry_cond;
+								if (enable_instr_only)
+									vc_entry_cond = way->is_pte && way->is_instr;
+								else 
+									vc_entry_cond = way->is_pte;
+
+								if (enable_doa_filtering) {
+
+#if defined SPLIT_STLB
+									uint64_t set_idx = get_set_index(victim_packet.address, fill_mshr.is_instr);
+#else 
+									uint64_t set_idx = get_set_index(victim_packet.address);
+#endif
+									//set_idx = 0;
+									if (victim_packet.is_pte && last_pte_entry[set_idx] == victim_packet.address) {
+										vc_entry_cond = vc_entry_cond; // force doa
+									} else {
+										vc_entry_cond = vc_entry_cond && !way->is_doa;
+									}
+									way->is_doa = true; // reset the flag
+								}
+
+								if (vc_entry_cond) {
+									//success = tx_cache->add_wq(writeback_packet);
+									//tx_cache->add_rq(victim_packet);
+									//std::cout << "adding address: " << way->address << std::endl; 
+									//tx_victim_cache[way->address] = *way;
+									// get set index
+									tx_victim_cache->add_request(victim_packet);
+									//std::cout << "tx_cache size:" << tx_victim_cache.size() << std::endl;
+								}
+							}
+#endif // TRANSLATION_EXCLUSIVE_CACHE
 
 #if defined FORCE_HIT // check if evicted entry is a PTE
 							if (NAME.find("L1D") != std::string::npos) {
@@ -210,7 +217,7 @@
 							way->v_address = fill_mshr.v_address;
 							way->data = fill_mshr.data;
 							//FIXME: should we have the type passed as well?
-#if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT || defined VICTIM_CACHE
+#if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT || defined TRANSLATION_EXCLUSIVE_CACHE
 							way->is_instr = fill_mshr.is_instr;
 							way->is_pte = fill_mshr.is_pte;
 #endif
@@ -332,9 +339,9 @@
 					if (NAME.find("L1D_VC") != std::string::npos) {
 					
 						unsigned int occupied_elements = 0;
-						for (unsigned int set_idx = 0; set_idx < NUM_SET; set_idx++) {
-							for (unsigned int way_idx = 0; way_idx < NUM_WAY; way_idx++) {
-								if (block[set_idx * NUM_WAY + way_idx].valid) {
+						for (unsigned int _set_idx = 0; _set_idx < NUM_SET; _set_idx++) {
+							for (unsigned int _way_idx = 0; _way_idx < NUM_WAY; _way_idx++) {
+								if (block[_set_idx * NUM_WAY + _way_idx].valid) {
 									occupied_elements++;
 								}
 							}
@@ -400,13 +407,13 @@
 						metadata_thru = impl_prefetcher_cache_operate(pf_base_addr, handle_pkt.ip, hit, handle_pkt.type, metadata_thru);
 					}
 
-#if defined VICTIM_CACHE
+#if defined TRANSLATION_EXCLUSIVE_CACHE
 					if (enable_doa_filtering && handle_pkt.is_pte) {
 						// we should also store the evicting address to last_pte_entry in the set (if it's pte)
 #if defined SPLIT_STLB
-						uint64_t set_idx = victim_cache->get_set_index(handle_pkt.address, fill_mshr.is_instr);
+						uint64_t set_idx = get_set_index(handle_pkt.address, fill_mshr.is_instr);
 #else 
-						uint64_t set_idx = victim_cache->get_set_index(handle_pkt.address);
+						uint64_t set_idx = get_set_index(handle_pkt.address);
 #endif
 						//set_idx = 0;
 						last_pte_entry[set_idx] = handle_pkt.address;
@@ -493,9 +500,9 @@
 //#endif
 						}
 
-#if defined VICTIM_CACHE
+#if defined TRANSLATION_EXCLUSIVE_CACHE
 						// If we have a hit, we need to change doa status at the block in the cache
-						if (enable_victim_cache && enable_doa_filtering) {
+						if (enable_tx_cache && enable_doa_filtering) {
 							way->is_doa = false;
 						}
 #endif
@@ -509,14 +516,14 @@
 							const auto way_idx = static_cast<std::size_t>(std::distance(set_begin, way)); // cast protected by earlier assertion
 							impl_update_replacement_state(handle_pkt.cpu, get_set_index(handle_pkt.address), way_idx, way->address, handle_pkt.ip, 0, handle_pkt.type, true);
 				*/
-						auto copy{handle_pkt};
+						auto copy_pkt{handle_pkt};
 						bool hit_forced = false;
 
 						if (NAME.find("STLB") != std::string::npos) {
 							if ((force_hit) && !handle_pkt.is_instr) { //FIXME: 
 								if (handle_pkt.translation_level == 0) {
 									//std::tie(copy.data, penalty) = vmem->va_to_pa(handle_pkt.cpu, handle_pkt.v_address);
-									copy.data = vmem->va_to_pa(handle_pkt.cpu, handle_pkt.v_address).first;
+									copy_pkt.data = vmem->va_to_pa(handle_pkt.cpu, handle_pkt.v_address).first;
 									hit_forced = true;
 								}
 								else	{
@@ -531,7 +538,7 @@
 								//copy.data = vmem->get_pte_pa(handle_pkt.cpu, handle_pkt.v_address, handle_pkt.translation_level).first;
 								auto it = cached_PTEs.find(handle_pkt.address);
 								if (it != cached_PTEs.end()) {
-									copy.data = (it->second).data;
+									copy_pkt.data = (it->second).data;
 									hit_forced = true;	
 								}
 							}
@@ -563,9 +570,9 @@
 							hit_hook();
 	#endif
 							
-							copy.pf_metadata = metadata_thru;
-							for (auto ret : copy.to_return)
-								ret->return_data(copy);
+							copy_pkt.pf_metadata = metadata_thru;
+							for (auto ret : copy_pkt.to_return)
+								ret->return_data(copy_pkt);
 
 							/*
 								* Dimitrios: not necessary for TLBs and PTEs, but we can leave it, it should always be false
@@ -582,7 +589,71 @@
 								
 							return true; //forcing hit
 						}
-#endif				
+#endif // FORCED_HIT			
+
+#if defined TRANSLATION_EXCLUSIVE_CACHE
+						// Dimitrios: updating replacement policy doesn't really matter at this point
+						// update replacement policy
+				/*
+							const auto way_idx = static_cast<std::size_t>(std::distance(set_begin, way)); // cast protected by earlier assertion
+							impl_update_replacement_state(handle_pkt.cpu, get_set_index(handle_pkt.address), way_idx, way->address, handle_pkt.ip, 0, handle_pkt.type, true);
+				*/
+						if (NAME.find("L1D") != std::string::npos) {
+							auto copy_pkt{handle_pkt};
+							bool entry_found = false;
+							if (enable_tx_victim_cache && (handle_pkt.is_pte)) {
+								//std::cout << "looking address: " << way->address << std::endl; 
+								//copy.data = vmem->get_pte_pa(handle_pkt.cpu, handle_pkt.v_address, handle_pkt.translation_level).first;
+								/*
+								auto it = tx_victim_cache.find(handle_pkt.address);
+								if (it != tx_victim_cache.end()) {
+									//std::cout << "Found it!" << std::endl;
+									copy_pkt.data = (it->second).data;
+									entry_found = true;	
+								}
+								*/
+								//std::cout << "lookout!" << std::endl;
+								auto [_entry, _entry_found] = tx_victim_cache->lookup(handle_pkt.address);
+								entry_found = _entry_found;
+								//std::cout << "segfault" << std::endl;	
+								copy_pkt.data = _entry.data;
+								//std::cout << "moving on..." << std::endl;
+							}
+
+							if (entry_found) { 
+/*
+							sim_stats.back().hits[handle_pkt.type][handle_pkt.cpu]++;
+
+	#if defined ENABLE_EXTRA_CACHE_STATS
+							if (handle_pkt.is_instr && !handle_pkt.is_pte) {
+								sim_stats.back().ihits[handle_pkt.type][handle_pkt.cpu]++;
+							} else if (!handle_pkt.is_instr && !handle_pkt.is_pte) {
+								sim_stats.back().dhits[handle_pkt.type][handle_pkt.cpu]++;
+							} else if (handle_pkt.is_instr && handle_pkt.is_pte) {
+								sim_stats.back().ithits[handle_pkt.cpu][handle_pkt.type]++;
+							} else if (!handle_pkt.is_instr && handle_pkt.is_pte) {
+								sim_stats.back().dthits[handle_pkt.cpu][handle_pkt.type]++;
+							} else {
+								std::cout << "Oups, something went wrong..." << std::endl;
+								std::cout << "\ttype:" << (uint32_t)handle_pkt.type << std::endl;
+								std::cout << "\tis_instr:" << (handle_pkt.is_instr?"true":"false") << std::endl;
+								assert(false);
+							}
+						
+							pageAddressStatsMon->add_access(handle_pkt.address, handle_pkt.is_instr);
+							reuseDistMon->add_access(handle_pkt.address);
+
+							hit_hook();
+	#endif
+*/					
+								copy_pkt.pf_metadata = metadata_thru;
+								for (auto ret : copy_pkt.to_return)
+									ret->return_data(copy_pkt);
+								
+								return true; //forcing hit
+							}
+						} 
+#endif		
 
 #if defined MULTIPLE_PAGE_SIZE
 						//TODO: Lookup entire TLB in case of large pages
@@ -752,8 +823,8 @@
 						bool success = false;
 						if (prefetch_as_load || handle_pkt.type != PREFETCH) {
 							
-#if defined VICTIM_CACHE
-							if (enable_translation_cache) {
+#if defined TRANSLATION_EXCLUSIVE_CACHE
+							if (enable_tx_cache) {
 								
 								bool vc_entry_cond;
 								if (enable_instr_only)
@@ -762,7 +833,7 @@
 									vc_entry_cond = fwd_pkt.is_pte;
 
 								if (vc_entry_cond) {
-									success = victim_cache->add_rq(fwd_pkt); 
+									success = tx_cache->add_rq(fwd_pkt); 
 								} else {
 									success = lower_level->add_rq(fwd_pkt);
 								}
@@ -826,12 +897,12 @@
 				void CACHE::operate()
 				{
 
-#if defined VICTIM_CACHE
+#if defined TRANSLATION_EXCLUSIVE_CACHE
 					//std::cout << "operate" << std::endl;
 					//FIXME: Not sure if we should operate the cache_queue as well
-					if (enable_victim_cache || enable_translation_cache) {
-						victim_cache->queues.operate(); //FIXME: Not sure about this line
-						victim_cache->operate();
+					if (enable_tx_cache || enable_tx_victim_cache) {
+						tx_cache->queues.operate(); //FIXME: Not sure about this line
+						tx_cache->operate();
 					}
 #endif
 
@@ -1160,19 +1231,19 @@ void CACHE::initialize()
 {
   impl_prefetcher_initialize();
   impl_initialize_replacement();
-#if defined VICTIM_CACHE
-	if (enable_victim_cache || enable_translation_cache) {
-		victim_cache->initialize();
+#if defined TRANSLATION_EXCLUSIVE_CACHE
+	if (enable_tx_cache || enable_tx_victim_cache) {
+		tx_cache->initialize();
 	}
 #endif
 }
 
 void CACHE::begin_phase()
 {
-#if defined VICTIM_CACHE
-	if (enable_victim_cache || enable_translation_cache) {
-		victim_cache->queues.begin_phase();
-		victim_cache->begin_phase();
+#if defined TRANSLATION_EXCLUSIVE_CACHE
+	if (enable_tx_cache || enable_tx_victim_cache) {
+		tx_cache->queues.begin_phase();
+		tx_cache->begin_phase();
 	}
 #endif 
   roi_stats.emplace_back();
@@ -1185,10 +1256,10 @@ void CACHE::begin_phase()
 void CACHE::end_phase(unsigned finished_cpu)
 {
 
-#if defined VICTIM_CACHE
-	if (enable_victim_cache || enable_translation_cache) {
-		victim_cache->queues.end_phase(finished_cpu);
-		victim_cache->end_phase(finished_cpu);
+#if defined TRANSLATION_EXCLUSIVE_CACHE
+	if (enable_tx_cache || enable_tx_victim_cache) {
+		tx_cache->queues.end_phase(finished_cpu);
+		tx_cache->end_phase(finished_cpu);
 	}
 #endif 
 

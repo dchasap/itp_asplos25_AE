@@ -32,7 +32,7 @@
 #include "memory_class.h"
 #include "operable.h"
 
-#if defined FORCE_HIT || defined MULTIPLE_PAGE_SIZE || defined VICTIM_CACHE
+#if defined FORCE_HIT || defined MULTIPLE_PAGE_SIZE || defined TRANSLATION_EXCLUSIVE_CACHE
 #include "vmem.h"
 #endif
 
@@ -133,7 +133,7 @@ class CACHE : public champsim::operable, public MemoryRequestConsumer, public Me
 
     uint32_t pf_metadata = 0;
 
-#if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT || defined VICTIM_CACHE
+#if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT || defined TRANSLATION_EXCLUSIVE_CACHE
 		bool is_instr = false;
 		bool is_pte = false;
 #endif
@@ -147,7 +147,7 @@ class CACHE : public champsim::operable, public MemoryRequestConsumer, public Me
 		uint64_t page_crossing = 0; 
 #endif
 
-#if defined VICTIM_CACHE
+#if defined TRANSLATION_EXCLUSIVE_CACHE
 		bool is_doa = true;
 #endif 
 
@@ -270,14 +270,116 @@ public:
   std::deque<PACKET> MSHR;
   std::deque<PACKET> inflight_writes;
 
-#if defined VICTIM_CACHE
-	//NonTranslatingQueues *victim_cache_queues; 
-	CACHE *victim_cache;
-	bool enable_victim_cache = false;
-  bool enable_translation_cache = false;
+#if defined TRANSLATION_EXCLUSIVE_CACHE
+	CACHE *tx_cache;
+	bool enable_tx_victim_cache = false;
+  bool enable_tx_cache = false;
 	bool enable_instr_only = false;
   bool enable_doa_filtering = false;
   std::vector<uint64_t> last_pte_entry;  // one entry per set
+  //std::map<uint64_t, BLOCK> tx_victim_cache;
+
+  class VICTIM_CACHE 
+  {
+    private:
+      uint64_t num_set, num_way, offset_bits;
+      std::vector<BLOCK>  blocks;
+      std::vector<uint64_t> freq_ctr;
+
+
+      uint32_t get_set(uint64_t address) 
+      {
+        return (address >> offset_bits) & champsim::bitmask(champsim::lg2(num_set));
+      }
+    
+      void update_replacement_state(uint32_t set_idx, uint32_t way_idx, bool hit)
+      {
+        // Mark the way as being used on the current cycle
+        //if (hit && type == WRITE) { // Skip this for writeback hits
+		    //  return;
+        //} No writes for PTEs
+       
+        if (hit) freq_ctr.at(set_idx * num_way + way_idx) ++;
+        else freq_ctr.at(set_idx * num_way + way_idx) = 0;
+      }
+
+      uint32_t find_victim(uint32_t set_idx)
+      {
+        auto begin = std::next(std::begin(freq_ctr), set_idx * num_way);
+        auto end = std::next(begin, num_way);
+
+        // Find the way whose last use frequency cntr has the lowest value
+        auto victim = std::min_element(begin, end);
+        assert(begin <= victim);
+        assert(victim < end);
+        uint32_t victim_idx = static_cast<uint32_t>(std::distance(begin, victim)); // cast protected by prior asserts
+	      //std::cout << "victim:" << victim_idx << std::endl;
+	      return victim_idx;
+      }
+
+
+    public:
+      VICTIM_CACHE(uint64_t _num_set, uint64_t _num_way, uint64_t _offset_bits)
+        : num_set(_num_set), num_way(_num_way), offset_bits(_offset_bits), blocks(_num_set * _num_way) 
+      {
+        //blocks.resize(num_set * num_way);
+        //std::cout << NAME << " LFU " << " SETS: " << NUM_SET << " WAYS: " << NUM_WAY << " SIZE: " << NUM_SET * NUM_WAY * 64 / 1024 << "KB" << std::endl;
+        freq_ctr.resize(num_set * num_way); 
+      }
+
+      void add_request(PACKET& request) 
+      {
+        uint64_t set_idx = get_set(request.address);
+        auto set_begin = std::next(blocks.begin(), set_idx * num_way);
+        auto set_end = std::next(set_begin, num_way);
+        auto way = std::find_if(set_begin, set_end, [](const BLOCK& block) { return !block.valid; });
+
+        if (way != set_end) {
+          way->valid = true;
+        } else {
+          uint32_t way_idx = find_victim(set_idx);
+          way = std::next(blocks.begin(), (set_idx * num_way) + way_idx);
+          update_replacement_state(set_idx, way_idx, false);  
+        }
+
+        way->prefetch = request.prefetch_from_this;
+        way->dirty = (request.type == WRITE);
+        way->address = request.address;
+        way->v_address = request.v_address;
+        way->data = request.data;
+
+#if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT || defined TRANSLATION_EXCLUSIVE_CACHE
+				way->is_instr = request.is_instr;
+				way->is_pte = request.is_pte;
+#endif
+
+#if defined MULTIPLE_PAGE_SIZE
+				way->page_size = request.page_size;
+				way->base_vpn = request.base_vpn;
+#endif
+        
+      }
+
+      std::pair<BLOCK, bool> lookup(uint64_t address) 
+      {
+        uint32_t set_idx = get_set(address);
+        auto set_begin = std::next(blocks.begin(), set_idx * num_way);
+        auto set_end = std::next(set_begin, num_way);
+        auto way = std::find_if(set_begin, set_end, eq_addr<BLOCK>(address, offset_bits));
+        uint32_t way_idx = std::distance(set_begin, way);
+				const auto hit = (way != set_end);
+       
+        if (hit) {
+          update_replacement_state(set_idx, way_idx, hit);
+          return {blocks.at((set_idx * num_way) + way_idx), hit};
+        } else {
+          return {blocks.at(0), hit};
+        }
+      }
+
+  };
+
+  VICTIM_CACHE* tx_victim_cache;
 #endif
 
   // functions
@@ -362,85 +464,79 @@ public:
 		}
 #endif 
 
-#if defined VICTIM_CACHE
+#if defined TRANSLATION_EXCLUSIVE_CACHE
 
 		if (NAME.find("L1D") != std::string::npos 
-				&& NAME.find("_VC") == std::string::npos) {
+				&& NAME.find("_TXC") == std::string::npos) {
 
-      char* victim_cache_flag = getenv("ENABLE_VICTIM_CACHE");
+      char* victim_cache_flag = getenv("ENABLE_TXVC");
 			if (strcmp(victim_cache_flag, "true") == 0) {
-				enable_victim_cache = true;
+				enable_tx_victim_cache = true;
 			}
 
-      char*  translation_cache_flag = getenv("ENABLE_TRANSLATION_CACHE");
-			if (strcmp(translation_cache_flag, "true") == 0) {
-				enable_translation_cache = true;
+      char*  TRANSLATION_EXCLUSIVE_CACHE_flag = getenv("ENABLE_TXC");
+			if (strcmp(TRANSLATION_EXCLUSIVE_CACHE_flag, "true") == 0) {
+				enable_tx_cache = true;
 			}
 
-      //assert(!enable_victim_cache || !enable_translation_cache);
-      //assert((enable_victim_cache != enable_translation_cache) || (!enable_victim_cache && !enable_translation_cache));
-      //assert((enable_translation_cache && !enable_doa_filtering) || !enable_translation_cache); // This does not work at the moment so check before proceeding
+      //assert(!enable_TRANSLATION_EXCLUSIVE_CACHE || !enable_TRANSLATION_EXCLUSIVE_CACHE);
+      //assert((enable_TRANSLATION_EXCLUSIVE_CACHE != enable_TRANSLATION_EXCLUSIVE_CACHE) || (!enable_TRANSLATION_EXCLUSIVE_CACHE && !enable_TRANSLATION_EXCLUSIVE_CACHE));
+      //assert((enable_TRANSLATION_EXCLUSIVE_CACHE && !enable_doa_filtering) || !enable_TRANSLATION_EXCLUSIVE_CACHE); // This does not work at the moment so check before proceeding
 
-			if (enable_victim_cache || enable_translation_cache) {
+			if (enable_tx_victim_cache || enable_tx_cache) {
 
-			
 				//FIXME: Not sure we should use braces for constructor - but maybe we need to (???)
 				// Create and connect a new victim cache between L1D and L2C
 				uint32_t num_set = 64;
 				uint32_t num_way = 8;
 				uint32_t mshr_size = 8; //64;
-				NonTranslatingQueues* victim_cache_queues = new NonTranslatingQueues(1.0, num_set, num_way, mshr_size, 5, 4, champsim::lg2(64), 0);
-				// Only first level caches should enable match_offset_bits
-/*
-				victim_cache = new CACHE(NAME+"_VC", 1.0, 64, 12, 16, 1, 2, 2, champsim::lg2(64), 0, 0, 0, 
-																	(1 << LOAD) | (1 << PREFETCH), *l1dv_queues, ll, 
-																	pref_type, repl_type, 0, 0, vmem);
-*/
-				uint32_t vc_num_set = 64;
-				uint32_t vc_num_way = 8;
-				uint32_t vc_latency = 1;
-				uint32_t vc_mshr_size = 8; //64;
+				NonTranslatingQueues* tx_cache_queues = new NonTranslatingQueues(1.0, num_set, num_way, mshr_size, 5, 4, champsim::lg2(64), 0);
 
-				if (getenv("VC_LATENCY")) {
-					vc_latency = std::stoull(getenv("VC_LATENCY"));
+				uint32_t txc_num_set = 64;
+				uint32_t txc_num_way = 8;
+				uint32_t txc_latency = 1;
+				uint32_t txc_mshr_size = 8; //64;
+
+				if (getenv("TXC_LATENCY")) {
+					txc_latency = std::stoull(getenv("TXC_LATENCY"));
 				} else {
-					std::cerr << "VC_LATENCY not set!" << std::endl;
+					std::cerr << "TXC_LATENCY not set!" << std::endl;
 					exit(0);
 				}
 
-				if (getenv("VC_NUM_SET")) {
-					vc_num_set = std::stoull(getenv("VC_NUM_SET"));
+				if (getenv("TXC_NUM_SET")) {
+					txc_num_set = std::stoull(getenv("TXC_NUM_SET"));
 				} else {
-					std::cerr << "VC_NUM_SET not set!" << std::endl;
+					std::cerr << "TXC_NUM_SET not set!" << std::endl;
 					exit(0);
 				}
 
-				if (getenv("VC_NUM_WAY")) {
-					vc_num_way = std::stoull(getenv("VC_NUM_WAY"));
+				if (getenv("TXC_NUM_WAY")) {
+					txc_num_way = std::stoull(getenv("TXC_NUM_WAY"));
 				} else {
-					std::cerr << "VC_NUM_WAY not set!" << std::endl;
+					std::cerr << "TXC_NUM_WAY not set!" << std::endl;
 					exit(0);
 				}
 
-				if (getenv("VC_INSTR_ONLY")) {
-					char* instr_only_flag = getenv("VC_INSTR_ONLY");
+				if (getenv("TXC_INSTR_ONLY")) {
+					char* instr_only_flag = getenv("TXC_INSTR_ONLY");
 					if (strcmp(instr_only_flag, "true") == 0) {
 						enable_instr_only = true;
 					}
 				}
 
-				if (getenv("VC_DOA_FILTERING")) {
-					char* doa_filtering_flag = getenv("VC_DOA_FILTERING");
+				if (getenv("TXC_DOA_FILTERING")) {
+					char* doa_filtering_flag = getenv("TXC_DOA_FILTERING");
 					if (strcmp(doa_filtering_flag, "true") == 0) {
 						enable_doa_filtering = true;
-            last_pte_entry.reserve(vc_num_set);
+            last_pte_entry.reserve(NUM_SET);
 					}
 				}
 
-				std::cout << NAME << ": Using PTE " << (enable_victim_cache?"victim":"translation")  << " cache." << std::endl;
-				std::cout << "\t\tLATENCY: " << vc_latency << std::endl;
-				std::cout << "\t\tSETS: " << vc_num_set << std::endl;
-				std::cout << "\t\tWAYS: " << vc_num_way << std::endl;
+				std::cout << NAME << ": Using PTE " << (enable_tx_victim_cache?"victim":"exclusive")  << " cache." << std::endl;
+				std::cout << "\t\tLATENCY: " << txc_latency << std::endl;
+				std::cout << "\t\tSETS: " << txc_num_set << std::endl;
+				std::cout << "\t\tWAYS: " << txc_num_way << std::endl;
 				if (enable_instr_only) 
 					std::cout << "\t\tAllowing only instuction PTEs." << std::endl;
 				else 
@@ -448,9 +544,12 @@ public:
         
         std::cout << "\t\tDOA filtering: " << (enable_doa_filtering?"enabled":"disabled") << std::endl;
 
-				victim_cache = new CACHE(NAME+"_VC", 1.0, vc_num_set, vc_num_way, vc_mshr_size, vc_latency, 2, 2, champsim::lg2(64), 0, 0, 0, 
-																	(1 << LOAD) | (1 << PREFETCH), *victim_cache_queues, ll, 
-																	CACHE::pprefetcherDno, CACHE::rreplacementDlfu, 0, 0, vmem);
+				tx_cache = new CACHE( NAME+"_TXC", 1.0, txc_num_set, txc_num_way, txc_mshr_size, txc_latency, 2, 2, champsim::lg2(64), 0, 0, 0, 
+															(1 << LOAD) | (1 << PREFETCH), *tx_cache_queues, ll, 
+															CACHE::pprefetcherDno, CACHE::rreplacementDlfu, 0, 0, vmem);
+
+        tx_victim_cache = new VICTIM_CACHE(txc_num_set, txc_num_way, champsim::lg2(64));
+        
 			}
 		}
 #endif

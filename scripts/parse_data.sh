@@ -71,9 +71,9 @@ for BENCHSUITE in ${BENCHSUITES}; do
 			files=''
 			for bench in $BENCHMARKS; do
 				elems=$(wc -l ${ROOT_DIR}/stats/${bench}${TAG}.csv | cut -d ' ' -f 1)
-				if [ "$elems" != "43" ]; then
-					echo ${ROOT_DIR}/stats/${bench}${TAG}.csv
-				fi 
+				#if [ "$elems" != "43" ]; then
+				#	echo ${ROOT_DIR}/stats/${bench}${TAG}.csv
+				#fi 
 				
 				files="${files} ${ROOT_DIR}/stats/${bench}${TAG}.csv"
 			done

@@ -51,7 +51,7 @@ void champsim::plain_printer::print(O3_CPU::stats_type stats)
     stream << str << ": " << mpkis[idx] << std::endl;
   stream << std::endl;
 
-#if defined(MULTIPLE_PAGE_SIZE)
+#if defined MULTIPLE_PAGE_SIZE
 	stream << "Instructions large pages: " << stats.total_instr_large_pages << std::endl;
 	stream << "Instructions small pages: " << stats.total_instr_small_pages << std::endl;
 	stream << "Large page distribution for instructions: " << ((100.0 * stats.total_instr_large_pages) / (stats.total_instr_large_pages + stats.total_instr_small_pages)) << "%" << std::endl;

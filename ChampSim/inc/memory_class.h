@@ -77,7 +77,7 @@ public:
 		uint64_t page_crossing = 0; 
 #endif
 
-#if defined VICTIM_CACHE
+#if defined TRANSLATION_EXCLUSIVE_CACHE
 	bool is_doa = true;
 #endif
 /*
@@ -122,7 +122,7 @@ PACKET(const PACKET& x)
 #if defined ENABLE_PAGE_CROSSING_STATS
   page_crossing = x.page_crossing;
 #endif
-#if defined VICTIM_CACHE
+#if defined TRANSLATION_EXCLUSIVE_CACHE
   is_doa = x.is_doa;
 #endif
   std::cout << "PACKET copy constructor finished!" << std::endl;

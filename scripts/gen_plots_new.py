@@ -171,14 +171,21 @@ def gen_plot(figure_name, benchsuite, data_files, file_type):
 					]
 		
 		tags = [
-							"8",
-							"16",
-							"32",
-							"64" ,
-							"128",
-							"256",
-							 "512"
-						]    
+							"4KB",
+							"8KB",
+							"16KB",
+							"32KB",
+							"64KB",
+							"128KB",
+							 "256KB",
+							 "512KB",
+							 "20MB"
+						]   
+
+		_tags = [ 	"TXVC-PERFECT",
+							"TXVC-HUGE",
+							 "TXVC-HUGE-DOA"
+						] 
 
 		cache_type = "cpu0_STLB"
 		op_type = "TOTAL"
@@ -191,12 +198,15 @@ def gen_plot(figure_name, benchsuite, data_files, file_type):
 		#means_df = stats.compute_mean(data_df, tags, 'IPC_IMPROVEMENT', 'mean')
 
 
-		print(data_df['benchmarks'].str.split('.').str[0])
+		#print(data_df['benchmarks'].str.split('.').str[0])
 		data_df['benchmarks'] = data_df['benchmarks'].str.split('.').str[0]
 	
 		plotting.plot_conf['plot_type'] = 'box'
 		plotting.plot_conf['xlabel'] = xlabels[benchsuite]
 		plotting.plot_conf['ylabel'] = "IPC Improvement (%)"
+		plotting.plot_conf['ymax'] = 25
+		plotting.plot_conf['ymin'] = 0
+		plotting.plot_conf['ystep'] = 2.5
 		plotting.plot_conf['plot_width'] = 9
 		plotting.plot_conf['plot_height'] = 3
 		plotting.plot_conf['rotation'] = 20
@@ -206,8 +216,8 @@ def gen_plot(figure_name, benchsuite, data_files, file_type):
 		plotting.plot_conf['legend_xoffset'] = 1.2
 		#plotting.plot_cols[']
 	
-		output_file = FIGURES_DIR + "/fig_vc_cache_eval2_" + benchsuite + "." + file_type
-		print(FIGURES_DIR + "/fig_vc_cache_eval2_" + benchsuite + "." + file_type)
+		output_file = FIGURES_DIR + "/fig_txvc_size_cache_size_eval_" + benchsuite + "." + file_type
+		print(output_file)
 		plotting.plot_stat(data_df, tags, 'IPC_IMPROVEMENT', output_file)
 	
 
@@ -336,7 +346,7 @@ def gen_plot(figure_name, benchsuite, data_files, file_type):
 																					cache_types, op_type, stat_names, 
 																					output_file)
 	
-	if (figure_name == "plot_ipc"): 
+	if (figure_name == "_plot_ipc"): 
 
 		input_baseline_files =	[ "./stats/" + benchsuite  + "_fdip_baseline_llc-s.1537-w.16.csv" ]
 		input_baseline_files =	[ "./stats/" + benchsuite  + "_fdip_xcache-vc.false-tc.false-i.false-doa.false-l.0-s.64-w.8-r.lfu_llc-s.1537-w.16.csv" ]

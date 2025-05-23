@@ -13,7 +13,15 @@ mkdir -p ${DUMP_DIR}
 
 TRACES_batch=(${TRACES})
 
-DEBUG='gdb -batch -ex "run" -ex "bt" --args'
+if [ "${DEBUG_RUN}" == "True" ]; then
+	echo "Running Debug mode"
+	DEBUG='gdb -batch -ex "run" -ex "bt" --args'
+	JOB_QUEUE=gp_debug
+else 
+	DEBUG='gdb -batch -ex "run" -ex "bt" --args'
+	JOB_QUEUE=gp_bsccs
+fi
+
 
 for (( ti=0; ti < ${#TRACES_batch[@]}; ti++ )) ; do
 
@@ -22,8 +30,7 @@ echo "#!/bin/bash
 #SBATCH -o ${DUMP_DIR}/${BENCHSUITE}_${ti}${DESCR_TAG}_run.out 
 #SBATCH -J chmpS_${BENCHSUITE}_${ti}${DESCR_TAG}_run
 #SBATCH -A bsc18
-#SBATCH --qos=gp_bsccs
-##SBATCH --qos=gp_debug
+#SBATCH --qos=${JOB_QUEUE}
 #SBATCH --time=${SIM_TIME}
 
 traces=(${TRACES})

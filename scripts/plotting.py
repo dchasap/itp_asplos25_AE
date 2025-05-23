@@ -6,6 +6,7 @@ import matplotlib.lines as mlines
 from matplotlib.patches import PathPatch
 from matplotlib.patches import Path
 from matplotlib.colors import ListedColormap
+from matplotlib.ticker import MultipleLocator
 import seaborn as sns
 
 #default plot parameters, user can overwrite them
@@ -14,7 +15,13 @@ plot_conf = {
                 'plot_width': 9,
                 'plot_height': 3,
 								'ylabel': None, 
-								'xlabel': None, 
+								'xlabel': None,
+								'xmin': None,
+								'xmax': None,
+								'xstep': None,
+								'ymin': None,
+								'ymax': None,
+								'ystep': None,
 								'show_xticks': True,
                 'rotation': 0,
                 'switch_yaxis': False, 
@@ -84,6 +91,20 @@ def plot(data, x, y, hue, axes):
 	fontsize=plot_conf['fontsize']
 	ax.set_ylabel(plot_conf['ylabel'], fontsize=fontsize)
 	ax.set_xlabel(plot_conf['xlabel'], fontsize=fontsize)
+
+	if (plot_conf['ymin'] != None):	
+		ax.set_ylim(bottom=plot_conf['ymin'])
+	if (plot_conf['ymax'] != None):
+		ax.set_ylim(top=plot_conf['ymax'])
+	if (plot_conf['xstep'] != None):
+		ax.xaxis.set_major_locator(MultipleLocator(plot_conf['xstep']))
+	if (plot_conf['xmin'] != None):
+		ax.set_xlim(left=plot_conf['xmin'])
+	if (plot_conf['xmax'] != None):
+		ax.set_xlim(right=plot_conf['xmax'])
+	if (plot_conf['ystep'] != None):
+		ax.yaxis.set_major_locator(MultipleLocator(plot_conf['ystep']))
+
 
 	if plot_conf['switch_yaxis']:
 		ax.yaxis.set_label_position("right")
