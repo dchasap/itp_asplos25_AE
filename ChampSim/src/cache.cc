@@ -93,8 +93,8 @@
 #endif	
 
 #if defined MULTIPLE_PAGE_SIZE
-							writeback_packet.page_size = writeback_packet.page_size;
-							writeback_packet.base_vpn = writeback_packet.base_vpn;
+							writeback_packet.page_size = way->page_size;
+							writeback_packet.base_vpn = way->base_vpn;
 #endif
 
 //FIXME: Should we skip writebacks for victim cache (??) - ptes are never written/dirty
@@ -599,7 +599,7 @@
 							impl_update_replacement_state(handle_pkt.cpu, get_set_index(handle_pkt.address), way_idx, way->address, handle_pkt.ip, 0, handle_pkt.type, true);
 				*/
 						if (NAME.find("L1D") != std::string::npos) {
-							auto copy_pkt{handle_pkt};
+							PACKET txc_copy_pkt{handle_pkt};
 							bool entry_found = false;
 							if (enable_tx_victim_cache && (handle_pkt.is_pte)) {
 								//std::cout << "looking address: " << way->address << std::endl; 
@@ -621,34 +621,34 @@
 							}
 
 							if (entry_found) { 
-/*
-							sim_stats.back().hits[handle_pkt.type][handle_pkt.cpu]++;
+
+								sim_stats.back().hits[handle_pkt.type][handle_pkt.cpu]++;
 
 	#if defined ENABLE_EXTRA_CACHE_STATS
-							if (handle_pkt.is_instr && !handle_pkt.is_pte) {
-								sim_stats.back().ihits[handle_pkt.type][handle_pkt.cpu]++;
-							} else if (!handle_pkt.is_instr && !handle_pkt.is_pte) {
-								sim_stats.back().dhits[handle_pkt.type][handle_pkt.cpu]++;
-							} else if (handle_pkt.is_instr && handle_pkt.is_pte) {
-								sim_stats.back().ithits[handle_pkt.cpu][handle_pkt.type]++;
-							} else if (!handle_pkt.is_instr && handle_pkt.is_pte) {
-								sim_stats.back().dthits[handle_pkt.cpu][handle_pkt.type]++;
-							} else {
-								std::cout << "Oups, something went wrong..." << std::endl;
-								std::cout << "\ttype:" << (uint32_t)handle_pkt.type << std::endl;
-								std::cout << "\tis_instr:" << (handle_pkt.is_instr?"true":"false") << std::endl;
-								assert(false);
-							}
+								if (handle_pkt.is_instr && !handle_pkt.is_pte) {
+									sim_stats.back().ihits[handle_pkt.type][handle_pkt.cpu]++;
+								} else if (!handle_pkt.is_instr && !handle_pkt.is_pte) {
+									sim_stats.back().dhits[handle_pkt.type][handle_pkt.cpu]++;
+								} else if (handle_pkt.is_instr && handle_pkt.is_pte) {
+									sim_stats.back().ithits[handle_pkt.cpu][handle_pkt.type]++;
+								} else if (!handle_pkt.is_instr && handle_pkt.is_pte) {
+									sim_stats.back().dthits[handle_pkt.cpu][handle_pkt.type]++;
+								} else {
+									std::cout << "Oups, something went wrong..." << std::endl;
+									std::cout << "\ttype:" << (uint32_t)handle_pkt.type << std::endl;
+									std::cout << "\tis_instr:" << (handle_pkt.is_instr?"true":"false") << std::endl;
+									assert(false);
+								}
 						
-							pageAddressStatsMon->add_access(handle_pkt.address, handle_pkt.is_instr);
-							reuseDistMon->add_access(handle_pkt.address);
+								pageAddressStatsMon->add_access(handle_pkt.address, handle_pkt.is_instr);
+								reuseDistMon->add_access(handle_pkt.address);
 
-							hit_hook();
+								hit_hook();
 	#endif
-*/					
-								copy_pkt.pf_metadata = metadata_thru;
-								for (auto ret : copy_pkt.to_return)
-									ret->return_data(copy_pkt);
+					
+								txc_copy_pkt.pf_metadata = metadata_thru;
+								for (auto ret : txc_copy_pkt.to_return)
+									ret->return_data(txc_copy_pkt);
 								
 								return true; //forcing hit
 							}

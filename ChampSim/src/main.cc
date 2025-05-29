@@ -185,7 +185,7 @@ int main(int argc, char** argv)
   std::cout << "Warmup Instructions: " << phases[0].length << std::endl;
   std::cout << "Simulation Instructions: " << phases[1].length << std::endl;
   std::cout << "Number of CPUs: " << std::size(ooo_cpu) << std::endl;
-#if defined(MULTIPLE_PAGE_SIZE)
+#if defined MULTIPLE_PAGE_SIZE
   std::cout << "Small page size: " << PAGE_SIZE << std::endl;
   std::cout << "Large page size: " << LARGE_PAGE_SIZE << std::endl;
 #else
@@ -208,10 +208,11 @@ int main(int argc, char** argv)
 	for (O3_CPU& cpu : ooo_cpu)
 		cpu.finalize();
 
-#if defined VICTIM_CACHE
+#if defined TRANSLATION_EXCLUSIVE_CACHE
 	for (CACHE& cache: caches) {
-		if (cache.enable_victim_cache) {
-			caches.push_back(*cache.victim_cache);
+    std::cout << cache.NAME << std::endl;
+		if (cache.enable_tx_victim_cache) {
+			caches.push_back(*cache.tx_cache);
 		}
 	}
 #endif
@@ -226,10 +227,16 @@ int main(int argc, char** argv)
 
 #if defined ENABLE_EXTRA_CACHE_STATS
   for (CACHE& cache : caches) {
+    std::cout << cache.NAME << std::endl;
     cache.pageAddressStatsMon->dump();
     cache.reuseDistMon->dump();
+  #if defined TRANSLATION_EXCLUSIVE_CACHE
+    if (cache.enable_tx_victim_cache)
+      cache.tx_victim_cache->print_stats();
+
 		delete cache.reuseDistMon;
 	}
+  #endif
 #endif
 
   for (CACHE& cache : caches)

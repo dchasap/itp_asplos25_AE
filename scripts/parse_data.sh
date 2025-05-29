@@ -110,16 +110,16 @@ for BENCHSUITE in ${BENCHSUITES}; do
 			echo "Processing reuse distance stats..."
 			files=''
 			for bench in ${BENCHMARKS}; do 
-				files="${files} ${ROOT_DIR}/dump/${bench}${TAG}_${REUSE_DIST_FILENAME_PREFIX}_cpu0_L1D_VC.csv"
+				files="${files} ${ROOT_DIR}/dump/${bench}${TAG}_${REUSE_DIST_FILENAME_PREFIX}_TXVC.csv"
 			done
 
 			python3 ${ROOT_DIR}/scripts/average_data.py 	--input-files ${files} \
 																										--benchmarks ${BENCHMARKS} \
-																										--output-file=${ROOT_DIR}/stats/${BENCHSUITE}${TAG}_${REUSE_DIST_FILENAME_PREFIX}_L1D_VC.csv
+																										--output-file=${ROOT_DIR}/stats/${BENCHSUITE}${TAG}_${REUSE_DIST_FILENAME_PREFIX}_TXVC.csv
 
 			python3 ${ROOT_DIR}/scripts/merge_champsim_data.py	--input-files ${files} \
 																													--benchmarks ${BENCHMARKS} \
-																													--output-file=${ROOT_DIR}/stats/${BENCHSUITE}${TAG}_${REUSE_DIST_FILENAME_PREFIX}_MERGED_L1D_VC.csv
+																													--output-file=${ROOT_DIR}/stats/${BENCHSUITE}${TAG}_${REUSE_DIST_FILENAME_PREFIX}_MERGED_TXVC.csv
 		fi
 
 	done

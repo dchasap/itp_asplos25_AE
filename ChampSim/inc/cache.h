@@ -45,6 +45,10 @@
 #include <cmath>
 #endif
 
+#if defined TRANSLATION_EXCLUSIVE_CACHE
+#include "doa_predictor.h"
+#endif 
+
 #if defined TRACK_BRANCH_HISTORY 
 extern uint64_t global_path_history_MHRP;
 extern uint64_t global_path_history;
@@ -286,6 +290,11 @@ public:
       std::vector<BLOCK>  blocks;
       std::vector<uint64_t> freq_ctr;
 
+#if defined ENABLE_EXTRA_CACHE_STATS
+      ReuseDistanceMonitor* reuseDistMon;
+#endif
+
+      DOAPredictor* dpPred;
 
       uint32_t get_set(uint64_t address) 
       {
@@ -324,7 +333,29 @@ public:
       {
         //blocks.resize(num_set * num_way);
         //std::cout << NAME << " LFU " << " SETS: " << NUM_SET << " WAYS: " << NUM_WAY << " SIZE: " << NUM_SET * NUM_WAY * 64 / 1024 << "KB" << std::endl;
+
+#if defined ENABLE_EXTRA_CACHE_STATS
+        
+        std::string reuse_dist_filename_prefix = getenv("REUSE_DIST_FILENAME_PREFIX");
+	    
+        reuseDistMon = new ReuseDistanceMonitor(num_set, num_way, offset_bits,
+																						reuse_dist_filename_prefix + "_" + "TXVC" + ".csv",
+																						true, true);
+#endif
         freq_ctr.resize(num_set * num_way); 
+
+        // TODO: parametrize
+        dpPred = new DOAPredictor(num_set, num_way, 16, 8); // 3 is max counter value, 2 is threshold
+      }
+
+      ~VICTIM_CACHE() 
+      {
+
+#if defined ENABLE_EXTRA_CACHE_STATS
+        delete reuseDistMon;
+#endif
+        
+        delete dpPred;
       }
 
       void add_request(PACKET& request) 
@@ -357,8 +388,13 @@ public:
 				way->page_size = request.page_size;
 				way->base_vpn = request.base_vpn;
 #endif
-        
+
+//#if defined ENABLE_EXTRA_CACHE_STATS
+//        reuseDistMon->add_access(request.address);
+//#endif
+
       }
+
 
       std::pair<BLOCK, bool> lookup(uint64_t address) 
       {
@@ -368,13 +404,26 @@ public:
         auto way = std::find_if(set_begin, set_end, eq_addr<BLOCK>(address, offset_bits));
         uint32_t way_idx = std::distance(set_begin, way);
 				const auto hit = (way != set_end);
-       
+
+#if defined ENABLE_EXTRA_CACHE_STATS
+        reuseDistMon->add_access(address);
+#endif
+        
         if (hit) {
           update_replacement_state(set_idx, way_idx, hit);
           return {blocks.at((set_idx * num_way) + way_idx), hit};
         } else {
           return {blocks.at(0), hit};
         }
+      }
+
+
+      void print_stats(void) 
+      {
+#if defined ENABLE_EXTRA_CACHE_STATS
+        reuseDistMon->dump();
+        delete reuseDistMon;
+#endif
       }
 
   };
@@ -573,7 +622,7 @@ public:
 			enable_reuseDistMon = false;
 		} else if (NAME.find("L1D") != std::string::npos) {
 			enable_reuseDistMon = true;
-			if (NAME.find("VC") != std::string::npos) {
+			if (NAME.find("TXC") != std::string::npos) {
 				std::cout << NAME << " enabled reuse distance monitor." << std::endl;
 				enable_reuseDistMon = true;
 			}
