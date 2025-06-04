@@ -73,7 +73,8 @@ uint64_t predTable::get_table_index(int type, uint64_t trace, int t)
 	uint64_t x1 ;
 	x1 = fi(trace , t);
 	uint64_t x2 = x1 & ((1 << predictor_index_bits)-1);
-	x2 = ( x2 & (1 << predictor_index_bits)-1);
+	//x2 = ( x2 & (1 << predictor_index_bits)-1);
+	x2 = x2 & ((1 << predictor_index_bits)-1);
 	return x2;
 }
 

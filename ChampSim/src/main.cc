@@ -155,7 +155,7 @@ int main(int argc, char** argv)
     }
   }
 
-#if defined(_MULTIPLE_PAGE_SIZE)
+#if defined _MULTIPLE_PAGE_SIZE
   std::vector<std::string> _trace_names{std::next(argv, optind), std::next(argv, argc)};
 	std::vector<std::string> trace_names, trace_ext_names;
 	// need to get the extensions out of the list and into traces_ext_names
@@ -195,7 +195,7 @@ int main(int argc, char** argv)
 
   init_structures();
 
-#if defined(_MULTIPLE_PAGE_SIZE) 
+#if defined _MULTIPLE_PAGE_SIZE 
   champsim_main(ooo_cpu, operables, phases, knob_cloudsuite, trace_names, trace_ext_names);
 #else
   champsim_main(ooo_cpu, operables, phases, knob_cloudsuite, trace_names);

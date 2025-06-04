@@ -132,7 +132,7 @@
 							//FIXME: This is probably the ONLY point we should move something to the victim cache
 							if (enable_tx_victim_cache) {
 
-								assert(NAME.find("_TXC") == std::string::npos);
+								//assert(NAME.find("_TXC") == std::string::npos);
 
 								PACKET victim_packet;
 								victim_packet.cpu = fill_mshr.cpu;
@@ -165,12 +165,15 @@
 #else 
 									uint64_t set_idx = get_set_index(victim_packet.address);
 #endif
+
 									//set_idx = 0;
 									if (victim_packet.is_pte && last_pte_entry[set_idx] == victim_packet.address) {
-										vc_entry_cond = vc_entry_cond; // force doa
-									} else {
-										vc_entry_cond = vc_entry_cond && !way->is_doa;
+										//vc_entry_cond = vc_entry_cond; // force doa
+										way->is_doa = false;
 									}
+					
+									bool is_dead = tx_victim_cache->predictDOA(victim_packet.address, way->is_doa);
+									vc_entry_cond = vc_entry_cond && !is_dead;
 									way->is_doa = true; // reset the flag
 								}
 
@@ -180,7 +183,7 @@
 									//std::cout << "adding address: " << way->address << std::endl; 
 									//tx_victim_cache[way->address] = *way;
 									// get set index
-									tx_victim_cache->add_request(victim_packet);
+									tx_victim_cache->add_request(victim_packet, current_cycle);
 									//std::cout << "tx_cache size:" << tx_victim_cache.size() << std::endl;
 								}
 							}
@@ -613,7 +616,7 @@
 								}
 								*/
 								//std::cout << "lookout!" << std::endl;
-								auto [_entry, _entry_found] = tx_victim_cache->lookup(handle_pkt.address);
+								auto [_entry, _entry_found] = tx_victim_cache->lookup(handle_pkt.address, current_cycle);
 								entry_found = _entry_found;
 								//std::cout << "segfault" << std::endl;	
 								copy_pkt.data = _entry.data;

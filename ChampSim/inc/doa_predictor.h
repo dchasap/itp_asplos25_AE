@@ -33,17 +33,19 @@ class DOAPredictor {
   public:
 
     DOAPredictor(uint64_t sets, uint64_t ways, uint32_t max_counter_value, uint32_t thrhld) : num_sets(sets), num_ways(ways), 
-        max_counter(max_counter_value), prediction_thrhld(thrhld) // Set threshold to half of the max counter value 
+        max_counter(max_counter_value) // Set threshold to half of the max counter value 
     {
         // Initialize the predictor
-        std::cout << "DOA Predictor initialized." << std::endl;
+        // std::cout << "DOA Predictor initialized." << std::endl;
+				prediction_thrhld = (max_counter_value / 2) + thrhld;
         prediction_table.resize(num_sets * num_ways);
     }
 
 
-    bool predict(uint64_t address, uint32_t bias) {
+    bool predict(uint64_t address, bool seems_dead) 
+    {
         // Implement prediction logic here
-        std::cout << "Predicting for address: " << address << std::endl;
+        // std::cout << "Predicting for address: " << address << std::endl;
         uint32_t hash_index = get_hash(address);
 
         if (prediction_table[hash_index].address != address) {
@@ -53,23 +55,26 @@ class DOAPredictor {
             return false;
         }
 
+        // FIXME: This overrides the predictor with the bias of L1D 
+        if (seems_dead) return true;
+        else return false;
+
+				uint32_t bias = 0;
+				if (seems_dead) bias = max_counter / 2;
         uint32_t prediction = prediction_table[hash_index].pred_cnt + bias;
         
         if (prediction >= prediction_thrhld) {
-            std::cout << "Prediction hit for address: " << address << std::endl;
+            //std::cout << "Prediction hit for address: " << address << std::endl;
             return true; // Prediction is doa
         } else {
-            std::cout << "Prediction miss for address: " << address << std::endl;
+            //std::cout << "Prediction miss for address: " << address << std::endl;
             return false; // Prediction is not doa
         }
     }
 
 
-    void update(uint64_t address, bool is_doa) {
-        // Update the predictor based on the outcome
-        std::cout << "Updating predictor for address: " << address 
-                  << " with outcome: " << (is_doa ? "doa" : "not doa") << std::endl;
-
+    void update(uint64_t address, bool is_doa) 
+    {
         uint32_t hash_index = get_hash(address);
 
         if (prediction_table[hash_index].address != address) {
@@ -87,4 +92,4 @@ class DOAPredictor {
 
 };
 
-#endif // _DOA_PREDICTOR_H
+#endif // DOA_PREDICTOR_H

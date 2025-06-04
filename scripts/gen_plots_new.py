@@ -117,60 +117,27 @@ def gen_plot(figure_name, benchsuite, data_files, file_type):
 	
 			input_data_files.append("./stats/" + benchsuite + "_" + data_file + ".csv")	
 
-		tags = [ 	"LRU",
-							"iTP",
-							"xPTP",
-							"iTP+xPTP",
-							"L1D-VC",
-							"iTP+L1D-VC",
-							"xPTP+L1D-VC",
-							"iTP+L1D-VC+xPTP"
-					]
-	
-		tags = [ 	
-							"xPTP+L1D-VC",
-							"iTP+L1D-VC+xPTP",
-							"xPTP+L1D-VC-PERFECT",
-							"iTP+L1D-VC-PERFECT+xPTP"
-					]
-	
-		tags = [ 	
-							"iTP",
-							"xPTP",
-							"iTP+xPTP",
-							"L1D-VC-PERFECT",
-							"L1D-VC-PERFECT+xPTP",
-							"L1D-VC-256KB",
-							"L1D-VC-256KB+xPTP",
-							"L1D-VC-32KB",
-							"L1D-VC-32KB+xPTP",
-							"L1D-VC-8KB",
-							"L1D-VC-8KB+xPTP"
-					]
-	
-		tags = [ 	
-							"L1D-VC-256KB+xPTP",
-							"L1D-iVC-256KB+xPTP",
-							"L1D-VC-32KB+xPTP",
-							"L1D-iVC-32KB+xPTP",
-					]
-
 		tags = [
 							"iTP",
 							"xPTP",
 							"iTP+xPTP",
-							"L1D-TC-32KB",
-							"L1D-TC-32KB+xPTP",
-							"L1D-TC-PERFECT",
-							"L1D-TC-PERFECT+xPTP",
-							"L1D-VC",
-							"L1D-VC-DOA",
-							"L1D-VC-DOA'",
-							"L1D-TC",
-							"L1D-VC-DOA+TC"
-					]
+							"TXVC-PERFECT",
+							"TXVC-PERFECT-DOA",
+							"TXVC-4KB",
+							"iTP+TXVC-4KB",
+							"TXVC-4KB+xPTP",
+							"iTP+TXVC-4KB+xPTP",
+							"TXVC-8KB",
+							"iTP+TXVC-8KB",
+							"TXVC-8KB+xPTP",
+							"iTP+TXVC-8KB+xPTP",
+							"TXVC-32KB",
+							"iTP+TXVC-32KB",
+							"TXVC-32KB+xPTP",
+							"iTP+TXVC-32KB+xPTP"
+						]
 		
-		tags = [
+		_tags = [
 							"4KB",
 							"8KB",
 							"16KB",
@@ -182,10 +149,10 @@ def gen_plot(figure_name, benchsuite, data_files, file_type):
 							 "20MB"
 						]   
 
-		_tags = [ 	
-							"TXVC-PERFECT",
-							"TXVC-HUGE",
-							"TXVC-HUGE-DOA"
+		tags = [ 	
+							"TXVC-4KB",
+							"TXVC-4KB-DOA",
+							"TXVC-HUGE-DOA'"
 						] 
 
 		cache_type = "cpu0_STLB"
@@ -204,9 +171,9 @@ def gen_plot(figure_name, benchsuite, data_files, file_type):
 		plotting.plot_conf['plot_type'] = 'box'
 		plotting.plot_conf['xlabel'] = xlabels[benchsuite]
 		plotting.plot_conf['ylabel'] = "IPC Improvement (%)"
-		plotting.plot_conf['ymax'] = 25
-		plotting.plot_conf['ymin'] = 0
-		plotting.plot_conf['ystep'] = 2.5
+		#plotting.plot_conf['ymax'] = 25
+		#plotting.plot_conf['ymin'] = 0
+		#plotting.plot_conf['ystep'] = 2.5
 		plotting.plot_conf['plot_width'] = 9
 		plotting.plot_conf['plot_height'] = 3
 		plotting.plot_conf['rotation'] = 20
@@ -216,7 +183,7 @@ def gen_plot(figure_name, benchsuite, data_files, file_type):
 		plotting.plot_conf['legend_xoffset'] = 1.2
 		#plotting.plot_cols[']
 	
-		output_file = FIGURES_DIR + "/fig_txvc_doa_size_cache_size_eval_" + benchsuite + "." + file_type
+		output_file = FIGURES_DIR + "/fig_txvc_doa_eval_" + benchsuite + "." + file_type
 		print(output_file)
 		plotting.plot_stat(data_df, tags, 'IPC_IMPROVEMENT', output_file)
 	
@@ -459,8 +426,8 @@ def gen_plot(figure_name, benchsuite, data_files, file_type):
 		plotting.plot_conf['legend_yoffset'] = 0.5
 		plotting.plot_conf['legend_xoffset'] = 1.2
 
-		output_file = FIGURES_DIR + "/fig_txvc_recall_distance_doa_" + benchsuite + "." + file_type
-		print(FIGURES_DIR + "/fig_txvc_recall_distance_doa_" + benchsuite + "." + file_type)
+		output_file = FIGURES_DIR + "/fig_txvc_recall_distance_doa2_" + benchsuite + "." + file_type
+		print(FIGURES_DIR + "/fig_txvc_recall_distance_doa2_" + benchsuite + "." + file_type)
 		plotting.plot_reuse_distance(data_df, tags, output_file)
 
 ## end gen_plot
@@ -478,14 +445,14 @@ parser.add_argument('--file_type', dest='file_type', required=False, default="pd
 if __name__ == "__main__":
 
 	args = parser.parse_args()
-	print("main")
+	
 	FIGURES_DIR = os.environ.get('FIGURES_DIR', './figures')
 	if not os.path.exists(FIGURES_DIR):
 		os.makedirs(FIGURES_DIR)
 	
 	for benchsuite in args.benchsuites:
 		#print(args.benchsuites)
-		#print(args.data_files)
+		print(args.data_files)
 		gen_plot(args.figure_name, benchsuite, args.data_files, args.file_type)	
 
 

@@ -47,6 +47,7 @@
 
 #if defined TRANSLATION_EXCLUSIVE_CACHE
 #include "doa_predictor.h"
+#include "victim_cache.h"
 #endif 
 
 #if defined TRACK_BRANCH_HISTORY 
@@ -283,82 +284,85 @@ public:
   std::vector<uint64_t> last_pte_entry;  // one entry per set
   //std::map<uint64_t, BLOCK> tx_victim_cache;
 
+  //TODO: Cannot move to victim_cache.h because it uses BLOCK
   class VICTIM_CACHE 
   {
     private:
       uint64_t num_set, num_way, offset_bits;
       std::vector<BLOCK>  blocks;
-      std::vector<uint64_t> freq_ctr;
+      ReplacementPolicy* replacementPol;
 
 #if defined ENABLE_EXTRA_CACHE_STATS
       ReuseDistanceMonitor* reuseDistMon;
 #endif
 
-      DOAPredictor* dpPred;
+      DOAPredictor* dbPred;
 
       uint32_t get_set(uint64_t address) 
       {
         return (address >> offset_bits) & champsim::bitmask(champsim::lg2(num_set));
       }
     
-      void update_replacement_state(uint32_t set_idx, uint32_t way_idx, bool hit)
-      {
-        // Mark the way as being used on the current cycle
-        //if (hit && type == WRITE) { // Skip this for writeback hits
-		    //  return;
-        //} No writes for PTEs
-       
-        if (hit) freq_ctr.at(set_idx * num_way + way_idx) ++;
-        else freq_ctr.at(set_idx * num_way + way_idx) = 0;
-      }
-
-      uint32_t find_victim(uint32_t set_idx)
-      {
-        auto begin = std::next(std::begin(freq_ctr), set_idx * num_way);
-        auto end = std::next(begin, num_way);
-
-        // Find the way whose last use frequency cntr has the lowest value
-        auto victim = std::min_element(begin, end);
-        assert(begin <= victim);
-        assert(victim < end);
-        uint32_t victim_idx = static_cast<uint32_t>(std::distance(begin, victim)); // cast protected by prior asserts
-	      //std::cout << "victim:" << victim_idx << std::endl;
-	      return victim_idx;
-      }
-
-
     public:
       VICTIM_CACHE(uint64_t _num_set, uint64_t _num_way, uint64_t _offset_bits)
         : num_set(_num_set), num_way(_num_way), offset_bits(_offset_bits), blocks(_num_set * _num_way) 
       {
-        //blocks.resize(num_set * num_way);
-        //std::cout << NAME << " LFU " << " SETS: " << NUM_SET << " WAYS: " << NUM_WAY << " SIZE: " << NUM_SET * NUM_WAY * 64 / 1024 << "KB" << std::endl;
+        std::cout << "TXVC initialized with " << num_set << " sets and " << num_way << " ways." << std::endl;
+				if (getenv("TXVC_REP_POLICY") != nullptr) {
+					char* rep_pol_name = getenv("TXVC_REP_POLICY");
+					if (strcmp(rep_pol_name, "lru") == 0) {
+            std::cout << "\tUsing LRU replacement policy for TXVC" << std::endl;
+					  replacementPol = new LRU(num_set, num_way);
+					} else if (strcmp(rep_pol_name, "lfu") == 0) {
+            std::cout << "\tUsing LFU replacement policy for TXVC" << std::endl;
+            replacementPol = new LFU(num_set, num_way);
+          } else {
+            std::cerr << "Unknown replacement policy for TXVC: " << rep_pol_name << std::endl;
+            exit(1);
+          }
+				} else {
+          std::cerr << "TXVC_REP_POLICY not set!" << std::endl;
+          exit(1);
+        }
 
-#if defined ENABLE_EXTRA_CACHE_STATS
+        // TODO: parametrize
         
+				uint32_t dbpred_cntr_sz = 0;
+        if (getenv("TXC_DBPRED_CNTR_SZ")) {
+					dbpred_cntr_sz = std::stoull(getenv("TXC_DBPRED_CNTR_SZ"));
+				} else {
+					std::cerr << "TXC_BPRED_CNTR_SZ not set!" << std::endl;
+					exit(0);
+				}
+        
+				uint32_t dbpred_thrhld = 0;
+        if (getenv("TXC_DBPRED_THRESHOLD")) {
+					dbpred_thrhld = std::stoull(getenv("TXC_DBPRED_THRESHOLD"));
+				} else {
+					std::cerr << "TXC_DBPRED_THRESHOLD not set!" << std::endl;
+					exit(0);
+				}
+
+        dbPred = new DOAPredictor(num_set, num_way, dbpred_cntr_sz, dbpred_thrhld); // 3 is max counter value, 2 is threshold
+
+#if defined ENABLE_EXTRA_CACHE_STATS        
         std::string reuse_dist_filename_prefix = getenv("REUSE_DIST_FILENAME_PREFIX");
 	    
         reuseDistMon = new ReuseDistanceMonitor(num_set, num_way, offset_bits,
 																						reuse_dist_filename_prefix + "_" + "TXVC" + ".csv",
 																						true, true);
 #endif
-        freq_ctr.resize(num_set * num_way); 
-
-        // TODO: parametrize
-        dpPred = new DOAPredictor(num_set, num_way, 16, 8); // 3 is max counter value, 2 is threshold
       }
+
 
       ~VICTIM_CACHE() 
       {
-
-#if defined ENABLE_EXTRA_CACHE_STATS
-        delete reuseDistMon;
-#endif
-        
-        delete dpPred;
+        delete replacementPol;
+        delete dbPred;
       }
 
-      void add_request(PACKET& request) 
+
+      void add_request(PACKET& request, uint64_t curr_cycle) 
       {
         uint64_t set_idx = get_set(request.address);
         auto set_begin = std::next(blocks.begin(), set_idx * num_way);
@@ -368,10 +372,12 @@ public:
         if (way != set_end) {
           way->valid = true;
         } else {
-          uint32_t way_idx = find_victim(set_idx);
+          uint32_t way_idx = replacementPol->find_victim(set_idx);
           way = std::next(blocks.begin(), (set_idx * num_way) + way_idx);
-          update_replacement_state(set_idx, way_idx, false);  
+          replacementPol->update_replacement_state(set_idx, way_idx, curr_cycle, false);  
         }
+
+        dbPred->update(way->address, way->is_doa); // update with the victims info
 
         way->prefetch = request.prefetch_from_this;
         way->dirty = (request.type == WRITE);
@@ -389,6 +395,7 @@ public:
 				way->base_vpn = request.base_vpn;
 #endif
 
+        way->is_doa = true;
 //#if defined ENABLE_EXTRA_CACHE_STATS
 //        reuseDistMon->add_access(request.address);
 //#endif
@@ -396,7 +403,7 @@ public:
       }
 
 
-      std::pair<BLOCK, bool> lookup(uint64_t address) 
+      std::pair<BLOCK, bool> lookup(uint64_t address, uint64_t curr_cycle) 
       {
         uint32_t set_idx = get_set(address);
         auto set_begin = std::next(blocks.begin(), set_idx * num_way);
@@ -409,14 +416,26 @@ public:
         reuseDistMon->add_access(address);
 #endif
         
+        //dbPred->update(address, hit);
+
         if (hit) {
-          update_replacement_state(set_idx, way_idx, hit);
+          way->is_doa = false;
+          replacementPol->update_replacement_state(set_idx, way_idx, curr_cycle,  hit);
           return {blocks.at((set_idx * num_way) + way_idx), hit};
         } else {
           return {blocks.at(0), hit};
         }
       }
 
+      bool predictDOA(uint64_t address, bool seems_dead) 
+      {
+        //uint32_t bias = 0;
+        //if (seems_dead) {
+        //  bias = 4; 
+        //}
+
+        return dbPred->predict(address, seems_dead);
+      }
 
       void print_stats(void) 
       {

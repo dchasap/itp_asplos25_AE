@@ -27,13 +27,13 @@ def parse_champsim_stats(input_file, output_file):
         CACHE_STATS[cache] = {}
         for op in OPERATIONS:
             CACHE_STATS[cache][op] = {}
-            for line in re.findall( cache + "\s" + op + ".*", data):
+            for line in re.findall( cache + r"\s" + op + ".*", data):
                 #print(line)
                 for stat in STATS:
-                    split_line = re.split("\s" + stat, line)
+                    split_line = re.split(r"\s" + stat, line)
                     # if we did not find the the stat token, skip
                     if(len(split_line) > 1):
-                        value = re.findall("\d+", split_line[1])[0]
+                        value = re.findall(r"\d+", split_line[1])[0]
                         CACHE_STATS[cache][op][stat] = value
                         #print(cache + "-" + op + "-" + stat + ":" + value)
                     elif (len(split_line) == 1):
@@ -48,7 +48,7 @@ def parse_champsim_stats(input_file, output_file):
     AVG_MISS_LATENCIES = {}
     for cache in CACHES:
         AVG_MISS_LATENCIES[cache] = {}
-        line = re.search(cache + '\sAVERAGE MISS LATENCY:\s+\d+.\d+', data)
+        line = re.search(cache + r'\sAVERAGE MISS LATENCY:\s+\d+.\d+', data)
         if (line==None):
             miss_latency = 'N/A'
         else:
@@ -56,7 +56,7 @@ def parse_champsim_stats(input_file, output_file):
         #print(cache + ":" + miss_latency)
         AVG_MISS_LATENCIES[cache]['AVERAGE_MISS_LATENCY'] = miss_latency
     
-        line = re.search(cache + '\sAVERAGE iMISS LATENCY:\s+\d+.\d+', data)
+        line = re.search(cache + r'\sAVERAGE iMISS LATENCY:\s+\d+.\d+', data)
         if (line == None):
             imiss_latency = 'N/A'
         else:
@@ -74,7 +74,7 @@ def parse_champsim_stats(input_file, output_file):
     PAGE_CROSSING = {}
     for cache in CACHES:
         PAGE_CROSSING[cache] = {}
-        line = re.search(cache + '\sPAGE CROSSINGS \(TLB HIT\):\s+\d+', data)
+        line = re.search(cache + r'\sPAGE CROSSINGS \(TLB HIT\):\s+\d+', data)
         #print(line.group())
         if (line==None):
             page_cross_hits = 'N/A'
@@ -83,7 +83,7 @@ def parse_champsim_stats(input_file, output_file):
         #print(cache + ":" + page_cross_hits)
         PAGE_CROSSING[cache]['PAGE_CROSS_HITS'] = page_cross_hits
       	
-        line = re.search(cache + '\sPAGE CROSSINGS \(TLB MISS\):\s+\d+', data)
+        line = re.search(cache + r'\sPAGE CROSSINGS \(TLB MISS\):\s+\d+', data)
         if (line==None):
             page_cross_misses = 'N/A'
         else:
@@ -95,7 +95,7 @@ def parse_champsim_stats(input_file, output_file):
     AVG_OCCUPANCY = {}
     for cache in CACHES:
         AVG_OCCUPANCY[cache] = {}
-        line = re.search(cache + '\sMAX OCCUPANCY:\s+\d+', data)
+        line = re.search(cache + r'\sMAX OCCUPANCY:\s+\d+', data)
         #print(line.group())
         if (line==None):
             avg_occupancy = 'N/A'
@@ -106,15 +106,15 @@ def parse_champsim_stats(input_file, output_file):
       	
 
     # Get IPC
-    lines = re.findall('CPU 0 cumulative IPC:\s+\d+[\.]?\d*', data)
+    lines = re.findall(r'CPU 0 cumulative IPC:\s+\d+[\.]?\d*', data)
     ipc = lines[len(lines)-1].split()[4]
 
     # Get number of instructions
-    lines = re.findall('instructions:\s+\d+', data)
+    lines = re.findall(r'instructions:\s+\d+', data)
     instructions = lines[len(lines)-4].split()[1]
 
     # Get number of cycles
-    lines = re.findall('cycles:\s+\d+', data)
+    lines = re.findall(r'cycles:\s+\d+', data)
     cycles = lines[len(lines)-1].split()[1]
 
 
