@@ -18,7 +18,7 @@ def load_df(input_data_files, tags, cache_type, op_type, sort = False, sorted_in
 		i = 0
 		for input_file in input_data_files:
 				#print(input_file)
-				#print(tags)
+				#print(tags[i])
 				tag = tags[i] #.pop(0) 
 				new_df = pd.read_csv(input_file, sep=',', index_col='benchmarks')
 
@@ -56,6 +56,7 @@ def load_df(input_data_files, tags, cache_type, op_type, sort = False, sorted_in
 
 		#df.to_csv("data.csv", sep=',', index=False)
 		return df
+
 
 def load_reuse_dist_df(input_data_files, tags):
 		# create data dataframe

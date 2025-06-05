@@ -12,7 +12,7 @@ xlabels = {
 			'selected_qualcomm_srv_ap': "Qualcomm Server Workloads",
 			'smt_qualcomm_srv_ap': "SMT Qualcomm Server Workloads",
 			'spec': "SPEC CPU 2006/2017",
-      'google_srv': "Google Server Workloads"
+      		'google_srv': "Google Server Workloads"
 		}
 
 FIGURES_DIR = "./figures"
@@ -122,7 +122,13 @@ def gen_plot(figure_name, benchsuite, data_files, file_type):
 							"xPTP",
 							"iTP+xPTP",
 							"TXVC-PERFECT",
+							"TXVC-PERFECT+iTP",
+							"TXVC-PERFECT+xPTP",
+							"TXVC-PERFECT+iTP+xPTP",
 							"TXVC-PERFECT-DOA",
+							"TXVC-PERFECT-DOA+iTP",
+							"TXVC-PERFEC-DOA+xPTP",
+							"TXVC-PERFECT-DOA+iTP+xPTP",
 							"TXVC-4KB",
 							"iTP+TXVC-4KB",
 							"TXVC-4KB+xPTP",
@@ -149,7 +155,7 @@ def gen_plot(figure_name, benchsuite, data_files, file_type):
 							 "20MB"
 						]   
 
-		tags = [ 	
+		_tags = [ 	
 							"TXVC-4KB",
 							"TXVC-4KB-DOA",
 							"TXVC-HUGE-DOA'"
@@ -176,7 +182,7 @@ def gen_plot(figure_name, benchsuite, data_files, file_type):
 		#plotting.plot_conf['ystep'] = 2.5
 		plotting.plot_conf['plot_width'] = 9
 		plotting.plot_conf['plot_height'] = 3
-		plotting.plot_conf['rotation'] = 20
+		plotting.plot_conf['rotation'] = 25
 		plotting.plot_conf['show_legend'] = True
 		plotting.plot_conf['legend_cols'] = 5
 		plotting.plot_conf['legend_yoffset'] = 0.5
@@ -199,40 +205,34 @@ def gen_plot(figure_name, benchsuite, data_files, file_type):
 			if (data_file == ""): continue
 			print(data_file)	
 			input_data_files.append("./stats/" + benchsuite + "_" + data_file + ".csv")	
-
-	
-		tags = [ 	"LRU",
+		
+		tags = [
 							"iTP",
 							"xPTP",
 							"iTP+xPTP",
-							"L1D-VC",
-							"iTP+L1D-VC",
-							"L1D-VC+xPTP",
-							"iTP+L1D-VC+xPTP"
-					]
-	
-		tags = [ 	"LRU",
-							"xPTP",
-							"L1D-VC+PERFECT+xPTP",
-							"iTP+L1D-VC-PERFECT+xPTP",
-							"ïTP+L1D-VC"
-					]
-	
-		tags = [ 	"no VC",
-							"64x6",
-							"32x6",
-							"16x6",
-							"8x6",
-							"4x6"
-					]
+							"TXVC-PERFECT",
+							"TXVC-PERFECT+iTP",
+							"TXVC-PERFECT+xPTP",
+							"TXVC-PERFECT+iTP+xPTP",
+							"TXVC-PERFECT-DOA",
+							"TXVC-PERFECT-DOA+iTP",
+							"TXVC-PERFEC-DOA+xPTP",
+							"TXVC-PERFECT-DOA+iTP+xPTP",
+							"TXVC-4KB",
+							"iTP+TXVC-4KB",
+							"TXVC-4KB+xPTP",
+							"iTP+TXVC-4KB+xPTP",
+							"TXVC-8KB",
+							"iTP+TXVC-8KB",
+							"TXVC-8KB+xPTP",
+							"iTP+TXVC-8KB+xPTP",
+							"TXVC-32KB",
+							"iTP+TXVC-32KB",
+							"TXVC-32KB+xPTP",
+							"iTP+TXVC-32KB+xPTP"
+						]
 
-
-		tags = [
-							"L1D_VC",
-							"L1D_IVC"
-					]
-		
-		cache_types=["cpu0_L1D_VC", "cpu0_L1D", "cpu0_L2C", "LLC"]
+		cache_types=["cpu0_STLB", "cpu0_L1D", "cpu0_L2C", "LLC"]
 		op_type = "TOTAL"
 
 		df = stats.load_df(input_data_files, tags, cache_types, op_type)
@@ -269,16 +269,16 @@ def gen_plot(figure_name, benchsuite, data_files, file_type):
 		plotting.plot_conf['show_legend'] = True
 		plotting.plot_conf['extra_xlabels'] = True
 
-		output_file = FIGURES_DIR + "/fig_l1dvc_mpki_impact_" + benchsuite + ".pdf"
-		print(FIGURES_DIR + "/fig_l1dvc_mpki_impact_" + benchsuite + ".pdf")
+		output_file = FIGURES_DIR + "/fig_txvc_doa_mpki_" + benchsuite + ".pdf"
+		print(output_file)
 		plotting.plot_average_multiple_caches(input_data_files, means_df, tags, 
 																					cache_types, op_type, "MPKI", 
 																					output_file)
 
 
 		plotting.plot_conf['ylabel'] = "Hit Ratio(%)"	
-		output_file = FIGURES_DIR + "/fig_l1dvc_hit_ratio_" + benchsuite + "_xptp.pdf"
-		print(FIGURES_DIR + "/fig_l1dvc_hit_ratio_" + benchsuite + ".pdf")
+		output_file = FIGURES_DIR + "/fig_txvc_hit_ratio_" + benchsuite + "_xptp.pdf"
+		print(output_file)
 		plotting.plot_average_multiple_caches(input_data_files, means_df, tags, 
 																					cache_types, op_type, "HIT_RATIO", 
 																					output_file)
@@ -307,8 +307,8 @@ def gen_plot(figure_name, benchsuite, data_files, file_type):
 			plotting.plot_conf['plot_height'] = 1.8
 			plotting.plot_conf['fontsize'] = 18
 
-			output_file = FIGURES_DIR + "/fig_pte_mpki_impact_" + cache_type + "_" + benchsuite + "2.pdf"
-			print(FIGURES_DIR + "/fig_pte_mpki_impact_" + cache_type + "_" + benchsuite + ".pdf")
+			output_file = FIGURES_DIR + "/fig_txvc_pte_mpki_" + cache_type + "_" + benchsuite + "2.pdf"
+			print(output_file)
 			plotting.plot_average_single_cache(	input_data_files, means_df_single_cache, tags, 
 																					cache_types, op_type, stat_names, 
 																					output_file)

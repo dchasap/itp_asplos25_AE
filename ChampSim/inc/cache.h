@@ -280,6 +280,7 @@ public:
 	bool enable_tx_victim_cache = false;
   bool enable_tx_cache = false;
 	bool enable_instr_only = false;
+  bool enable_data_only = false;
   bool enable_doa_filtering = false;
   std::vector<uint64_t> last_pte_entry;  // one entry per set
   //std::map<uint64_t, BLOCK> tx_victim_cache;
@@ -593,6 +594,13 @@ public:
 					}
 				}
 
+				if (getenv("TXC_DATA_ONLY")) {
+					char* data_only_flag = getenv("TXC_DATA_ONLY");
+					if (strcmp(data_only_flag, "true") == 0) {
+						enable_data_only = true;
+					}
+				}
+
 				if (getenv("TXC_DOA_FILTERING")) {
 					char* doa_filtering_flag = getenv("TXC_DOA_FILTERING");
 					if (strcmp(doa_filtering_flag, "true") == 0) {
@@ -607,6 +615,8 @@ public:
 				std::cout << "\t\tWAYS: " << txc_num_way << std::endl;
 				if (enable_instr_only) 
 					std::cout << "\t\tAllowing only instuction PTEs." << std::endl;
+        else if (enable_data_only)
+          std::cout << "\t\tAllowing only data PTEs." << std::endl;
 				else 
 					std::cout << "\t\tAllowing both instuction and data PTEs." << std::endl;
         

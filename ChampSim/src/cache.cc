@@ -155,6 +155,8 @@
 								bool vc_entry_cond;
 								if (enable_instr_only)
 									vc_entry_cond = way->is_pte && way->is_instr;
+								else if (enable_data_only)
+									vc_entry_cond = way->is_pte && !way->is_instr;
 								else 
 									vc_entry_cond = way->is_pte;
 
@@ -832,6 +834,8 @@
 								bool vc_entry_cond;
 								if (enable_instr_only)
 									vc_entry_cond = fwd_pkt.is_pte && fwd_pkt.is_instr;
+								else if (enable_data_only)
+									vc_entry_cond = fwd_pkt.is_pte && !fwd_pkt.is_instr;
 								else 
 									vc_entry_cond = fwd_pkt.is_pte;
 

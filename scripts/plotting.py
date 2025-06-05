@@ -397,37 +397,39 @@ def plot_average_multiple_caches(	input_baseline_files, means_df, input_tags, ca
 
 			#hatches = itertools.cycle(['/', '//', '+', '-', 'x', '\\', '*', 'o', 'O', '.'])
 			for j, bar in enumerate(ax.patches):
-				if (j == 10):
+				if (j == 3):
 					bar.set_hatch('////')
-				elif j == 9:
-					bar.set_hatch('...')
-				elif j == 8:
-					bar.set_hatch('xxx')
 				elif j == 7:
+					bar.set_hatch('...')
+				elif j == 11:
+					bar.set_hatch('xxx')
+				elif j == 15:
 					bar.set_hatch('OO')
-				elif j == 6:
+				elif j == 19:
 					bar.set_hatch('\\\\\\')
 			#	hatch = next(hatches)
 	
 			if (i == 0):
 				ax.set_ylabel(plot_conf['ylabel'])
-				ax.legend(loc='center', ncol=3, frameon=False, bbox_to_anchor=(1.6, 1.3))
+				ax.legend(loc='center', ncol=6, frameon=False, bbox_to_anchor=(1.9, 1.3))
 			else:
 				ax.set_ylabel('')
 				ax.get_legend().remove()
 
 			if (cache == "cpu0_L1D"):
 				ax.set_xlabel("L1D")
-			if (cache == "cpu0_L1D_VC"):
-				ax.set_xlabel("L1D_VC")
+			elif (cache == "TXVC"):
+				ax.set_xlabel("TXVC")
 			elif (cache == "cpu0_L2C"):
 				ax.set_xlabel("L2C")
 			elif (cache == "cpu0_DTLB"):
 				ax.set_xlabel("DTLB")
 			elif (cache == "cpu0_STLB"):
 				ax.set_xlabel("STLB")
-			else:
+			elif (cache == "LLC"):
 				ax.set_xlabel("LLC")
+			else:
+				ax.set_xlabel("N/A")
 
 			ax.set_xticks([])
 			ax.tick_params(axis='y', labelsize=11, pad=-3)

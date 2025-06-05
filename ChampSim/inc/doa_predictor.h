@@ -44,6 +44,10 @@ class DOAPredictor {
 
     bool predict(uint64_t address, bool seems_dead) 
     {
+        // FIXME: This overrides the predictor with the bias of L1D 
+        if (seems_dead) return true;
+        else return false;
+        
         // Implement prediction logic here
         // std::cout << "Predicting for address: " << address << std::endl;
         uint32_t hash_index = get_hash(address);
@@ -54,10 +58,6 @@ class DOAPredictor {
             prediction_table[hash_index].pred_cnt = 0; // Start with a neutral prediction
             return false;
         }
-
-        // FIXME: This overrides the predictor with the bias of L1D 
-        if (seems_dead) return true;
-        else return false;
 
 				uint32_t bias = 0;
 				if (seems_dead) bias = max_counter / 2;
