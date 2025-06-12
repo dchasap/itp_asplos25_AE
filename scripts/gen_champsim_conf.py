@@ -20,7 +20,6 @@ def load_config(filename):
 
 
 def save_config(config, filename):
-    #print(config_file['L1D']['sets'])
     output_file = open(filename, 'w')
     output_file.write(json.dumps(dict(config), indent=2))
 

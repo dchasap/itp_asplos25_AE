@@ -1,6 +1,4 @@
 
-import os
-import argparse	
 import stats
 import plotting
 import pandas as pd
@@ -12,15 +10,16 @@ xlabels = {
 			'selected_qualcomm_srv_ap': "Qualcomm Server Workloads",
 			'smt_qualcomm_srv_ap': "SMT Qualcomm Server Workloads",
 			'spec': "SPEC CPU 2006/2017",
-      		'google_srv': "Google Server Workloads"
+      'google_srv': "Google Server Workloads",
+			'debug': "srv105_ap"
 		}
 
 FIGURES_DIR = "./figures"
 
 
-def gen_plot(figure_name, benchsuite, data_files, file_type):
+def gen_plot(benchsuite, _tags, data_files, figure_name, figure_type, file_type, figure_dir):
 
-	if (figure_name == "plot_impki"):
+	if (figure_type == "plot_impki"):
 
 		input_data_files =	[ "./stats/" + benchsuite  + "_fdip_baseline_llc-s.1537-w.16.csv" ]
 
@@ -43,7 +42,7 @@ def gen_plot(figure_name, benchsuite, data_files, file_type):
 		plotting.plot_stat(data_df, tags, 'iMPKI', output_file)
 	
 
-	if (figure_name == "plot_itp_eval_per_bench"):
+	if (figure_type == "plot_itp_eval_per_bench"):
 
 		input_baseline_files =	[ "./stats/" + benchsuite  + "_fdip_baseline_llc-s.1537-w.16.csv" ]
 	
@@ -101,94 +100,22 @@ def gen_plot(figure_name, benchsuite, data_files, file_type):
 		plotting.plot_stat_w_means(data_df, means_df, tags, output_file)
 	
 
-	if (figure_name == "plot_ipc"): 
+	if (figure_type == "plot_ipc"): 
 
-		input_baseline_files =	[ "./stats/" + benchsuite  + "_fdip_baseline_llc-s.1537-w.16.csv" ]
-		input_baseline_files =	[ "./stats/" + benchsuite  + "_fdip_xcache-vc.false-tc.false-i.false-doa.false-l.0-s.64-w.8-r.lfu_llc-s.1537-w.16.csv" ]
-		#input_baseline_files =	[ "./stats/" + benchsuite  + "_fdip_baseline.csv" ]
-	
 		input_data_files = []
-		#data_files = data_files.replace('\t', '')
-		#data_files = data_files.split('\n')
+		input_baseline_files = []
+		tags = []
+		i = 0
+		for file in data_files:
+			if "BASELINE" in file:
+				input_baseline_files.append(file)
+			else:
+				input_data_files.append(file)
+				tags.append(_tags[i])
 
-		for data_file in data_files:
-			print("data_file: " + data_file)
-			if (data_file == ""): continue
-	
-			input_data_files.append("./stats/" + benchsuite + "_" + data_file + ".csv")	
+			i += 1
 
-		tags = [
-							"iTP",
-							"xPTP",
-							"iTP+xPTP",
-							"TXVC-PERFECT",
-							"TXVC-PERFECT+iTP",
-							"TXVC-PERFECT+xPTP",
-							"TXVC-PERFECT+iTP+xPTP",
-							"TXVC-PERFECT-DOA",
-							"TXVC-PERFECT-DOA+iTP",
-							"TXVC-PERFEC-DOA+xPTP",
-							"TXVC-PERFECT-DOA+iTP+xPTP",
-							"TXVC-4KB",
-							"iTP+TXVC-4KB",
-							"TXVC-4KB+xPTP",
-							"iTP+TXVC-4KB+xPTP",
-							"TXVC-8KB",
-							"iTP+TXVC-8KB",
-							"TXVC-8KB+xPTP",
-							"iTP+TXVC-8KB+xPTP",
-							"TXVC-32KB",
-							"iTP+TXVC-32KB",
-							"TXVC-32KB+xPTP",
-							"iTP+TXVC-32KB+xPTP"
-						]
-		
-		_tags = [
-							"4KB",
-							"8KB",
-							"16KB",
-							"32KB",
-							"64KB",
-							"128KB",
-							 "256KB",
-							 "512KB",
-							 "20MB"
-						]   
-
-		_tags = [ 	
-							"OLD-DOA",
-							"CNTR-SZ:1",
-							"CNTR-SZ:2",
-							"CNTR-SZ:3",
-							"CNTR-SZ:4"
-						] 
-
-		tags = [ 	
-							"TXVC:4KB-DOA:4KB",
-							"TXCC:4KB-DOA:INF",
-							"TXVC:32KB-DOA:4KB",
-							"TXCC:32KB-DOA:INF",
-							"TXVC:INF-DOA:4KB",
-							"TXCC:INF-DOA:INF"
-						] 				
-
-		tags = [ 	
-							"TXVC:4KB-DOA:INF-CNTR:2",
-							"TXVC:4KB-DOA:INF-CNTR:3",
-							"TXVC:4KB-DOA:INF-CNTR:4",
-							"TXVC:4KB-DOA:INF-CNTR:5"
-						] 		
-
-		_tags = [
-							"4KB-i",
-							"4KB-d",
-							"8KB-i",
-							"8KB-d",
-							"32KB-i",
-							"32KB-d",
-							"INF-i",
-							"INF-d"
-						]   
+		#tags = tags[1:] # this only works if baseline is only one file and is the first
 
 		cache_type = "cpu0_STLB"
 		op_type = "TOTAL"
@@ -216,17 +143,13 @@ def gen_plot(figure_name, benchsuite, data_files, file_type):
 		plotting.plot_conf['legend_cols'] = 5
 		plotting.plot_conf['legend_yoffset'] = 0.5
 		plotting.plot_conf['legend_xoffset'] = 1.2
-		#plotting.plot_cols[']
-	
-		#output_file = FIGURES_DIR + "/fig_txvc_instr_vs_data_eval_" + benchsuite + "." + file_type
-		output_file = FIGURES_DIR + "/fig_txvc_doa_inf_cntr_size_eval_" + benchsuite + "." + file_type
-		#output_file = FIGURES_DIR + "/fig_txvc_doa_inf_eval_" + benchsuite + "." + file_type
-		#output_file = FIGURES_DIR + "/fig_txvc_doa_eval_" + benchsuite + "." + file_type
+
+		output_file = figure_dir + "/" + figure_name + "_" + benchsuite + "." + file_type
 		print(output_file)
 		plotting.plot_stat(data_df, tags, 'IPC_IMPROVEMENT', output_file)
 	
 
-	if (figure_name == "plot_mpki"):
+	if (figure_type == "plot_mpki"):
 	
 		input_data_files = []
 		#data_files = data_files.replace('\t', '')
@@ -346,7 +269,7 @@ def gen_plot(figure_name, benchsuite, data_files, file_type):
 																					output_file)
 	
 
-	if (figure_name == "plot_occupancy"):
+	if (figure_type == "plot_occupancy"):
 	
 		input_data_files = []
 
@@ -382,7 +305,7 @@ def gen_plot(figure_name, benchsuite, data_files, file_type):
 		plotting.plot_stat(data_df, tags, 'MAX_OCCUPANCY', output_file)
 
 
-	if (figure_name == "plot_l2c_eval"): 
+	if (figure_type == "plot_l2c_eval"): 
 
 		input_baseline_files =	[ "./stats/" + benchsuite  + "_fdip_baseline_llc-s.1537-w.16.csv" ]
 	
@@ -428,7 +351,7 @@ def gen_plot(figure_name, benchsuite, data_files, file_type):
 		plotting.plot_stat(data_df, tags, 'IPC_IMPROVEMENT', output_file)
 
 
-	if (figure_name == "plot_reuse_dist"):
+	if (figure_type == "plot_reuse_dist"):
 		
 		input_data_files = []
 		#data_files = data_files.replace('\t', '')
@@ -463,28 +386,5 @@ def gen_plot(figure_name, benchsuite, data_files, file_type):
 		plotting.plot_reuse_distance(data_df, tags, output_file)
 
 ## end gen_plot
-
-
-
-### Command Line Arguments ###
-parser = argparse.ArgumentParser()
-parser.add_argument('--figure', dest='figure_name', required=True, default=None, help="Name of figure to generate.")
-parser.add_argument('--benchsuites', dest='benchsuites', required=True, default=None, nargs='+', help="Name of benchmarksuite to use.")
-parser.add_argument('--data_files', dest='data_files', required=True, default=None, nargs='+', help="List of experiments configuration names.")
-parser.add_argument('--file_type', dest='file_type', required=False, default="pdf", help="Filetype of the figure.")
-
-
-if __name__ == "__main__":
-
-	args = parser.parse_args()
-	
-	FIGURES_DIR = os.environ.get('FIGURES_DIR', './figures')
-	if not os.path.exists(FIGURES_DIR):
-		os.makedirs(FIGURES_DIR)
-	
-	for benchsuite in args.benchsuites:
-		#print(args.benchsuites)
-		#print(args.data_files)
-		gen_plot(args.figure_name, benchsuite, args.data_files, args.file_type)	
 
 

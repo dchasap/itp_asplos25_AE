@@ -1,0 +1,37 @@
+
+import qualcomm_srv_workloads
+
+
+
+def get_benchmark_traces(workload_name):
+
+  if workload_name == "qualcomm_srv_ap":
+    traces = qualcomm_srv_workloads.get_qualcomm_srv()
+    traces_dir = qualcomm_srv_workloads.get_qualcomm_srv_dir()
+
+  elif workload_name == "selected_qualcomm_srv_ap":
+    traces = qualcomm_srv_workloads.get_selected_qualcomm_srv()
+    traces_dir = qualcomm_srv_workloads.get_qualcomm_srv_dir()
+  
+  elif workload_name == "smt_qualcomm_srv_ap":
+    traces = qualcomm_srv_workloads.get_smt_qualcomm_srv()
+    traces_dir = qualcomm_srv_workloads.get_qualcomm_srv_dir()
+  
+  elif workload_name == "debug":
+    traces = [ qualcomm_srv_workloads.get_selected_qualcomm_srv()[0] ]
+    traces_dir = qualcomm_srv_workloads.get_qualcomm_srv_dir()
+
+  return traces, traces_dir
+
+
+
+def get_benchmark_names(workload_name):
+
+  traces, traces_dir = get_benchmark_traces(workload_name)
+
+  names = []
+  for trace in traces:
+    name = trace.split('.')[0]
+    names.append(name)
+  
+  return names

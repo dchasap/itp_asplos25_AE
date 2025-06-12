@@ -75,7 +75,7 @@ def load_reuse_dist_df(input_data_files, tags):
 
 				i += 1 # that's for tags' list
 
-		print(df)
+		#print(df)
 		return df
 
 
@@ -92,8 +92,8 @@ def compute_variation(baseline_df, df, tags, col_name, new_col_name, revert=Fals
 	if (revert):
 		df[new_col_name] = ((baseline_df[col_name] - df[col_name]) * 100 / df[col_name])
 	else:
-		print(len(df))
-		print(len(baseline_df))
+		#print(len(df))
+		#print(len(baseline_df))
 		df[new_col_name] = ((df[col_name] - baseline_df[col_name]) * 100 / baseline_df[col_name])
 
 	return df

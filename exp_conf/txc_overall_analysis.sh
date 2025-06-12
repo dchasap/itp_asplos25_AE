@@ -19,12 +19,12 @@ declare -A VAR_DECLARATIONS=(
 	['ENABLE_TXVC']="true"
 	['ENABLE_TXC']="false"
 	['TXC_LATENCY']="0"
-	['TXC_NUM_SET']="20480"
+	['TXC_NUM_SET']="64"
 	['TXC_NUM_WAY']="8"
 	['TXVC_REP_POLICY']="lfu"
 	['TXC_INSTR_ONLY']="false"
 	['TXC_DATA_ONLY']="false"
-	['TXC_DOA_FILTERING']="false"	
+	['TXC_DOA_FILTERING']="true"	
 	['TXC_DBPRED_CNTR_SZ']="2"
 	['TXC_DBPRED_THRESHOLD']="0"
 	['REUSE_DIST_FILENAME_PREFIX']="${REUSE_DIST_FILENAME_PREFIX}"
@@ -59,7 +59,7 @@ fdip_xcache-txvc.{ENABLE_TXVC}-txc.{ENABLE_TXC}-i.{TXC_INSTR_ONLY}-doa.{TXC_DOA_
 fdip_xcache-txvc.{ENABLE_TXVC}-txc.{ENABLE_TXC}-i.{TXC_INSTR_ONLY}-doa.{TXC_DOA_FILTERING}-l.{TXC_LATENCY}-s.{TXC_NUM_SET}-w.{TXC_NUM_WAY}-r.lfu_stlb-r.itp_l2c-r.xptp_llc-s.1537-w.16
 "
 
-export CONFIGURATION_TAGS="
+export _CONFIGURATION_TAGS="
 fdip_xcache-txvc.{ENABLE_TXVC}-i.{TXC_INSTR_ONLY}-doa.{TXC_DOA_FILTERING}-cntr_sz.{TXC_DBPRED_CNTR_SZ}-thrhld.{TXC_DBPRED_THRESHOLD}-s.{TXC_NUM_SET}-w.{TXC_NUM_WAY}_stlb-r.itp_llc-s.1537-w.16
 fdip_xcache-txvc.{ENABLE_TXVC}-i.{TXC_INSTR_ONLY}-doa.{TXC_DOA_FILTERING}-cntr_sz.{TXC_DBPRED_CNTR_SZ}-thrhld.{TXC_DBPRED_THRESHOLD}-s.{TXC_NUM_SET}-w.{TXC_NUM_WAY}_l2c-r.xptp_llc-s.1537-w.16
 fdip_xcache-txvc.{ENABLE_TXVC}-i.{TXC_INSTR_ONLY}-doa.{TXC_DOA_FILTERING}-cntr_sz.{TXC_DBPRED_CNTR_SZ}-thrhld.{TXC_DBPRED_THRESHOLD}-s.{TXC_NUM_SET}-w.{TXC_NUM_WAY}_stlb-r.itp_l2c-r.xptp_llc-s.1537-w.16
@@ -92,7 +92,7 @@ export GENERATE_STATS="True"
 export GENERATE_EXTRA_STATS="False"
 export GENERATE_REUSE_DISTANCE_STATS="False"
 export GENERATE_PLOTS="False"
-export PLOT_TYPE="plot_ipc"
+export PLOT_TYPE="plot_mpki"
 export PLOT_FILE_TYPE="pdf"
 
 

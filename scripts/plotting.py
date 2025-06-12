@@ -125,7 +125,7 @@ def plot(data, x, y, hue, axes):
 	plt.xticks(fontsize=fontsize)
 
 	ax.set_axisbelow(True)
-	ax.grid(visible=True, axis='y', color='grey', alpha=0.5, linestyle='--', linewidth=1.5)
+	ax.grid(visible=True, axis='both', color='grey', alpha=0.5, linestyle='--', linewidth=1.5)
 
 	return ax
 
@@ -368,7 +368,7 @@ def plot_average_single_cache(	input_baseline_files, means_df, input_tags, cache
 
 def plot_average_multiple_caches(	input_baseline_files, means_df, input_tags, cache_types, 
 																	op_type, stat_name, output_file):
-
+		sns.set_palette(sns.color_palette())
 		plot_width = plot_conf['plot_width']
 		plot_height = plot_conf['plot_height']
 		fig, axes = plt.subplots(	nrows=2, ncols=4, 
@@ -381,7 +381,9 @@ def plot_average_multiple_caches(	input_baseline_files, means_df, input_tags, ca
 		axes[0][2].remove()
 		axes[0][3].remove()
 
-		sns.set_style('white')
+		#sns.set_style('white')
+		#sns.color_palette("tab10")
+		sns.set_palette(sns.color_palette('Paired'))
 
 		i = 0
 #		plt.yticks(fontsize=5)
@@ -392,7 +394,7 @@ def plot_average_multiple_caches(	input_baseline_files, means_df, input_tags, ca
 			plot_conf['ylabel'] = plot_conf['ylabel']
 
 			ax = sns.barplot(	data=means_df.loc[means_df['cache'] == cache],
-								x='cache', y=stat_name, hue='tag', width=0.8, color='grey',
+								x='cache', y=stat_name, hue='tag', width=0.8,
 								linewidth=.5, edgecolor='black', ax=axes[1][i])
 
 			#hatches = itertools.cycle(['/', '//', '+', '-', 'x', '\\', '*', 'o', 'O', '.'])
@@ -411,7 +413,7 @@ def plot_average_multiple_caches(	input_baseline_files, means_df, input_tags, ca
 	
 			if (i == 0):
 				ax.set_ylabel(plot_conf['ylabel'])
-				ax.legend(loc='center', ncol=6, frameon=False, bbox_to_anchor=(1.9, 1.3))
+				ax.legend(loc='center', ncol=6, frameon=False, bbox_to_anchor=(2.1, 1.3))
 			else:
 				ax.set_ylabel('')
 				ax.get_legend().remove()
