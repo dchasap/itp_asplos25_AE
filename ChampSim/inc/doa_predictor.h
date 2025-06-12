@@ -51,7 +51,7 @@ class DOAPredictor {
 
         prediction_table.resize(num_sets * num_ways);
 
-      char* use_bias = getenv("TXVC_DBPRED_USE_BIAS");
+      char* use_bias = getenv("TXC_DBPRED_USE_BIAS");
 			if (strcmp(use_bias, "true") == 0) {
 				use_bias_flag = true;
 			}

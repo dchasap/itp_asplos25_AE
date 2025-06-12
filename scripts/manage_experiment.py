@@ -213,10 +213,15 @@ def plot_experimental_data(config):
 	else:
 		simulations = config['EXPERIMENT']['simulations'].replace(" ", "").split(",")
 
+	stats_dir = config['BASE']['STATS_DIR'] + "/" + exp_name + "/" + sim
 	csv_data_files = []
 	for sim in simulations:
-		stats_dir = config['BASE']['STATS_DIR'] + "/" + exp_name + "/" + sim
-		csv_data_file = stats_dir + "/" + workload_name + "_" + sim + ".csv"
+		
+		if config.has_option(sim, 'simulation_stats'):
+			csv_data_file = config[sim]['simulation_stats']
+		else:
+			csv_data_file = stats_dir + "/" + workload_name + "_" + sim + ".csv"
+		
 		csv_data_files.append(csv_data_file)
 
 	os.system("mkdir -p " + figures_dir)
