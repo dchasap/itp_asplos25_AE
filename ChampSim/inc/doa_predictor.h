@@ -1,7 +1,7 @@
 #ifndef DOA_PREDICTOR_H
 #define DOA_PREDICTOR_H
 
-//#define _DOA_BUDGETED
+#define _DOA_BUDGETED
 
 #include <iostream>
 #include <algorithm>
@@ -41,31 +41,31 @@ class DOAPredictor {
     DOAPredictor(uint64_t sets, uint64_t ways, uint32_t max_counter_value, uint32_t thrhld) : num_sets(sets), num_ways(ways), 
         max_counter(max_counter_value) // Set threshold to half of the max counter value 
     {
-        // Initialize the predictor
-        // std::cout << "DOA Predictor initialized." << std::endl;
-				if (thrhld > 0) { 
-          prediction_thrhld = thrhld;
-        } else {
-          prediction_thrhld = max_counter / 2;
-        }
+      // Initialize the predictor
+      // std::cout << "DOA Predictor initialized." << std::endl;
+			if (thrhld > 0) { 
+        prediction_thrhld = thrhld;
+      } else {
+        prediction_thrhld = max_counter / 2;
+      }
 
-        prediction_table.resize(num_sets * num_ways);
+      prediction_table.resize(num_sets * num_ways);
 
       char* use_bias = getenv("TXC_DBPRED_USE_BIAS");
-			if (strcmp(use_bias, "true") == 0) {
-				use_bias_flag = true;
-			}
+		  if (strcmp(use_bias, "true") == 0) {
+			  use_bias_flag = true;
+		  }
 
-        std::cout << "TXVC: Using DOA prediction:" << std::endl;
+      std::cout << "TXVC: Using DOA prediction:" << std::endl;
 #if defined _DOA_BUDGETED
-        std::cout << "\t-sets: " << num_sets << std::endl;
-        std::cout << "\t-ways: " << num_ways << std::endl;
+      std::cout << "\t-sets: " << num_sets << std::endl;
+      std::cout << "\t-ways: " << num_ways << std::endl;
 #else 
-        std::cout << "\t-No collisions!" << std::endl;
+      std::cout << "\t-No collisions!" << std::endl;
 #endif
-        std::cout << "\t-max_counter_value: " << max_counter << std::endl;
-        std::cout << "\t-prediction theshold: " << prediction_thrhld << std::endl; 
-        std::cout << "\tUse bias: " << (use_bias_flag?"true":"false") << std::endl;
+      std::cout << "\t-max_counter_value: " << max_counter << std::endl;
+      std::cout << "\t-prediction theshold: " << prediction_thrhld << std::endl; 
+      std::cout << "\tUse bias: " << (use_bias_flag?"true":"false") << std::endl;
     }
 
 #if defined _DOA_BUDGETED
@@ -87,7 +87,7 @@ class DOAPredictor {
         }
 
 				uint32_t bias = 0;
-				if (seems_dead) bias = max_counter / 2;
+				if (seems_dead && use_bias_flag) bias = max_counter / 2;
         uint32_t prediction = prediction_table[hash_index].pred_cnt + bias;
         
         if (prediction >= prediction_thrhld) {
@@ -126,9 +126,10 @@ class DOAPredictor {
         //if (seems_dead) return true;
         //else return false;
         
-        uint32_t bias = 0;
-				if (seems_dead) bias = 0; //bias = max_counter / 2;
-
+        //use_bias_flag = false;
+				uint32_t bias = 0;
+				if (seems_dead && use_bias_flag) bias = max_counter / 2;
+        
         auto pred_it = prediction_map.find(address);
 
         if (pred_it == prediction_map.end()) {

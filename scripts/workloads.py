@@ -1,6 +1,6 @@
 
 import qualcomm_srv_workloads
-
+import google_srv_workloads
 
 
 def get_benchmark_traces(workload_name):
@@ -17,6 +17,10 @@ def get_benchmark_traces(workload_name):
     traces = qualcomm_srv_workloads.get_smt_qualcomm_srv()
     traces_dir = qualcomm_srv_workloads.get_qualcomm_srv_dir()
   
+  elif workload_name == "google_srv":
+    traces = goole_srv_workloads.get_google_srv()
+    traces_dir = google_srv_workloads_dir()
+
   elif workload_name == "debug":
     traces = [ qualcomm_srv_workloads.get_selected_qualcomm_srv()[0] ]
     traces_dir = qualcomm_srv_workloads.get_qualcomm_srv_dir()

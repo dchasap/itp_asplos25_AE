@@ -160,6 +160,11 @@ def parse_experimental_data(config):
 	simulations = config['EXPERIMENT']['simulations'].replace(" ", "").split(",")
 
 	for sim in simulations:
+
+		if config.has_option(sim, 'simulation_stats'):
+			print("Skipping " + sim + "...")
+			continue
+
 		dump_dir = config['BASE']['DUMP_DIR'] + "/" + exp_name + "/" + sim
 		stats_dir = config['BASE']['STATS_DIR'] + "/" + exp_name + "/" + sim
 		workload_name = config['EXPERIMENT']['workload']
@@ -213,9 +218,11 @@ def plot_experimental_data(config):
 	else:
 		simulations = config['EXPERIMENT']['simulations'].replace(" ", "").split(",")
 
-	stats_dir = config['BASE']['STATS_DIR'] + "/" + exp_name + "/" + sim
+	
 	csv_data_files = []
 	for sim in simulations:
+
+		stats_dir = config['BASE']['STATS_DIR'] + "/" + exp_name + "/" + sim
 		
 		if config.has_option(sim, 'simulation_stats'):
 			csv_data_file = config[sim]['simulation_stats']
@@ -240,7 +247,7 @@ def show_experimental_data(config):
 	figure_file = figures_dir + "/" + figure_name + "_" + workload + "." + file_type
 	
 	#os.system("evince " + figure_file)
-	subprocess.run(["evince", figure_file])
+	subprocess.Popen(["evince", figure_file])
 
 
 # MAIN 
@@ -261,11 +268,11 @@ if __name__ == "__main__":
 	if args.run_experiment:
 		prepare_experiment(config)
 	
-	elif args.parse_data and parsing_plotting_module_available:
+	if args.parse_data and parsing_plotting_module_available:
 		parse_experimental_data(config)
 
-	elif args.plot_data and parsing_plotting_module_available:
+	if args.plot_data and parsing_plotting_module_available:
 		plot_experimental_data(config)
 
-	elif args.show_data and parsing_plotting_module_available:
+	if args.show_data and parsing_plotting_module_available:
 		show_experimental_data(config)
