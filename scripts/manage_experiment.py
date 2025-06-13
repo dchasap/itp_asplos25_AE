@@ -64,7 +64,7 @@ cpu_json_parameters = []
 cpu_env_parameters = [ 'enable_txvc' ]
 
 cache_json_parameters = [ 'sets', 'ways', 'prefetcher', 'replacement', 'force_hit' ]
-cache_env_parameters = [ 'sets', 'ways', 'replacement', 'doa_filtering' ]
+cache_env_parameters = [ 'sets', 'ways', 'replacement', 'doa_filtering', 'dbpred_cntr_size', 'data_only', 'instr_only' ]
 
 
 def set_champsim_json_params(config, json_conf, sim, component, parameters):
@@ -85,6 +85,7 @@ def set_champsim_env_params(config, enviromental_variables, sim, component, para
 
 	for param in parameters:
 		#if (component+'.'+param) in config[].keys():
+		#print(component+'.'+param)
 		if config.has_option(sim, component+'.'+param) and ((component+'.'+param) in confnames_to_envars.keys()):
 			key = confnames_to_envars[component+'.'+param]
 			value = config[sim][component+'.'+param]
@@ -105,10 +106,10 @@ def prepare_experiment(config):
 	debug_run = config['EXPERIMENT'].getboolean('debug_run')
 
 	# first get the simulations' names
-	if debug_run:
-		simulations = [ 'debug' ]
-	else: 
-		simulations = config['EXPERIMENT']['simulations'].replace(" ", "").split(",")
+	#if debug_run:
+	#	simulations = [ 'debug' ]
+	#else: 
+	simulations = config['EXPERIMENT']['simulations'].replace(" ", "").split(",")
 
 	
 	for sim in simulations:
@@ -124,9 +125,10 @@ def prepare_experiment(config):
 		champsimconf.set_entry(new_json_conf, None, 'executable_name', exp_name + '/champsim_' + sim)
 
 		# Setup simulation parameters
+		enviromental_variables = default_enviromental_variables
+
 		for component in components:
 
-			enviromental_variables = default_enviromental_variables
 			# check cpu components
 			set_champsim_json_params(config, new_json_conf, sim, component, cpu_json_parameters)
 			enviromental_variables = set_champsim_env_params(config, enviromental_variables, sim, component, cpu_env_parameters)

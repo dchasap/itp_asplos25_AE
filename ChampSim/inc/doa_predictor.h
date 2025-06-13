@@ -58,14 +58,14 @@ class DOAPredictor {
 
       std::cout << "TXVC: Using DOA prediction:" << std::endl;
 #if defined _DOA_BUDGETED
-      std::cout << "\t-sets: " << num_sets << std::endl;
-      std::cout << "\t-ways: " << num_ways << std::endl;
+      std::cout << "\t- sets: " << num_sets << std::endl;
+      std::cout << "\t- ways: " << num_ways << std::endl;
 #else 
-      std::cout << "\t-No collisions!" << std::endl;
+      std::cout << "\t- No collisions!" << std::endl;
 #endif
-      std::cout << "\t-max_counter_value: " << max_counter << std::endl;
-      std::cout << "\t-prediction theshold: " << prediction_thrhld << std::endl; 
-      std::cout << "\tUse bias: " << (use_bias_flag?"true":"false") << std::endl;
+      std::cout << "\t- max_counter_value: " << max_counter << std::endl;
+      std::cout << "\t- prediction theshold: " << prediction_thrhld << std::endl; 
+      std::cout << "\t- Use bias: " << (use_bias_flag?"true":"false") << std::endl;
     }
 
 #if defined _DOA_BUDGETED
