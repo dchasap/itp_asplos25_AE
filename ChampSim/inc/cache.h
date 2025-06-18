@@ -344,7 +344,7 @@ public:
 					exit(0);
 				}
 
-        dbPred = new DOAPredictor(num_set, num_way, dbpred_cntr_sz, dbpred_thrhld); // 3 is max counter value, 2 is threshold
+        dbPred = new DOAPredictor(num_set, num_way, dbpred_cntr_sz, dbpred_thrhld, true);
 
 #if defined ENABLE_EXTRA_CACHE_STATS        
         std::string reuse_dist_filename_prefix = getenv("REUSE_DIST_FILENAME_PREFIX");
@@ -444,6 +444,8 @@ public:
         reuseDistMon->dump();
         delete reuseDistMon;
 #endif
+
+        dbPred->print_stats();
       }
 
   };
@@ -543,28 +545,26 @@ public:
 				enable_tx_victim_cache = true;
 			}
 
+/*
       char*  TRANSLATION_EXCLUSIVE_CACHE_flag = getenv("ENABLE_TXC");
 			if (strcmp(TRANSLATION_EXCLUSIVE_CACHE_flag, "true") == 0) {
 				enable_tx_cache = true;
 			}
-
-      //assert(!enable_TRANSLATION_EXCLUSIVE_CACHE || !enable_TRANSLATION_EXCLUSIVE_CACHE);
-      //assert((enable_TRANSLATION_EXCLUSIVE_CACHE != enable_TRANSLATION_EXCLUSIVE_CACHE) || (!enable_TRANSLATION_EXCLUSIVE_CACHE && !enable_TRANSLATION_EXCLUSIVE_CACHE));
-      //assert((enable_TRANSLATION_EXCLUSIVE_CACHE && !enable_doa_filtering) || !enable_TRANSLATION_EXCLUSIVE_CACHE); // This does not work at the moment so check before proceeding
+*/
 
 			if (enable_tx_victim_cache || enable_tx_cache) {
 
 				//FIXME: Not sure we should use braces for constructor - but maybe we need to (???)
 				// Create and connect a new victim cache between L1D and L2C
-				uint32_t num_set = 64;
-				uint32_t num_way = 8;
-				uint32_t mshr_size = 8; //64;
-				NonTranslatingQueues* tx_cache_queues = new NonTranslatingQueues(1.0, num_set, num_way, mshr_size, 5, 4, champsim::lg2(64), 0);
+				//uint32_t num_set = 64;
+				//uint32_t num_way = 8;
+				//uint32_t mshr_size = 8; //64;
+				//NonTranslatingQueues* tx_cache_queues = new NonTranslatingQueues(1.0, num_set, num_way, mshr_size, 5, 4, champsim::lg2(64), 0);
 
 				uint32_t txc_num_set = 64;
 				uint32_t txc_num_way = 8;
 				uint32_t txc_latency = 1;
-				uint32_t txc_mshr_size = 8; //64;
+				//uint32_t txc_mshr_size = 8; //64;
 
 				if (getenv("TXC_LATENCY")) {
 					txc_latency = std::stoull(getenv("TXC_LATENCY"));
@@ -622,9 +622,9 @@ public:
         
         std::cout << "\t\tDOA filtering: " << (enable_doa_filtering?"enabled":"disabled") << std::endl;
 
-				tx_cache = new CACHE( NAME+"_TXC", 1.0, txc_num_set, txc_num_way, txc_mshr_size, txc_latency, 2, 2, champsim::lg2(64), 0, 0, 0, 
-															(1 << LOAD) | (1 << PREFETCH), *tx_cache_queues, ll, 
-															CACHE::pprefetcherDno, CACHE::rreplacementDlfu, 0, 0, vmem);
+				//tx_cache = new CACHE( NAME+"_TXC", 1.0, txc_num_set, txc_num_way, txc_mshr_size, txc_latency, 2, 2, champsim::lg2(64), 0, 0, 0, 
+				//											(1 << LOAD) | (1 << PREFETCH), *tx_cache_queues, ll, 
+				//											CACHE::pprefetcherDno, CACHE::rreplacementDlfu, 0, 0, vmem);
 
         tx_victim_cache = new VICTIM_CACHE(txc_num_set, txc_num_way, champsim::lg2(64));
         

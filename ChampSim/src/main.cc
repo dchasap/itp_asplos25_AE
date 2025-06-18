@@ -209,12 +209,12 @@ int main(int argc, char** argv)
 		cpu.finalize();
 
 #if defined TRANSLATION_EXCLUSIVE_CACHE
-	for (CACHE& cache: caches) {
-    std::cout << cache.NAME << std::endl;
-		if (cache.enable_tx_victim_cache) {
-			caches.push_back(*cache.tx_cache);
-		}
-	}
+	//for (CACHE& cache: caches) {
+  //  std::cout << cache.NAME << std::endl;
+	//	if (cache.enable_tx_victim_cache) {
+	//		caches.push_back(*cache.tx_cache);
+	//	}
+	//}
 #endif
 
 #if defined ENABLE_PTW_STATS

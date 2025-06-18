@@ -140,7 +140,8 @@ def prepare_experiment(config):
 		champsimconf.save_config(new_json_conf, root_dir + '/sim_conf/' + exp_name + '/' + sim + '.json')
 
 		# Build champsim
-		os.system(champsim_dir + '/config.sh --compile-all-modules ' + root_dir + '/sim_conf/' + exp_name + '/' + sim + '.json')
+		#os.system(champsim_dir + '/config.sh --compile-all-modules ' + root_dir + '/sim_conf/' + exp_name + '/' + sim + '.json')
+		os.system(champsim_dir + '/config.sh ' + root_dir + '/sim_conf/' + exp_name + '/' + sim + '.json')
 		os.system('make -C ' + champsim_dir)
 
 		# Run simulation
@@ -148,6 +149,7 @@ def prepare_experiment(config):
 		dump_dir = config['BASE']['dump_dir'] + "/" + exp_name + "/" + sim
 		workload_name = config['EXPERIMENT']['workload'] # TODO: adjust for multiple workloads
 		print("Submitting simulation jobs for " + sim)
+		print(enviromental_variables)
 		simulation.run_simulation_batch(root_dir, trace_dir, dump_dir, sim, exp_name, workload_name, config['SIMULATION'], enviromental_variables, debug_run)
 
 

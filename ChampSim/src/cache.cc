@@ -162,6 +162,8 @@
 
 								if (enable_doa_filtering) {
 
+									//std::cout << "DOA Filtering" << std::endl;
+
 #if defined SPLIT_STLB
 									uint64_t set_idx = get_set_index(victim_packet.address, fill_mshr.is_instr);
 #else 
@@ -178,7 +180,7 @@
 									vc_entry_cond = vc_entry_cond && !is_dead;
 									way->is_doa = true; // reset the flag
 								}
-
+								//std::cout << "add_req" << std::endl;
 								if (vc_entry_cond) {
 									//success = tx_cache->add_wq(writeback_packet);
 									//tx_cache->add_rq(victim_packet);
@@ -828,7 +830,8 @@
 						bool success = false;
 						if (prefetch_as_load || handle_pkt.type != PREFETCH) {
 							
-#if defined TRANSLATION_EXCLUSIVE_CACHE
+//#if defined TRANSLATION_EXCLUSIVE_CACHE
+#if 0
 							if (enable_tx_cache) {
 								
 								bool vc_entry_cond;
@@ -907,10 +910,10 @@
 #if defined TRANSLATION_EXCLUSIVE_CACHE
 					//std::cout << "operate" << std::endl;
 					//FIXME: Not sure if we should operate the cache_queue as well
-					if (enable_tx_cache || enable_tx_victim_cache) {
-						tx_cache->queues.operate(); //FIXME: Not sure about this line
-						tx_cache->operate();
-					}
+					//if (enable_tx_cache || enable_tx_victim_cache) {
+					//	tx_cache->queues.operate(); //FIXME: Not sure about this line
+					//	tx_cache->operate();
+					//}
 #endif
 
 					auto tag_bw = MAX_TAG;
@@ -1239,19 +1242,19 @@ void CACHE::initialize()
   impl_prefetcher_initialize();
   impl_initialize_replacement();
 #if defined TRANSLATION_EXCLUSIVE_CACHE
-	if (enable_tx_cache || enable_tx_victim_cache) {
-		tx_cache->initialize();
-	}
+	//if (enable_tx_cache || enable_tx_victim_cache) {
+	//	tx_cache->initialize();
+	//}
 #endif
 }
 
 void CACHE::begin_phase()
 {
 #if defined TRANSLATION_EXCLUSIVE_CACHE
-	if (enable_tx_cache || enable_tx_victim_cache) {
-		tx_cache->queues.begin_phase();
-		tx_cache->begin_phase();
-	}
+	//if (enable_tx_cache || enable_tx_victim_cache) {
+	//	tx_cache->queues.begin_phase();
+	//	tx_cache->begin_phase();
+	//}
 #endif 
   roi_stats.emplace_back();
   sim_stats.emplace_back();
@@ -1264,10 +1267,10 @@ void CACHE::end_phase(unsigned finished_cpu)
 {
 
 #if defined TRANSLATION_EXCLUSIVE_CACHE
-	if (enable_tx_cache || enable_tx_victim_cache) {
-		tx_cache->queues.end_phase(finished_cpu);
-		tx_cache->end_phase(finished_cpu);
-	}
+	//if (enable_tx_cache || enable_tx_victim_cache) {
+	//	tx_cache->queues.end_phase(finished_cpu);
+	//	tx_cache->end_phase(finished_cpu);
+	//}
 #endif 
 
   for (auto type : {LOAD, RFO, PREFETCH, WRITE, TRANSLATION}) {
