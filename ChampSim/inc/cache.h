@@ -26,6 +26,7 @@
 #include <string>
 #include <vector>
 #include <string.h>
+#include <iomanip>
 
 #include "champsim.h"
 #include "champsim_constants.h"
@@ -46,7 +47,7 @@
 #endif
 
 #if defined TRANSLATION_EXCLUSIVE_CACHE
-#include "doa_predictor.h"
+#include "cache_filter.h"
 #include "victim_cache.h"
 #endif 
 
@@ -281,7 +282,6 @@ public:
   bool enable_tx_cache = false;
 	bool enable_instr_only = false;
   bool enable_data_only = false;
-  bool enable_doa_filtering = false;
   std::vector<uint64_t> last_pte_entry;  // one entry per set
   //std::map<uint64_t, BLOCK> tx_victim_cache;
 
@@ -293,11 +293,18 @@ public:
       std::vector<BLOCK>  blocks;
       ReplacementPolicy* replacementPol;
 
+      bool enable_cache_filtering = false;
+
+      //stats
+      uint64_t total_accesses = 0;
+      uint64_t total_hits = 0;
+      uint64_t total_misses = 0;
+
 #if defined ENABLE_EXTRA_CACHE_STATS
       ReuseDistanceMonitor* reuseDistMon;
 #endif
 
-      DOAPredictor* dbPred;
+      CacheFilter* cacheFilter;
 
       uint32_t get_set(uint64_t address) 
       {
@@ -326,25 +333,43 @@ public:
           exit(1);
         }
 
-        // TODO: parametrize
-        
-				uint32_t dbpred_cntr_sz = 0;
-        if (getenv("TXC_DBPRED_CNTR_SZ")) {
-					dbpred_cntr_sz = std::stoull(getenv("TXC_DBPRED_CNTR_SZ"));
-				} else {
-					std::cerr << "TXC_BPRED_CNTR_SZ not set!" << std::endl;
-					exit(0);
-				}
-        
-				uint32_t dbpred_thrhld = 0;
-        if (getenv("TXC_DBPRED_THRESHOLD")) {
-					dbpred_thrhld = std::stoull(getenv("TXC_DBPRED_THRESHOLD"));
-				} else {
-					std::cerr << "TXC_DBPRED_THRESHOLD not set!" << std::endl;
-					exit(0);
+        if (getenv("TXC_CACHE_FILTERING")) {
+					char* cache_filtering_flag = getenv("TXC_CACHE_FILTERING");
+					if (strcmp(cache_filtering_flag, "true") == 0) {
+						enable_cache_filtering = true;
+					}
 				}
 
-        dbPred = new DOAPredictor(num_set, num_way, dbpred_cntr_sz, dbpred_thrhld, true);
+        if (enable_cache_filtering) {
+          
+          if (getenv("TXC_CACHE_FILTER") != nullptr) {
+
+					  char* dbpred_name = getenv("TXC_CACHE_FILTER");
+            if (strcmp(dbpred_name, "doa-simple") == 0) {
+              std::cout << "\tTXVC: Using DOA-simpe filter" << std::endl;
+					    cacheFilter = new SimpleDOAFilter();
+            } else if (strcmp(dbpred_name, "doa") == 0) {
+              std::cout << "\tTXVC: Using DOA filter" << std::endl;
+					    cacheFilter = new DOAPredictor(num_set, num_way, true);
+            } else if (strcmp(dbpred_name, "mfu") == 0) {
+              std::cout << "\tTXVC: Using MFU filter" << std::endl;
+              cacheFilter = new MFUFilter(num_set, num_way, false);
+            } else {
+              std::cerr << "TXVC: Unknown cache filter " << dbpred_name << "!" << std::endl;
+              exit(1);
+            }
+
+            //std::cout << "\tCache filtering: " << dbpred_name << std::endl;
+				  
+          } else {
+            std::cerr << "TXC_CACHE_FILTER not set!" << std::endl;
+            exit(1);
+          }
+
+        } else {
+          std::cout << "\tCache filtering disabled." << std::endl;      
+        }
+
 
 #if defined ENABLE_EXTRA_CACHE_STATS        
         std::string reuse_dist_filename_prefix = getenv("REUSE_DIST_FILENAME_PREFIX");
@@ -358,12 +383,32 @@ public:
 
       ~VICTIM_CACHE() 
       {
+#if defined ENABLE_EXTRA_CACHE_STATS
+        delete reuseDistMon;
+#endif
         delete replacementPol;
-        delete dbPred;
+        delete cacheFilter;
       }
 
 
-      void add_request(PACKET& request, uint64_t curr_cycle) 
+      void add_request(PACKET& request, uint64_t curr_cycle, bool seems_dead) 
+      {
+
+        if (enable_cache_filtering) {
+          bool bypass = cacheFilter->predict(request.address, seems_dead);
+          if (bypass) {
+            //std::cout << "Block " << request.address " byapassed." << std::endl;
+            return;
+          }
+        }
+
+        auto [way, found] = lookup(request.address, curr_cycle);
+        if (!found) {
+          fill(request, curr_cycle);
+        }
+      }
+
+      void fill(PACKET& request, uint64_t curr_cycle) 
       {
         uint64_t set_idx = get_set(request.address);
         auto set_begin = std::next(blocks.begin(), set_idx * num_way);
@@ -377,8 +422,9 @@ public:
           way = std::next(blocks.begin(), (set_idx * num_way) + way_idx);
           replacementPol->update_replacement_state(set_idx, way_idx, curr_cycle, false);  
         }
-
-        dbPred->update(way->address, way->is_doa); // update with the victims info
+        
+        if (enable_cache_filtering)
+          cacheFilter->update(way->address, way->is_doa, false); 
 
         way->prefetch = request.prefetch_from_this;
         way->dirty = (request.type == WRITE);
@@ -417,35 +463,47 @@ public:
         reuseDistMon->add_access(address);
 #endif
         
-        //dbPred->update(address, hit);
+        if (enable_cache_filtering)
+          cacheFilter->update(address, hit, true);
+
+        total_accesses++;
 
         if (hit) {
+          total_hits++;
           way->is_doa = false;
           replacementPol->update_replacement_state(set_idx, way_idx, curr_cycle,  hit);
           return {blocks.at((set_idx * num_way) + way_idx), hit};
         } else {
+          total_misses++;
           return {blocks.at(0), hit};
         }
       }
 
+      /*
       bool predictDOA(uint64_t address, bool seems_dead) 
       {
         //uint32_t bias = 0;
         //if (seems_dead) {
         //  bias = 4; 
         //}
-
+        //std::cout << "Calling predictDOA(" << address << ", " << seems_dead << ")" << std::endl;
         return dbPred->predict(address, seems_dead);
       }
+      */
 
       void print_stats(void) 
       {
+        std::cout << "TXVC";
+        std::cout << " TOTAL       ";
+        std::cout << "ACCESSES:" << std::setw(10) << total_accesses << "  ";
+        std::cout << "HIT:" << std::setw(10) << total_hits << "  "; 
+        std::cout << "MISS:" << std::setw(10) << total_misses << std::endl;
+       
 #if defined ENABLE_EXTRA_CACHE_STATS
         reuseDistMon->dump();
-        delete reuseDistMon;
 #endif
-
-        dbPred->print_stats();
+        if (enable_cache_filtering)
+          cacheFilter->print_stats();
       }
 
   };
@@ -601,14 +659,6 @@ public:
 					}
 				}
 
-				if (getenv("TXC_DOA_FILTERING")) {
-					char* doa_filtering_flag = getenv("TXC_DOA_FILTERING");
-					if (strcmp(doa_filtering_flag, "true") == 0) {
-						enable_doa_filtering = true;
-            last_pte_entry.reserve(NUM_SET);
-					}
-				}
-
 				std::cout << NAME << ": Using PTE " << (enable_tx_victim_cache?"victim":"exclusive")  << " cache." << std::endl;
 				std::cout << "\t\tLATENCY: " << txc_latency << std::endl;
 				std::cout << "\t\tSETS: " << txc_num_set << std::endl;
@@ -620,7 +670,7 @@ public:
 				else 
 					std::cout << "\t\tAllowing both instuction and data PTEs." << std::endl;
         
-        std::cout << "\t\tDOA filtering: " << (enable_doa_filtering?"enabled":"disabled") << std::endl;
+        
 
 				//tx_cache = new CACHE( NAME+"_TXC", 1.0, txc_num_set, txc_num_way, txc_mshr_size, txc_latency, 2, 2, champsim::lg2(64), 0, 0, 0, 
 				//											(1 << LOAD) | (1 << PREFETCH), *tx_cache_queues, ll, 
@@ -630,6 +680,8 @@ public:
         
 			}
 		}
+
+    last_pte_entry.reserve(NUM_SET);
 #endif
 
 #if defined ENABLE_EXTRA_CACHE_STATS

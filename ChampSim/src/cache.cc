@@ -152,6 +152,9 @@
 								victim_packet.page_size = way->page_size;
 								victim_packet.base_vpn = way->base_vpn;
 #endif
+								bool is_dead = way->is_doa;
+								way->is_doa = true; // reset the flag
+
 								bool vc_entry_cond;
 								if (enable_instr_only)
 									vc_entry_cond = way->is_pte && way->is_instr;
@@ -160,26 +163,22 @@
 								else 
 									vc_entry_cond = way->is_pte;
 
-								if (enable_doa_filtering) {
-
-									//std::cout << "DOA Filtering" << std::endl;
-
 #if defined SPLIT_STLB
-									uint64_t set_idx = get_set_index(victim_packet.address, fill_mshr.is_instr);
+								uint64_t set_idx = get_set_index(victim_packet.address, fill_mshr.is_instr);
 #else 
-									uint64_t set_idx = get_set_index(victim_packet.address);
+								uint64_t set_idx = get_set_index(victim_packet.address);
 #endif
 
-									//set_idx = 0;
-									if (victim_packet.is_pte && last_pte_entry[set_idx] == victim_packet.address) {
-										//vc_entry_cond = vc_entry_cond; // force doa
-										way->is_doa = false;
-									}
-					
-									bool is_dead = tx_victim_cache->predictDOA(victim_packet.address, way->is_doa);
-									vc_entry_cond = vc_entry_cond && !is_dead;
-									way->is_doa = true; // reset the flag
+								//set_idx = 0;
+								if (victim_packet.is_pte && last_pte_entry[set_idx] == victim_packet.address) {
+									//vc_entry_cond = vc_entry_cond; // force doa
+									way->is_doa = false;
 								}
+					
+								//bool is_dead = tx_victim_cache->predictDOA(victim_packet.address, way->is_doa);
+								//vc_entry_cond = vc_entry_cond && !is_dead;
+								//way->is_doa = true; // reset the flag
+
 								//std::cout << "add_req" << std::endl;
 								if (vc_entry_cond) {
 									//success = tx_cache->add_wq(writeback_packet);
@@ -187,7 +186,7 @@
 									//std::cout << "adding address: " << way->address << std::endl; 
 									//tx_victim_cache[way->address] = *way;
 									// get set index
-									tx_victim_cache->add_request(victim_packet, current_cycle);
+									tx_victim_cache->add_request(victim_packet, current_cycle, is_dead);
 									//std::cout << "tx_cache size:" << tx_victim_cache.size() << std::endl;
 								}
 							}
@@ -415,7 +414,7 @@
 					}
 
 #if defined TRANSLATION_EXCLUSIVE_CACHE
-					if (enable_doa_filtering && handle_pkt.is_pte) {
+					if (handle_pkt.is_pte) {
 						// we should also store the evicting address to last_pte_entry in the set (if it's pte)
 #if defined SPLIT_STLB
 						uint64_t set_idx = get_set_index(handle_pkt.address, fill_mshr.is_instr);
@@ -509,9 +508,9 @@
 
 #if defined TRANSLATION_EXCLUSIVE_CACHE
 						// If we have a hit, we need to change doa status at the block in the cache
-						if (enable_tx_cache && enable_doa_filtering) {
-							way->is_doa = false;
-						}
+						//if (enable_tx_victim_cache) {
+						way->is_doa = false;
+						//}
 #endif
 
 					} else {
@@ -619,7 +618,6 @@
 									entry_found = true;	
 								}
 								*/
-								//std::cout << "lookout!" << std::endl;
 								auto [_entry, _entry_found] = tx_victim_cache->lookup(handle_pkt.address, current_cycle);
 								entry_found = _entry_found;
 								//std::cout << "segfault" << std::endl;	

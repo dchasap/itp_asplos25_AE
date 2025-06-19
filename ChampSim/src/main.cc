@@ -227,7 +227,7 @@ int main(int argc, char** argv)
 
 #if defined ENABLE_EXTRA_CACHE_STATS
   for (CACHE& cache : caches) {
-    std::cout << cache.NAME << std::endl;
+    //std::cout << cache.NAME << std::endl;
     cache.pageAddressStatsMon->dump();
     cache.reuseDistMon->dump();
   #if defined TRANSLATION_EXCLUSIVE_CACHE

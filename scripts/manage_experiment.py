@@ -37,7 +37,8 @@ default_enviromental_variables = {
 	'TXVC_REP_POLICY': "lfu",
 	'TXC_INSTR_ONLY': "false",
 	'TXC_DATA_ONLY': "false",
-	'TXC_DOA_FILTERING': "false",	
+	'TXC_CACHE_FILTERING': "false",
+	'TXC_CACHE_FILTER': "",
 	'TXC_DBPRED_CNTR_SZ': "3",
 	'TXC_DBPRED_THRESHOLD': "0",
 	'TXC_DBPRED_USE_BIAS': "false",
@@ -51,7 +52,8 @@ confnames_to_envars = {
 	'txvc.replacement': 'TXVC_REP_POLICY',
 	'txvc.instr_only': 'TXC_INSTR_ONLY',
 	'txvc.data_only': 'TXC_DATA_ONLY',
-	'txvc.doa_filtering': 'TXC_DOA_FILTERING',
+	'txvc.cache_filtering': 'TXC_CACHE_FILTERING',
+	'txvc.cache_filter': 'TXC_CACHE_FILTER',
 	'txvc.dbpred_use_bias': 'TXC_DBPRED_USE_BIAS',
 	'txvc.dbpred_cntr_size': 'TXC_DBPRED_CNTR_SZ',
 	'txvc.dbpred_threshold': 'TXC_DBPRED_THRESHOLD'
@@ -64,7 +66,9 @@ cpu_json_parameters = []
 cpu_env_parameters = [ 'enable_txvc' ]
 
 cache_json_parameters = [ 'sets', 'ways', 'prefetcher', 'replacement', 'force_hit' ]
-cache_env_parameters = [ 'sets', 'ways', 'replacement', 'doa_filtering', 'dbpred_cntr_size', 'data_only', 'instr_only' ]
+cache_env_parameters = [ 	'sets', 'ways', 'replacement', 
+													'cache_filtering', 'cache_filter', 'dbpred_cntr_size', 'dbpred_threshold', 
+													'data_only', 'instr_only' ]
 
 
 def set_champsim_json_params(config, json_conf, sim, component, parameters):
@@ -95,7 +99,7 @@ def set_champsim_env_params(config, enviromental_variables, sim, component, para
 	return enviromental_variables
 
 
-def prepare_experiment(config):
+def prepare_experiment(config, build_champsim, run):
 
 	root_dir = config['BASE']['ROOT_DIR']
 	champsim_dir = config['BASE']['CHAMPSIM_DIR']
@@ -140,18 +144,19 @@ def prepare_experiment(config):
 		champsimconf.save_config(new_json_conf, root_dir + '/sim_conf/' + exp_name + '/' + sim + '.json')
 
 		# Build champsim
-		#os.system(champsim_dir + '/config.sh --compile-all-modules ' + root_dir + '/sim_conf/' + exp_name + '/' + sim + '.json')
-		os.system(champsim_dir + '/config.sh ' + root_dir + '/sim_conf/' + exp_name + '/' + sim + '.json')
-		os.system('make -C ' + champsim_dir)
+		if (build_champsim):
+			#os.system(champsim_dir + '/config.sh --compile-all-modules ' + root_dir + '/sim_conf/' + exp_name + '/' + sim + '.json')
+			os.system(champsim_dir + '/config.sh ' + root_dir + '/sim_conf/' + exp_name + '/' + sim + '.json')
+			os.system('make -C ' + champsim_dir)
 
 		# Run simulation
-		trace_dir = config['BASE']['TRACE_DIR']
-		dump_dir = config['BASE']['dump_dir'] + "/" + exp_name + "/" + sim
-		workload_name = config['EXPERIMENT']['workload'] # TODO: adjust for multiple workloads
-		print("Submitting simulation jobs for " + sim)
-		print(enviromental_variables)
-		simulation.run_simulation_batch(root_dir, trace_dir, dump_dir, sim, exp_name, workload_name, config['SIMULATION'], enviromental_variables, debug_run)
-
+		if (run):
+			trace_dir = config['BASE']['TRACE_DIR']
+			dump_dir = config['BASE']['dump_dir'] + "/" + exp_name + "/" + sim
+			workload_name = config['EXPERIMENT']['workload'] # TODO: adjust for multiple workloads
+			print("Submitting simulation jobs for " + sim)
+			#print(enviromental_variables)
+			simulation.run_simulation_batch(root_dir, trace_dir, dump_dir, sim, exp_name, workload_name, config['SIMULATION'], enviromental_variables, debug_run)
 
 
 def parse_experimental_data(config):
@@ -257,6 +262,7 @@ def show_experimental_data(config):
 # MAIN 
 parser = argparse.ArgumentParser()
 parser.add_argument('--config', dest='config_file', required=True, help="Name of the experiment configuration file.")
+parser.add_argument('--build', dest='build_binaries', required=False, action='store_true', help='Build ChampSim binaries.')
 parser.add_argument('--run', dest='run_experiment', required=False, action='store_true', help='Run simulations.')
 parser.add_argument('--parse', dest='parse_data', required=False, action='store_true', help='Parse simulations\' data.')
 parser.add_argument('--plot', dest='plot_data', required=False, action='store_true', help='Plot simulations\' data.')
@@ -269,8 +275,8 @@ if __name__ == "__main__":
 	config = configparser.ConfigParser()
 	config.read(args.config_file)
 
-	if args.run_experiment:
-		prepare_experiment(config)
+	if args.run_experiment or args.build_binaries:
+		prepare_experiment(config, args.build_binaries, args.run_experiment)
 	
 	if args.parse_data and parsing_plotting_module_available:
 		parse_experimental_data(config)
