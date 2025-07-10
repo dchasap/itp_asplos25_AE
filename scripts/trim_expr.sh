@@ -1,0 +1,6 @@
+
+EXPRESSION=$1
+FILE=$2
+
+sed -i "/${EXPRESSION}/d" ${FILE}
+

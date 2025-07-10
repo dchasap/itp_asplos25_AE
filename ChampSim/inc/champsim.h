@@ -19,6 +19,8 @@
 
 #include <cstdint>
 #include <exception>
+#include <iostream>
+#include <sstream>
 
 #define MULTIPLE_PAGE_SIZE
 #define ENABLE_EXTRA_CPU_STATS
@@ -48,6 +50,41 @@ constexpr bool debug_print = true;
 #else
 constexpr bool debug_print = false;
 #endif
+
+class DebugLogger {
+  
+  private:
+    bool enabled;
+    std::ostringstream buffer;
+
+  public:
+    
+    DebugLogger() { enabled = false; };
+
+    void enable() { enabled = true; };
+    void disable() { enabled = false; }
+
+    // Overload << to collect the message
+    template<typename T>
+    DebugLogger& operator<<(const T& msg) {
+        if (enabled) {
+            buffer << msg;
+        }
+        return *this;
+    }
+
+    // Handle std::endl and other manipulators
+    DebugLogger& operator<<(std::ostream& (*manip)(std::ostream&)) {
+        if (enabled) {
+            manip(buffer);
+            // Flush the buffer to cout when endl is received
+            std::cout << buffer.str();
+            buffer.str(""); // Clear buffer
+        }
+        return *this;
+    }
+  };
+
 } // namespace champsim
 
 #endif

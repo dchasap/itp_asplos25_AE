@@ -17,7 +17,7 @@ def parse_champsim_stats(input_file, output_file):
     #print(args.input_file)
     # Get Cache and TLB statistics
 
-    CACHES = ['cpu0_DTLB', 'cpu0_ITLB', 'cpu0_STLB', 'cpu0_L1I', 'cpu0_L1D', 'cpu0_L2C', 'LLC', 'cpu0_L1D_VC']
+    CACHES = ['cpu0_DTLB', 'cpu0_ITLB', 'cpu0_STLB', 'cpu0_L1I', 'cpu0_L1D', 'cpu0_L2C', 'LLC', 'TXVC']
     OPERATIONS = ['TOTAL', 'LOAD', 'RFO', 'PREFETCH', 'WRITEBACK', 'TRANSLATION']
     STATS = [   'ACCESS', 'HIT', 'MISS', 'dACCESS', 'dHIT', 'dMISS', 'iACCESS', 'iHIT', 'iMISS', 
                 'dtHIT', 'dtMISS', 'itHIT', 'itMISS', 'itACCESS', 'dtACCESS',
@@ -104,7 +104,15 @@ def parse_champsim_stats(input_file, output_file):
             avg_occupancy = line.group().split()[3]
         #print(cache + ":" + avg_occupancy)
         AVG_OCCUPANCY[cache] = avg_occupancy
-      	
+
+    # Get CACHE FILTER stats
+    lines = re.findall(r'DBPRED: prediction accuracy:\s+\d+[\.]?\d*%', data)
+    if (len(lines) == 0):
+        cache_filter_accuracy = 'N/A'
+    else:
+        #print(lines)
+        cache_filter_accuracy = lines[0].split()[3].replace('%', '')
+        #print(cache_filter_accuracy)
 
     # Get IPC
     lines = re.findall(r'CPU 0 cumulative IPC:\s+\d+[\.]?\d*', data)
@@ -135,6 +143,8 @@ def parse_champsim_stats(input_file, output_file):
     header.append('PAGE_CROSS_HITS')
     header.append('PAGE_CROSS_MISSES')
 
+    header.append('CACHE_FILTER_ACCURACY')
+
     header.append('IPC')
     header.append('INSTRUCTIONS')
     header.append('CYCLES')
@@ -153,6 +163,7 @@ def parse_champsim_stats(input_file, output_file):
             new_row.append(AVG_MISS_LATENCIES[cache]['AVERAGE_dMISS_LATENCY'])
             new_row.append(PAGE_CROSSING[cache]['PAGE_CROSS_HITS'])
             new_row.append(PAGE_CROSSING[cache]['PAGE_CROSS_MISSES'])
+            new_row.append(cache_filter_accuracy)
             new_row.append(ipc)
             new_row.append(instructions)
             new_row.append(cycles)

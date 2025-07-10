@@ -42,14 +42,14 @@ def plot(data, x, y, hue, axes):
 							kde=True, ax=axes)
 	elif (plot_type == 'violin'):
 		ax = sns.violinplot(data=data, y=y, x=hue, linewidth=1, scale='count', ax=axes, color='#aeaeae')
-		i = 0
-		while (i < len(ax.collections)):
-			if (i % 2 == 0):
-				ax.collections[i].set_edgecolor('black')
-			else:
-				ax.collections[i].set_edgecolor('black')
-				ax.collections[i].set_linewidth(4)
-			i = i + 1
+		#i = 0
+		#while (i < len(ax.collections)):
+		#	if (i % 2 == 0):
+		#		ax.collections[i].set_edgecolor('black')
+		#	else:
+		#		ax.collections[i].set_edgecolor('black')
+		#		ax.collections[i].set_linewidth(4)
+		#	i = i + 1
 	elif (plot_type == 'box'):
 		PROPS = {
 			'boxprops':{'facecolor':'#aeaeae', 'edgecolor':'black'},
@@ -256,7 +256,8 @@ def plot_average_single_cache(	input_baseline_files, means_df, input_tags, cache
 		fig, axes = plt.subplots(	nrows=1, ncols=1, 
 									figsize=(plot_width, plot_height+2))
 
-		sns.set_style('white')
+		#sns.set_style('white')
+		sns.set_palette(sns.color_palette('Paired'))
 
 		i = 0
 		hatch_idx = 0
@@ -264,7 +265,7 @@ def plot_average_single_cache(	input_baseline_files, means_df, input_tags, cache
 		rep_pol_legend_handle = [None, None, None, None, None, None, None, None]
 		for stat_name in stat_names:
 			ax = sns.barplot(	data=means_df,
-									x='cache', y=stat_name, hue='tag', width=0.8, color='grey',
+									x='cache', y=stat_name, hue='tag', width=0.8, #color='grey',
 									linewidth=.5, edgecolor='black', ax=axes)
 
 			hatches = ['', '///', 'xx', '\\\\\\']
@@ -328,7 +329,7 @@ def plot_average_single_cache(	input_baseline_files, means_df, input_tags, cache
 													rep_pol_legend_handle[3], rep_pol_legend_handle[4], rep_pol_legend_handle[5],
 													rep_pol_legend_handle[6], rep_pol_legend_handle[7]], 
 												labels = input_tags, loc='upper center', 
-												ncol=2, frameon=0, bbox_to_anchor=(0.2,1.45), title = "Replacement Policy")
+												ncol=3, frameon=0, bbox_to_anchor=(0.2,1.45), title = "Replacement Policy")
 		
 		plt.gca().add_artist(mpki_breakdown_legend)
 		#mpki_breakdown_legend.legendHandles[0].set_facecolor('white')
@@ -398,17 +399,17 @@ def plot_average_multiple_caches(	input_baseline_files, means_df, input_tags, ca
 								linewidth=.5, edgecolor='black', ax=axes[1][i])
 
 			#hatches = itertools.cycle(['/', '//', '+', '-', 'x', '\\', '*', 'o', 'O', '.'])
-			for j, bar in enumerate(ax.patches):
-				if (j == 3):
-					bar.set_hatch('////')
-				elif j == 7:
-					bar.set_hatch('...')
-				elif j == 11:
-					bar.set_hatch('xxx')
-				elif j == 15:
-					bar.set_hatch('OO')
-				elif j == 19:
-					bar.set_hatch('\\\\\\')
+			#for j, bar in enumerate(ax.patches):
+			#	if (j == 3):
+			#		bar.set_hatch('////')
+			#	elif j == 7:
+			#		bar.set_hatch('...')
+			#	elif j == 11:
+			#		bar.set_hatch('xxx')
+			#	elif j == 15:
+			#		bar.set_hatch('OO')
+			#	elif j == 19:
+			#		bar.set_hatch('\\\\\\')
 			#	hatch = next(hatches)
 	
 			if (i == 0):
@@ -418,7 +419,9 @@ def plot_average_multiple_caches(	input_baseline_files, means_df, input_tags, ca
 				ax.set_ylabel('')
 				ax.get_legend().remove()
 
-			if (cache == "cpu0_L1D"):
+			if (cache == "cpu0_L1I"):
+				ax.set_xlabel("L1I")
+			elif (cache == "cpu0_L1D"):
 				ax.set_xlabel("L1D")
 			elif (cache == "TXVC"):
 				ax.set_xlabel("TXVC")
@@ -445,4 +448,25 @@ def plot_average_multiple_caches(	input_baseline_files, means_df, input_tags, ca
 		fig.savefig(output_file, bbox_inches='tight')
 		matplotlib.pyplot.close()
 
+def plot_histogram(data, output_file):
+		
+		#sns.set_palette(sns.color_palette())
+		plot_width = plot_conf['plot_width']
+		plot_height = plot_conf['plot_height']
+		fig, axes = plt.subplots(nrows=2, ncols=4, figsize=(plot_width, plot_height+2))
 
+
+		#sns.set_style('white')
+		#sns.color_palette("tab10")
+		sns.set_palette(sns.color_palette('Paired'))
+
+		# Create a histogram
+		plt.hist(data, bins=30, density=True)
+
+		# Set title and labels
+		plt.title(plot_conf['title'])
+		plt.xlabel(plot_conf['xlabel'])
+		plt.ylabel(plot_conf['ylabel'])
+
+		fig.savefig(output_file, bbox_inches='tight')
+		matplotlib.pyplot.close()

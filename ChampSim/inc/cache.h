@@ -32,6 +32,7 @@
 #include "champsim_constants.h"
 #include "memory_class.h"
 #include "operable.h"
+#include "memory_trace.h"
 
 #if defined FORCE_HIT || defined MULTIPLE_PAGE_SIZE || defined TRANSLATION_EXCLUSIVE_CACHE
 #include "vmem.h"
@@ -296,9 +297,14 @@ public:
       bool enable_cache_filtering = false;
 
       //stats
-      uint64_t total_accesses = 0;
-      uint64_t total_hits = 0;
-      uint64_t total_misses = 0;
+      uint64_t total_accesses = 0, total_itaccesses = 0, total_dtaccesses = 0;
+      uint64_t total_hits = 0, total_ithits = 0, total_dthits = 0;
+      uint64_t total_misses = 0, total_itmisses = 0, total_dtmisses = 0;
+
+      std::ofstream histogram_file;
+		  std::string histogram_filename;
+      std::vector<uint64_t> mem_access_list;
+      bool save_mem_accesses;
 
 #if defined ENABLE_EXTRA_CACHE_STATS
       ReuseDistanceMonitor* reuseDistMon;
@@ -348,12 +354,18 @@ public:
             if (strcmp(dbpred_name, "doa-simple") == 0) {
               std::cout << "\tTXVC: Using DOA-simpe filter" << std::endl;
 					    cacheFilter = new SimpleDOAFilter();
+            } else if (strcmp(dbpred_name, "oracle-doa") == 0) {
+              std::cout << "\tTXVC: Using Oracle DOA filter" << std::endl;
+					    cacheFilter = new OracleDOAFilter(num_set, num_way, true);  
             } else if (strcmp(dbpred_name, "doa") == 0) {
               std::cout << "\tTXVC: Using DOA filter" << std::endl;
 					    cacheFilter = new DOAPredictor(num_set, num_way, true);
             } else if (strcmp(dbpred_name, "mfu") == 0) {
               std::cout << "\tTXVC: Using MFU filter" << std::endl;
               cacheFilter = new MFUFilter(num_set, num_way, false);
+            } else if (strcmp(dbpred_name, "oracle-mfu") == 0) {
+              std::cout << "\tTXVC: Using Oracle MFU filter" << std::endl;
+              cacheFilter = new OracleMFUFilter(num_set, num_way, true);  
             } else {
               std::cerr << "TXVC: Unknown cache filter " << dbpred_name << "!" << std::endl;
               exit(1);
@@ -371,12 +383,27 @@ public:
         }
 
 
+        save_mem_accesses = false;
+        if (save_mem_accesses) {
+          char* _histogram_filename = nullptr;
+          if (getenv("TXVC_MEMORY_TRACE_PATH")) {
+				    _histogram_filename = getenv("TXVC_MEMORY_TRACE_PATH");
+            histogram_filename.assign(_histogram_filename);
+            histogram_file = std::ofstream(_histogram_filename, std::ios::out);
+			    } else {
+				    std::cout << "TXVC_MEMORY_TRACE_PATH not set!" << std::endl;
+				    exit(1);
+		  	  }
+
+          std::cout << "TXVC: Saving memory accesses to " << histogram_filename << std::endl;
+        }
+
 #if defined ENABLE_EXTRA_CACHE_STATS        
         std::string reuse_dist_filename_prefix = getenv("REUSE_DIST_FILENAME_PREFIX");
 	    
         reuseDistMon = new ReuseDistanceMonitor(num_set, num_way, offset_bits,
-																						reuse_dist_filename_prefix + "_" + "TXVC" + ".csv",
-																						true, true);
+																						    reuse_dist_filename_prefix + "_" + "TXVC" + ".csv",
+																						    true, true);
 #endif
       }
 
@@ -424,7 +451,7 @@ public:
         }
         
         if (enable_cache_filtering)
-          cacheFilter->update(way->address, way->is_doa, false); 
+          cacheFilter->update(way->address, way->is_doa, false, curr_cycle); 
 
         way->prefetch = request.prefetch_from_this;
         way->dirty = (request.type == WRITE);
@@ -462,19 +489,33 @@ public:
 #if defined ENABLE_EXTRA_CACHE_STATS
         reuseDistMon->add_access(address);
 #endif
+        if (save_mem_accesses)
+          mem_access_list.push_back(address);
         
         if (enable_cache_filtering)
-          cacheFilter->update(address, hit, true);
+          cacheFilter->update(address, !hit, true, curr_cycle); // if hit, not doa
 
         total_accesses++;
+        if (way->is_instr)
+          total_itaccesses++;
+        else
+          total_dtaccesses++;
 
         if (hit) {
           total_hits++;
+          if (way->is_instr)
+            total_ithits++;
+          else
+            total_dthits++;
           way->is_doa = false;
           replacementPol->update_replacement_state(set_idx, way_idx, curr_cycle,  hit);
           return {blocks.at((set_idx * num_way) + way_idx), hit};
         } else {
           total_misses++;
+          if (way->is_instr)
+            total_itmisses++;
+          else 
+            total_dtmisses++;
           return {blocks.at(0), hit};
         }
       }
@@ -493,17 +534,31 @@ public:
 
       void print_stats(void) 
       {
+        if (save_mem_accesses) {
+          std::cout << "Saving memory access histogram data to " << histogram_filename << std::endl;
+          histogram_file << "address" << std::endl;
+          for (auto it = mem_access_list.begin(); it != mem_access_list.end(); ++it) {
+            histogram_file << *it << std::endl;
+          }
+          histogram_file.close();
+        }
+
         std::cout << "TXVC";
         std::cout << " TOTAL       ";
         std::cout << "ACCESSES:" << std::setw(10) << total_accesses << "  ";
         std::cout << "HIT:" << std::setw(10) << total_hits << "  "; 
-        std::cout << "MISS:" << std::setw(10) << total_misses << std::endl;
+        std::cout << "MISS:" << std::setw(10) << total_misses << " ";
+        std::cout << "itACCESSES:" << std::setw(10) << total_itaccesses << "  ";
+        std::cout << "itHIT:" << std::setw(10) << total_ithits << "  "; 
+        std::cout << "itMISS:" << std::setw(10) << total_itmisses << " ";
+        std::cout << "dtACCESSES:" << std::setw(10) << total_dtaccesses << "  ";
+        std::cout << "dtHIT:" << std::setw(10) << total_dthits << "  "; 
+        std::cout << "dtMISS:" << std::setw(10) << total_dtmisses;
+        std::cout << std::endl;
        
 #if defined ENABLE_EXTRA_CACHE_STATS
         reuseDistMon->dump();
 #endif
-        if (enable_cache_filtering)
-          cacheFilter->print_stats();
       }
 
   };

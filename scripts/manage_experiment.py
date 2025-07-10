@@ -5,7 +5,9 @@ import configparser
 import os
 import subprocess
 import traceback
+
 # custom modules
+import conf_preprocessor
 import champsimconf
 import workloads
 import simulation
@@ -42,7 +44,12 @@ default_enviromental_variables = {
 	'TXC_DBPRED_CNTR_SZ': "3",
 	'TXC_DBPRED_THRESHOLD': "0",
 	'TXC_DBPRED_USE_BIAS': "false",
-	'REUSE_DIST_FILENAME_PREFIX': "reuse_dist"	
+	'TXC_FILTER_CLEANUP_INTERVAL': "9999999999999999",
+	'TXC_FILTER_TOP_N_FACTOR': "1.0",
+	'CACHE_FILTER_FREQ_THRESHOLD': "2",
+	'TXVC_MEMORY_TRACE_PATH': "./data",
+	'CACHE_FILTER_MEMORY_TRACE_PATH': './data',
+	'REUSE_DIST_FILENAME_PREFIX': "reuse_dist"
 	}
 
 confnames_to_envars = {
@@ -56,7 +63,13 @@ confnames_to_envars = {
 	'txvc.cache_filter': 'TXC_CACHE_FILTER',
 	'txvc.dbpred_use_bias': 'TXC_DBPRED_USE_BIAS',
 	'txvc.dbpred_cntr_size': 'TXC_DBPRED_CNTR_SZ',
-	'txvc.dbpred_threshold': 'TXC_DBPRED_THRESHOLD'
+	'txvc.dbpred_threshold': 'TXC_DBPRED_THRESHOLD',
+	'txvc.dbpred_use_bias': 'TXC_DBPRED_USE_BIAS',
+	'txvc.filter_cleanup_interval': 'TXC_FILTER_CLEANUP_INTERVAL',
+	'txvc.filter_top_n_factor': 'TXC_FILTER_TOP_N_FACTOR',
+	'txvc.filter_frequency_threshold': 'CACHE_FILTER_FREQ_THRESHOLD',
+	'txvc.filter_mem_trace_path':	"CACHE_FILTER_MEMORY_TRACE_PATH",
+	'txvc.mem_trace_path': 'TXVC_MEMORY_TRACE_PATH'
 }
 
 components = ['ooo_cpu', 'itlb', 'dtlb', 'stlb', 'l1i', 'l1d', 'l2c', 'llc', 'txvc']
@@ -67,7 +80,10 @@ cpu_env_parameters = [ 'enable_txvc' ]
 
 cache_json_parameters = [ 'sets', 'ways', 'prefetcher', 'replacement', 'force_hit' ]
 cache_env_parameters = [ 	'sets', 'ways', 'replacement', 
-													'cache_filtering', 'cache_filter', 'dbpred_cntr_size', 'dbpred_threshold', 
+													'cache_filtering', 'cache_filter', 'filter_mem_trace_path',
+													'dbpred_cntr_size', 'dbpred_threshold', 'dbpred_use_bias',
+													'filter_cleanup_interval', 'filter_top_n_factor', 'filter_frequency_threshold', 
+													'filter_mem_trace_path',
 													'data_only', 'instr_only' ]
 
 
@@ -109,6 +125,10 @@ def prepare_experiment(config, build_champsim, run):
 	
 	debug_run = config['EXPERIMENT'].getboolean('debug_run')
 
+	parallel_run = False
+	if (config.has_option('EXPERIMENT', 'parallel_run')):
+		parallel_run = config['EXPERIMENT'].getboolean('parallel_run')
+
 	# first get the simulations' names
 	#if debug_run:
 	#	simulations = [ 'debug' ]
@@ -129,7 +149,7 @@ def prepare_experiment(config, build_champsim, run):
 		champsimconf.set_entry(new_json_conf, None, 'executable_name', exp_name + '/champsim_' + sim)
 
 		# Setup simulation parameters
-		enviromental_variables = default_enviromental_variables
+		enviromental_variables = default_enviromental_variables # FIXME: is this a swallow copy?
 
 		for component in components:
 
@@ -156,7 +176,7 @@ def prepare_experiment(config, build_champsim, run):
 			workload_name = config['EXPERIMENT']['workload'] # TODO: adjust for multiple workloads
 			print("Submitting simulation jobs for " + sim)
 			#print(enviromental_variables)
-			simulation.run_simulation_batch(root_dir, trace_dir, dump_dir, sim, exp_name, workload_name, config['SIMULATION'], enviromental_variables, debug_run)
+			simulation.run_simulation_batch(root_dir, trace_dir, dump_dir, sim, exp_name, workload_name, config['SIMULATION'], enviromental_variables, parallel_run, debug_run)
 
 
 def parse_experimental_data(config):
@@ -230,7 +250,6 @@ def plot_experimental_data(config):
 	
 	csv_data_files = []
 	for sim in simulations:
-
 		stats_dir = config['BASE']['STATS_DIR'] + "/" + exp_name + "/" + sim
 		
 		if config.has_option(sim, 'simulation_stats'):
@@ -241,6 +260,7 @@ def plot_experimental_data(config):
 		csv_data_files.append(csv_data_file)
 
 	os.system("mkdir -p " + figures_dir)
+	print("Plotting " + plot_name + " for " + workload_name)
 	champsim2plot.gen_plot(workload_name, simulations, csv_data_files, plot_name, plot_type, file_type, figures_dir)
 
 
@@ -274,6 +294,8 @@ if __name__ == "__main__":
 
 	config = configparser.ConfigParser()
 	config.read(args.config_file)
+
+	config = conf_preprocessor.preprocess(config, args.config_file)
 
 	if args.run_experiment or args.build_binaries:
 		prepare_experiment(config, args.build_binaries, args.run_experiment)
