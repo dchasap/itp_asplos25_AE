@@ -607,6 +607,7 @@
 						if (NAME.find("L1D") != std::string::npos) {
 							PACKET txc_copy_pkt{handle_pkt};
 							bool entry_found = false;
+							//FIXME: NEED TO ADD CHECK FRO ONLY DATA/INSTR
 							if (enable_tx_victim_cache && (handle_pkt.is_pte)) {
 								//std::cout << "looking address: " << way->address << std::endl; 
 								//copy.data = vmem->get_pte_pa(handle_pkt.cpu, handle_pkt.v_address, handle_pkt.translation_level).first;

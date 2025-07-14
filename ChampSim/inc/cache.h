@@ -365,7 +365,10 @@ public:
               cacheFilter = new MFUFilter(num_set, num_way, false);
             } else if (strcmp(dbpred_name, "oracle-mfu") == 0) {
               std::cout << "\tTXVC: Using Oracle MFU filter" << std::endl;
-              cacheFilter = new OracleMFUFilter(num_set, num_way, true);  
+              cacheFilter = new OracleMFUFilter(num_set, num_way, true); 
+            } else if (strcmp(dbpred_name, "generate-trace") == 0) {
+              std::cout << "\tTXVC: Generating a memory trace for the cache filter" << std::endl;
+              cacheFilter = new FilterTracer();   
             } else {
               std::cerr << "TXVC: Unknown cache filter " << dbpred_name << "!" << std::endl;
               exit(1);
@@ -556,6 +559,8 @@ public:
         std::cout << "dtMISS:" << std::setw(10) << total_dtmisses;
         std::cout << std::endl;
        
+        cacheFilter->print_stats();
+
 #if defined ENABLE_EXTRA_CACHE_STATS
         reuseDistMon->dump();
 #endif

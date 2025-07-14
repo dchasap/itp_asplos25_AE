@@ -29,6 +29,45 @@ class CacheFilter {
 };
 
 
+class FilterTracer : public CacheFilter {
+
+  private: 
+    bool save_mem_trace;
+    MemoryTracer memTracer;
+    std::vector<uint64_t> accesses_vector;
+
+  public:
+
+    FilterTracer() {
+      
+      if (getenv("CACHE_FILTER_MEMORY_TRACE_PATH") != nullptr) { 
+        std::string memtrace_filename = getenv("CACHE_FILTER_MEMORY_TRACE_PATH");
+        std::cerr << "\tSaving memory trace to " << memtrace_filename << std::endl;
+        memTracer.open_tracefile(memtrace_filename);
+      } else {
+        std::cerr << "CACHE_FILTER_MEMORY_TRACE_PATH not set!" << std::endl;
+        exit(1);
+      }
+    
+    }
+
+    virtual bool predict(uint64_t address, bool) 
+    {
+      memTracer.add_access(address);
+      return false;
+    };
+
+    virtual void update(uint64_t, bool, bool, uint64_t) { return; };
+
+    virtual void print_stats() 
+    {
+      memTracer.save_tracefile();
+      return;
+    }
+};
+
+
+
 class OracleDOAFilter : public CacheFilter {
 
   private:
@@ -41,13 +80,16 @@ class OracleDOAFilter : public CacheFilter {
 
     uint64_t freq_threshold;
     std::vector<FrequencyNode> ordered_freq_map;
-
-    bool save_mem_trace;
-    MemoryTracer memTracer;
+    
     MemoryTraceReader memTraceReader;
     std::vector<uint64_t> accesses_vector;
 
     champsim::DebugLogger debugLog;
+
+    // stats
+    uint64_t total_predictions = 0, total_correct_predictions = 0, total_wrong_predictions = 0;
+    std::map<uint64_t, bool> last_prediction_map;
+    uint64_t predictors_agree = 0, predictors_disagree = 0;
 
   public: 
     OracleDOAFilter(uint64_t sets, uint64_t ways, bool _skip_lookups) 
@@ -61,12 +103,10 @@ class OracleDOAFilter : public CacheFilter {
 
       std::cout << "CACHE_FILTER: Oracle DOA" << std::endl;
 
-      save_mem_trace = true;
       if (getenv("CACHE_FILTER_MEMORY_TRACE_PATH") != nullptr) { 
         std::string memtrace_filename = getenv("CACHE_FILTER_MEMORY_TRACE_PATH");
         if (memTraceReader.open_tracefile(memtrace_filename)) {
           std::cout << "\tReading memory trace from " << memtrace_filename << std::endl;
-          save_mem_trace = false;
           accesses_vector = memTraceReader.get_accesses();
           memTraceReader.close_tracefile();
 
@@ -113,8 +153,8 @@ class OracleDOAFilter : public CacheFilter {
           std::cout << "-Set (filtered) size: " << ordered_freq_map.size() << std::endl;
  
         } else {
-          std::cerr << "\tSaving memory trace to " << memtrace_filename << std::endl;
-          memTracer.open_tracefile(memtrace_filename);
+          std::cerr << "\tMemory trace " << memtrace_filename << " not found!" << std::endl;
+          exit(1);
         }
 
       } else {
@@ -126,29 +166,42 @@ class OracleDOAFilter : public CacheFilter {
     
     
     // Return true if address is not in the top N frequencies
-    virtual bool predict(uint64_t address, bool) 
+    virtual bool predict(uint64_t address, bool seems_dead) 
     {
-
+      total_predictions++;
       for (auto access_it = ordered_freq_map.begin(); access_it != ordered_freq_map.end(); ++access_it) {
         
         debugLog << "Comparing " << address << " with " << access_it->key << std::endl; 
 
         if (access_it->key == address) {
-          debugLog << "Address " << address << " found in top N"  << std::endl;
+          debugLog << "Address " << address << " found in doa list"  << std::endl;
+          if (seems_dead) predictors_agree++;
+          else predictors_disagree++;
+          last_prediction_map.insert({address, true});
           return true;
         }
       }
 
       debugLog << "Address " << address << " not found"  << std::endl;
+      if (seems_dead) predictors_disagree++;
+      else predictors_agree++;
+      last_prediction_map.insert({address, false});
       return false;
     }
 
-    virtual void update(uint64_t, bool, bool, uint64_t) { return; }
+    virtual void update(uint64_t address, bool is_doa, bool, uint64_t) 
+    { 
+      if (is_doa == last_prediction_map[address]) {
+        total_correct_predictions++;
+      } else {
+        total_wrong_predictions++;
+      }
+    }
 
     virtual void print_stats() 
     {
-      if (save_mem_trace)
-        memTracer.save_tracefile();
+      std::cout << "DBPRED: predictors agree: " << double((predictors_agree*100) / (predictors_agree+predictors_disagree)) << "%" << std::endl;
+      std::cout << "DBPRED: predictor accuracy: " << double((total_correct_predictions*100) / (total_correct_predictions+total_wrong_predictions)) << "%" << std::endl;
     }
 };
 
