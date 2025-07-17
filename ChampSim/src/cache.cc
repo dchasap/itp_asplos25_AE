@@ -97,31 +97,7 @@
 							writeback_packet.base_vpn = way->base_vpn;
 #endif
 
-//FIXME: Should we skip writebacks for victim cache (??) - ptes are never written/dirty
-#if 0
-							if (!enable_tx_cache && !enable_tx_victim_cache) {
-/*
-							if (enable_TRANSLATION_EXCLUSIVE_CACHE && false) { 
-							bool vc_entry_cond;
-							if (enable_instr_only)
-								vc_entry_cond = writeback_packet.is_pte && writeback_packet.is_instr;
-							else 
-								vc_entry_cond = writeback_packet.is_pte;
-
-							//if (enable_TRANSLATION_EXCLUSIVE_CACHE && vc_entry_cond && !way.is_doa) {
-							if (enable_TRANSLATION_EXCLUSIVE_CACHE && vc_entry_cond) {
-								success = TRANSLATION_EXCLUSIVE_CACHE->add_wq(writeback_packet);
-							} else { 
-								success = lower_level->add_wq(writeback_packet);
-							}
-*/
-								success = lower_level->add_wq(writeback_packet);
-							} else {
-								success = lower_level->add_wq(writeback_packet);
-							}
-#else
 							success = lower_level->add_wq(writeback_packet);
-#endif
 						}
 
 						if (success) {
@@ -431,26 +407,7 @@
 						sim_stats.back().hits[handle_pkt.type][handle_pkt.cpu]++;
 
 #if defined ENABLE_EXTRA_CACHE_STATS
-						if (handle_pkt.is_instr && !handle_pkt.is_pte) {
-							sim_stats.back().ihits[handle_pkt.type][handle_pkt.cpu]++;
-						} else if (!handle_pkt.is_instr && !handle_pkt.is_pte) {
-							sim_stats.back().dhits[handle_pkt.type][handle_pkt.cpu]++;
-						} else if (handle_pkt.is_instr && handle_pkt.is_pte) {
-							sim_stats.back().ithits[handle_pkt.cpu][handle_pkt.type]++;
-						} else if (!handle_pkt.is_instr && handle_pkt.is_pte) {
-							sim_stats.back().dthits[handle_pkt.cpu][handle_pkt.type]++;
-						} else {
-							//sim_stats.back().ihits[handle_pkt.type][handle_pkt.cpu]++;
-							std::cout << "Oups, something went wrong..." << std::endl;
-							std::cout << "\ttype:" << (uint32_t)handle_pkt.type << std::endl;
-							std::cout << "\tis_instr:" << (handle_pkt.is_instr?"true":"false") << std::endl;
-							assert(false);
-						}
-
-						pageAddressStatsMon->add_access(handle_pkt.address, handle_pkt.is_instr);
-						reuseDistMon->add_access(handle_pkt.address);
-
-						hit_hook();
+						hit_hook(handle_pkt);
 #endif
 
 						// update replacement policy
@@ -555,25 +512,7 @@
 							sim_stats.back().hits[handle_pkt.type][handle_pkt.cpu]++;
 
 	#if defined ENABLE_EXTRA_CACHE_STATS
-							if (handle_pkt.is_instr && !handle_pkt.is_pte) {
-								sim_stats.back().ihits[handle_pkt.type][handle_pkt.cpu]++;
-							} else if (!handle_pkt.is_instr && !handle_pkt.is_pte) {
-								sim_stats.back().dhits[handle_pkt.type][handle_pkt.cpu]++;
-							} else if (handle_pkt.is_instr && handle_pkt.is_pte) {
-								sim_stats.back().ithits[handle_pkt.cpu][handle_pkt.type]++;
-							} else if (!handle_pkt.is_instr && handle_pkt.is_pte) {
-								sim_stats.back().dthits[handle_pkt.cpu][handle_pkt.type]++;
-							} else {
-								std::cout << "Oups, something went wrong..." << std::endl;
-								std::cout << "\ttype:" << (uint32_t)handle_pkt.type << std::endl;
-								std::cout << "\tis_instr:" << (handle_pkt.is_instr?"true":"false") << std::endl;
-								assert(false);
-							}
-						
-							pageAddressStatsMon->add_access(handle_pkt.address, handle_pkt.is_instr);
-							reuseDistMon->add_access(handle_pkt.address);
-
-							hit_hook();
+							hit_hook(handle_pkt);
 	#endif
 							
 							copy_pkt.pf_metadata = metadata_thru;
@@ -596,8 +535,58 @@
 							return true; //forcing hit
 						}
 #endif // FORCED_HIT			
+#if 0 //defined TRANSLATION_EXCLUSIVE_CACHE
 
-#if defined TRANSLATION_EXCLUSIVE_CACHE
+						if (NAME.find("L1D") != std::string::npos) {
+							//PACKET txc_copy_pkt{handle_pkt};
+							bool entry_found = false;
+							
+							bool vc_entry_cond;
+							if (enable_instr_only)
+								vc_entry_cond = handle_pkt.is_pte && handle_pkt.is_instr;
+							else if (enable_data_only)
+								vc_entry_cond = handle_pkt.is_pte && handle_pkt.is_instr;
+							else 
+								vc_entry_cond = handle_pkt.is_pte;
+							
+							if (enable_tx_victim_cache && vc_entry_cond) {
+
+								auto [_entry, _entry_found] = tx_victim_cache->lookup(handle_pkt.address, current_cycle);
+								entry_found = _entry_found;
+								//copy_pkt.data = _entry.data;
+
+								if (entry_found) { 
+
+									PACKET txvc_mshr_packet;
+									txvc_mshr_packet.address = handle_pkt.address;
+									txvc_mshr_packet.type = handle_pkt.type;
+									txvc_mshr_packet.is_instr = handle_pkt.is_instr;
+									txvc_mshr_packet.cpu = 0; // Possible issue for multicore
+									txvc_mshr_packet.address = _entry.address;
+									txvc_mshr_packet.data = _entry.data;
+									txvc_mshr_packet.instr_id = handle_pkt.instr_id;
+									txvc_mshr_packet.ip = handle_pkt.ip;
+									txvc_mshr_packet.type = handle_pkt.type;
+									txvc_mshr_packet.pf_metadata = _entry.pf_metadata; // not sure
+
+#if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT
+									txvc_mshr_packet.is_instr = _entry.is_instr;
+									txvc_mshr_packet.is_pte = _entry.is_pte;
+#endif	
+
+#if defined MULTIPLE_PAGE_SIZE
+									txvc_mshr_packet.page_size = _entry.page_size;
+									txvc_mshr_packet.base_vpn = _entry.base_vpn;
+#endif
+ 			
+									handle_fill(txvc_mshr_packet);
+								
+									//return false; // This skips pushing the miss to the L2C
+								}
+							}
+						} 
+#endif
+#if 0 //defined TRANSLATION_EXCLUSIVE_CACHE
 						// Dimitrios: updating replacement policy doesn't really matter at this point
 						// update replacement policy
 				/*
@@ -631,25 +620,7 @@
 								sim_stats.back().hits[handle_pkt.type][handle_pkt.cpu]++;
 
 	#if defined ENABLE_EXTRA_CACHE_STATS
-								if (handle_pkt.is_instr && !handle_pkt.is_pte) {
-									sim_stats.back().ihits[handle_pkt.type][handle_pkt.cpu]++;
-								} else if (!handle_pkt.is_instr && !handle_pkt.is_pte) {
-									sim_stats.back().dhits[handle_pkt.type][handle_pkt.cpu]++;
-								} else if (handle_pkt.is_instr && handle_pkt.is_pte) {
-									sim_stats.back().ithits[handle_pkt.cpu][handle_pkt.type]++;
-								} else if (!handle_pkt.is_instr && handle_pkt.is_pte) {
-									sim_stats.back().dthits[handle_pkt.cpu][handle_pkt.type]++;
-								} else {
-									std::cout << "Oups, something went wrong..." << std::endl;
-									std::cout << "\ttype:" << (uint32_t)handle_pkt.type << std::endl;
-									std::cout << "\tis_instr:" << (handle_pkt.is_instr?"true":"false") << std::endl;
-									assert(false);
-								}
-						
-								pageAddressStatsMon->add_access(handle_pkt.address, handle_pkt.is_instr);
-								reuseDistMon->add_access(handle_pkt.address);
-
-								hit_hook();
+								hit_hook(handle_pkt);
 	#endif
 					
 								txc_copy_pkt.pf_metadata = metadata_thru;
@@ -685,26 +656,9 @@
 										assert(handle_pkt.translation_level == 0);
 
 										sim_stats.back().hits[handle_pkt.type][handle_pkt.cpu]++;
-	#if defined ENABLE_EXTRA_CACHE_STATS
-										if (handle_pkt.is_instr && !handle_pkt.is_pte) {
-											sim_stats.back().ihits[handle_pkt.type][handle_pkt.cpu]++;
-										} else if (!handle_pkt.is_instr && !handle_pkt.is_pte) {
-											sim_stats.back().dhits[handle_pkt.type][handle_pkt.cpu]++;
-										} else if (handle_pkt.is_instr && handle_pkt.is_pte) {
-											sim_stats.back().ithits[handle_pkt.cpu][handle_pkt.type]++;
-										} else if (!handle_pkt.is_instr && handle_pkt.is_pte) {
-											sim_stats.back().dthits[handle_pkt.cpu][handle_pkt.type]++;
-										} else {
-											//std::cout << "Oups, something went wrong..." << std::endl;
-											//std::cout << "\ttype:" << (uint32_t)handle_pkt.type << std::endl;
-											//std::cout << "\tis_instr:" << (handle_pkt.is_instr?"true":"false") << std::endl;
-											assert(false);
-										}
-
-										pageAddressStatsMon->add_access(handle_pkt.address, handle_pkt.is_instr);
-										reuseDistMon->add_access(handle_pkt.address);
-
-										hit_hook();
+	
+										#if defined ENABLE_EXTRA_CACHE_STATS
+										hit_hook(handle_pkt);
 	#endif
 
 										copy.pf_metadata = metadata_thru;
@@ -738,25 +692,7 @@
 #endif
 
 #if defined ENABLE_EXTRA_CACHE_STATS
-						if (handle_pkt.is_instr && !handle_pkt.is_pte) {
-							sim_stats.back().imisses[handle_pkt.type][handle_pkt.cpu]++;
-						} else if (!handle_pkt.is_instr && !handle_pkt.is_pte) {
-							sim_stats.back().dmisses[handle_pkt.type][handle_pkt.cpu]++;
-						} else if (handle_pkt.is_instr && handle_pkt.is_pte) {
-							sim_stats.back().itmisses[handle_pkt.cpu][handle_pkt.type]++;
-						} else if (!handle_pkt.is_instr && handle_pkt.is_pte) {
-							sim_stats.back().dtmisses[handle_pkt.cpu][handle_pkt.type]++;
-						} else {
-							std::cout << "Oups, something went wrong..." << std::endl;
-							std::cout << "\ttype:" << (uint32_t)handle_pkt.type << std::endl;
-							std::cout << "\tis_instr:" << (handle_pkt.is_instr?"true":"false") << std::endl;
-							assert(false);
-						}
-
-						pageAddressStatsMon->add_access(handle_pkt.address, handle_pkt.is_instr);
-						reuseDistMon->add_access(handle_pkt.address);
-
-						miss_hook();
+						miss_hook(handle_pkt);
 #endif
 
 					}
@@ -777,6 +713,30 @@
 					}
 
 					cpu = handle_pkt.cpu;
+
+#if defined TRANSLATION_EXCLUSIVE_CACHE
+					BLOCK txvc_block_entry;
+					bool entry_found = false;
+					if (NAME.find("L1D") != std::string::npos) {
+						//PACKET txc_copy_pkt{handle_pkt};
+							
+						bool vc_entry_cond;
+						if (enable_instr_only)
+							vc_entry_cond = handle_pkt.is_pte && handle_pkt.is_instr;
+						else if (enable_data_only)
+							vc_entry_cond = handle_pkt.is_pte && handle_pkt.is_instr;
+						else 
+							vc_entry_cond = handle_pkt.is_pte;
+							
+						if (enable_tx_victim_cache && vc_entry_cond) {
+
+							auto [_entry, _entry_found] = tx_victim_cache->lookup(handle_pkt.address, current_cycle);
+							entry_found = _entry_found;
+							txvc_block_entry = _entry;
+							//copy_pkt.data = _entry.data;
+						}
+					}
+#endif
 
 					// check mshr
 					auto mshr_entry = std::find_if(MSHR.begin(), MSHR.end(), eq_addr<PACKET>(handle_pkt.address, OFFSET_BITS));
@@ -825,38 +785,28 @@
 
 						fwd_pkt.fill_this_level = true; // We will always fill the lower level
 						fwd_pkt.prefetch_from_this = false;
-
-						bool success = false;
-						if (prefetch_as_load || handle_pkt.type != PREFETCH) {
+#if defined TRANSLATION_EXCLUSIVE_CACHE
 							
-//#if defined TRANSLATION_EXCLUSIVE_CACHE
-#if 0
-							if (enable_tx_cache) {
-								
-								bool vc_entry_cond;
-								if (enable_instr_only)
-									vc_entry_cond = fwd_pkt.is_pte && fwd_pkt.is_instr;
-								else if (enable_data_only)
-									vc_entry_cond = fwd_pkt.is_pte && !fwd_pkt.is_instr;
-								else 
-									vc_entry_cond = fwd_pkt.is_pte;
-
-								if (vc_entry_cond) {
-									success = tx_cache->add_rq(fwd_pkt); 
-								} else {
+							if (!entry_found) {
+								bool success = false;
+								if (prefetch_as_load || handle_pkt.type != PREFETCH)
 									success = lower_level->add_rq(fwd_pkt);
-								}
-							} else {
-								success = lower_level->add_rq(fwd_pkt);
+								else
+									success = lower_level->add_pq(fwd_pkt);
+
+								if (!success)
+									return false;
 							}
 #else
+						bool success = false;
+						if (prefetch_as_load || handle_pkt.type != PREFETCH)
 							success = lower_level->add_rq(fwd_pkt);
-#endif
-						} else
+						else
 							success = lower_level->add_pq(fwd_pkt);
 
 						if (!success)
 							return false;
+#endif
 
 						// Allocate an MSHR
 						if (!std::empty(fwd_pkt.to_return)) {
@@ -869,6 +819,59 @@
 #endif
 						}
 					}
+
+#if defined TRANSLATION_EXCLUSIVE_CACHE
+					if (NAME.find("L1D") != std::string::npos) {
+						//PACKET txc_copy_pkt{handle_pkt};
+						//bool entry_found = false;
+						/*	
+						bool vc_entry_cond;
+						if (enable_instr_only)
+							vc_entry_cond = handle_pkt.is_pte && handle_pkt.is_instr;
+						else if (enable_data_only)
+							vc_entry_cond = handle_pkt.is_pte && handle_pkt.is_instr;
+						else 
+							vc_entry_cond = handle_pkt.is_pte;
+							
+						if (enable_tx_victim_cache && vc_entry_cond) {
+
+							auto [_entry, _entry_found] = tx_victim_cache->lookup(handle_pkt.address, current_cycle);
+							entry_found = _entry_found;
+							//copy_pkt.data = _entry.data;
+						*/
+							if (entry_found) { 
+
+								PACKET txvc_mshr_packet;
+								txvc_mshr_packet.address = handle_pkt.address;
+								txvc_mshr_packet.type = handle_pkt.type;
+								txvc_mshr_packet.is_instr = handle_pkt.is_instr;
+								txvc_mshr_packet.cpu = 0; // Possible issue for multicore
+								txvc_mshr_packet.address = txvc_block_entry.address;
+								txvc_mshr_packet.data = txvc_block_entry.data;
+								txvc_mshr_packet.instr_id = handle_pkt.instr_id;
+								txvc_mshr_packet.ip = handle_pkt.ip;
+								txvc_mshr_packet.type = handle_pkt.type;
+								txvc_mshr_packet.pf_metadata = txvc_block_entry.pf_metadata; // not sure
+
+#if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT
+								txvc_mshr_packet.is_instr = txvc_block_entry.is_instr;
+								txvc_mshr_packet.is_pte = txvc_block_entry.is_pte;
+#endif	
+
+#if defined MULTIPLE_PAGE_SIZE
+								txvc_mshr_packet.page_size = txvc_block_entry.page_size;
+								txvc_mshr_packet.base_vpn = txvc_block_entry.base_vpn;
+#endif
+ 			
+								//handle_fill(txvc_mshr_packet);
+								//txc_copy_pkt.pf_metadata = metadata_thru;
+								//for (auto ret : txc_copy_pkt.to_return)
+								return_data(txvc_mshr_packet);
+								//return true; // This skips pushing the miss to the L2C
+							}
+						//}
+					} 
+#endif
 
 					//sim_stats.back().misses[handle_pkt.type][handle_pkt.cpu]++;
 					return true;
@@ -1181,13 +1184,18 @@ void CACHE::return_data(const PACKET& packet)
 
   // sanity check
   if (mshr_entry == MSHR.end()) {
+#if defined TRANSLATION_EXCLUSIVE_CACHE
+		//MSHR.erase(mshr_entry);
+		return;
+#else
     std::cerr << "[" << NAME << "_MSHR] " << __func__ << " instr_id: " << packet.instr_id << " cannot find a matching entry!";
     std::cerr << " address: " << std::hex << packet.address;
     std::cerr << " v_address: " << packet.v_address;
     std::cerr << " address: " << (packet.address >> OFFSET_BITS) << std::dec;
     std::cerr << " event: " << packet.event_cycle << " current: " << current_cycle << std::endl;
     assert(0);
-  }
+#endif
+	}
 
   // MSHR holds the most updated information about this request
   mshr_entry->data = packet.data;
@@ -1360,11 +1368,45 @@ void CACHE::print_deadlock()
 }
 
 #if defined ENABLE_EXTRA_CACHE_STATS
-	void CACHE::hit_hook() {
+	void CACHE::hit_hook(const PACKET& handle_pkt) {
 
+		if (handle_pkt.is_instr && !handle_pkt.is_pte) {
+			sim_stats.back().ihits[handle_pkt.type][handle_pkt.cpu]++;
+		} else if (!handle_pkt.is_instr && !handle_pkt.is_pte) {
+			sim_stats.back().dhits[handle_pkt.type][handle_pkt.cpu]++;
+		} else if (handle_pkt.is_instr && handle_pkt.is_pte) {
+			sim_stats.back().ithits[handle_pkt.cpu][handle_pkt.type]++;
+		} else if (!handle_pkt.is_instr && handle_pkt.is_pte) {
+			sim_stats.back().dthits[handle_pkt.cpu][handle_pkt.type]++;
+		} else {
+			std::cout << "Oups, something went wrong..." << std::endl;
+			std::cout << "\ttype:" << (uint32_t)handle_pkt.type << std::endl;
+			std::cout << "\tis_instr:" << (handle_pkt.is_instr?"true":"false") << std::endl;
+			assert(false);
+		}
+						
+		//pageAddressStatsMon->add_access(handle_pkt.address, handle_pkt.is_instr);
+		//reuseDistMon->add_access(handle_pkt.address);
 	}
 
-	void CACHE::miss_hook() {
+	void CACHE::miss_hook(const PACKET& handle_pkt) {
+						
+		if (handle_pkt.is_instr && !handle_pkt.is_pte) {
+			sim_stats.back().imisses[handle_pkt.type][handle_pkt.cpu]++;
+		} else if (!handle_pkt.is_instr && !handle_pkt.is_pte) {
+			sim_stats.back().dmisses[handle_pkt.type][handle_pkt.cpu]++;
+		} else if (handle_pkt.is_instr && handle_pkt.is_pte) {
+			sim_stats.back().itmisses[handle_pkt.cpu][handle_pkt.type]++;
+		} else if (!handle_pkt.is_instr && handle_pkt.is_pte) {
+			sim_stats.back().dtmisses[handle_pkt.cpu][handle_pkt.type]++;
+		} else {
+			std::cout << "Oups, something went wrong..." << std::endl;
+			std::cout << "\ttype:" << (uint32_t)handle_pkt.type << std::endl;
+			std::cout << "\tis_instr:" << (handle_pkt.is_instr?"true":"false") << std::endl;
+			assert(false);
+		}
 
+		pageAddressStatsMon->add_access(handle_pkt.address, handle_pkt.is_instr);
+		reuseDistMon->add_access(handle_pkt.address);
 	}
 #endif

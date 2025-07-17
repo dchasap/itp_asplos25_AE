@@ -291,6 +291,7 @@ public:
   {
     private:
       uint64_t num_set, num_way, offset_bits;
+      //std::queue<PACKET> rd_queue;
       std::vector<BLOCK>  blocks;
       ReplacementPolicy* replacementPol;
 
@@ -559,7 +560,8 @@ public:
         std::cout << "dtMISS:" << std::setw(10) << total_dtmisses;
         std::cout << std::endl;
        
-        cacheFilter->print_stats();
+        if (enable_cache_filtering)
+          cacheFilter->print_stats();
 
 #if defined ENABLE_EXTRA_CACHE_STATS
         reuseDistMon->dump();
@@ -780,8 +782,8 @@ public:
   }
 
 #if defined ENABLE_EXTRA_CACHE_STATS
-  void hit_hook();
-  void miss_hook();
+  void hit_hook(const PACKET&);
+  void miss_hook(const PACKET&);
 #endif
 
 	//~CACHE() { std::cout << "***** CACHE DESTROYER *****" << std::endl; };

@@ -131,6 +131,6 @@ def run_simulation_batch(root_dir, trace_dir, dump_dir, sim_name, exp_name, work
 
     job.close()
     os.system("sbatch " + job_name + ".run")
-    #os.system("rm " + job_name + ".run")
+    os.system("rm " + job_name + ".run")
     
     ti += batch_size
