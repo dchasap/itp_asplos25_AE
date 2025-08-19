@@ -51,13 +51,18 @@ class FilterTracer : public CacheFilter {
     
     }
 
-    virtual bool predict(uint64_t address, bool) 
+    virtual bool predict(uint64_t, bool) 
     {
-      memTracer.add_access(address);
       return false;
     };
 
-    virtual void update(uint64_t, bool, bool, uint64_t) { return; };
+    virtual void update(uint64_t address, bool, bool is_lookup, uint64_t)
+    { 
+      if (is_lookup)
+        memTracer.add_access(address);
+      
+      return; 
+    };
 
     virtual void print_stats() 
     {
@@ -702,6 +707,8 @@ class OracleMFUFilter : public CacheFilter {
           // eliminate all the elements with freq <= 1
           for (auto it = ordered_freq_map.begin(); it != ordered_freq_map.end(); ) {
             if (it->freq < freq_threshold) {
+            //if (it->freq > freq_threshold) {
+            //if (it->freq < freq_threshold || it->freq > freq_threshold) {
               it = ordered_freq_map.erase(it);
             } else {
               ++it;

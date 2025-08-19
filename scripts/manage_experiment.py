@@ -16,6 +16,7 @@ try:
 	import champsim2plot
 	parsing_plotting_module_available = True
 except ImportError:
+	print("Could not load all modules, parsing and plotting disabled.")
 	parsing_plotting_module_available = False
 
 
@@ -33,43 +34,45 @@ default_enviromental_variables = {
 	'DATA_PAGE_SIZE_DIST': "0",
 	'ENABLE_TXVC': "false",
 	'ENABLE_TXC': "false",
-	'TXC_LATENCY': "0",
-	'TXC_NUM_SET': "8",
-	'TXC_NUM_WAY': "8",
+	'TXVC_LATENCY': "0",
+	'TXVC_NUM_SET': "8",
+	'TXVC_NUM_WAY': "8",
 	'TXVC_REP_POLICY': "lfu",
-	'TXC_INSTR_ONLY': "false",
-	'TXC_DATA_ONLY': "false",
-	'TXC_CACHE_FILTERING': "false",
-	'TXC_CACHE_FILTER': "",
-	'TXC_DBPRED_CNTR_SZ': "3",
-	'TXC_DBPRED_THRESHOLD': "0",
-	'TXC_DBPRED_USE_BIAS': "false",
-	'TXC_FILTER_CLEANUP_INTERVAL': "9999999999999999",
-	'TXC_FILTER_TOP_N_FACTOR': "1.0",
-	'CACHE_FILTER_FREQ_THRESHOLD': "2",
+	'TXVC_INSTR_ONLY': "false",
+	'TXVC_DATA_ONLY': "false",
+	'TXVC_CACHE_FILTERING': "false",
+	'TXVC_CACHE_FILTER': "",
+	'TXVC_CACHE_LEVEL': "1",
+	'TXVC_DBPRED_CNTR_SZ': "3",
+	'TXVC_DBPRED_THRESHOLD': "0",
+	'TXVC_DBPRED_USE_BIAS': "false",
+	'TXVC_FILTER_CLEANUP_INTERVAL': "9999999999999999",
+	'TXVC_FILTER_TOP_N_FACTOR': "1.0",
 	'TXVC_MEMORY_TRACE_PATH': "./data",
+	'CACHE_FILTER_FREQ_THRESHOLD': "2",
 	'CACHE_FILTER_MEMORY_TRACE_PATH': './data',
 	'REUSE_DIST_FILENAME_PREFIX': "reuse_dist"
 	}
 
 confnames_to_envars = {
 	'ooo_cpu.enable_txvc': 'ENABLE_TXVC',
-	'txvc.sets': 'TXC_NUM_SET',
-	'txvc.ways': 'TXC_NUM_WAY',
+	'txvc.sets': 'TXVC_NUM_SET',
+	'txvc.ways': 'TXVC_NUM_WAY',
 	'txvc.replacement': 'TXVC_REP_POLICY',
-	'txvc.instr_only': 'TXC_INSTR_ONLY',
-	'txvc.data_only': 'TXC_DATA_ONLY',
-	'txvc.cache_filtering': 'TXC_CACHE_FILTERING',
-	'txvc.cache_filter': 'TXC_CACHE_FILTER',
-	'txvc.dbpred_use_bias': 'TXC_DBPRED_USE_BIAS',
-	'txvc.dbpred_cntr_size': 'TXC_DBPRED_CNTR_SZ',
-	'txvc.dbpred_threshold': 'TXC_DBPRED_THRESHOLD',
-	'txvc.dbpred_use_bias': 'TXC_DBPRED_USE_BIAS',
-	'txvc.filter_cleanup_interval': 'TXC_FILTER_CLEANUP_INTERVAL',
-	'txvc.filter_top_n_factor': 'TXC_FILTER_TOP_N_FACTOR',
+	'txvc.instr_only': 'TXVC_INSTR_ONLY',
+	'txvc.data_only': 'TXVC_DATA_ONLY',
+	'txvc.cache_filtering': 'TXVC_CACHE_FILTERING',
+	'txvc.cache_filter': 'TXVC_CACHE_FILTER',
+	'txvc.level': 'TXVC_CACHE_LEVEL',
+	'txvc.dbpred_use_bias': 'TXVC_DBPRED_USE_BIAS',
+	'txvc.dbpred_cntr_size': 'TXVC_DBPRED_CNTR_SZ',
+	'txvc.dbpred_threshold': 'TXVC_DBPRED_THRESHOLD',
+	'txvc.dbpred_use_bias': 'TXVC_DBPRED_USE_BIAS',
+	'txvc.filter_cleanup_interval': 'TXVC_FILTER_CLEANUP_INTERVAL',
+	'txvc.filter_top_n_factor': 'TXVC_FILTER_TOP_N_FACTOR',
+	'txvc.mem_trace_path': 'TXVC_MEMORY_TRACE_PATH',
 	'txvc.filter_frequency_threshold': 'CACHE_FILTER_FREQ_THRESHOLD',
-	'txvc.filter_mem_trace_path':	"CACHE_FILTER_MEMORY_TRACE_PATH",
-	'txvc.mem_trace_path': 'TXVC_MEMORY_TRACE_PATH'
+	'txvc.filter_mem_trace_path':	"CACHE_FILTER_MEMORY_TRACE_PATH"
 }
 
 components = ['ooo_cpu', 'itlb', 'dtlb', 'stlb', 'l1i', 'l1d', 'l2c', 'llc', 'txvc']
@@ -80,7 +83,7 @@ cpu_env_parameters = [ 'enable_txvc' ]
 
 cache_json_parameters = [ 'sets', 'ways', 'prefetcher', 'replacement', 'force_hit' ]
 cache_env_parameters = [ 	'sets', 'ways', 'replacement', 
-													'cache_filtering', 'cache_filter', 'filter_mem_trace_path',
+													'cache_filtering', 'cache_filter', 'level', 'filter_mem_trace_path',
 													'dbpred_cntr_size', 'dbpred_threshold', 'dbpred_use_bias',
 													'filter_cleanup_interval', 'filter_top_n_factor', 'filter_frequency_threshold', 
 													'filter_mem_trace_path',
@@ -242,11 +245,7 @@ def plot_experimental_data(config):
 	file_type = config['PLOTTING']['file_type']
 	workload_name = config['EXPERIMENT']['workload']
                
-	if config.has_option('EXPERIMENT', 'alternative_tags'):
-		simulations = configp['EXPERIMENT']['alternative_tags'].replace(" ", "").split(",")
-	else:
-		simulations = config['EXPERIMENT']['simulations'].replace(" ", "").split(",")
-
+	simulations = config['EXPERIMENT']['simulations'].replace(" ", "").split(",")
 	
 	csv_data_files = []
 	for sim in simulations:
@@ -258,6 +257,11 @@ def plot_experimental_data(config):
 			csv_data_file = stats_dir + "/" + workload_name + "_" + sim + ".csv"
 		
 		csv_data_files.append(csv_data_file)
+
+	if config.has_option('PLOTTING', 'alternative_tags'):
+		simulations = config['PLOTTING']['alternative_tags'].replace(" ", "").split(",")
+
+	print(simulations)
 
 	os.system("mkdir -p " + figures_dir)
 	print("Plotting " + plot_name + " for " + workload_name)

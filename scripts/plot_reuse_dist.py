@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn 
 
-data_dir = './data/txvc_mem_access_hist/TXVC-4KB'
+data_dir = './data/txvc_freq_analysis/TXVC-Inf_MFU-FREQ-2'
 figures_dir = './figures'
 
 import plotting
@@ -16,14 +16,10 @@ plot_width = 8.0
 plot_height = 6.0
 fig, axes = plt.subplots(nrows=1, ncols=1, figsize=(plot_width, plot_height))
 
-average_count = 0;
-average_num_elements = []
-for i in [ 500, 400, 300, 200, 100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 8, 6, 4, 2, 1 ]:
-  average_num_elements.append(0)
 
 for bench in benchmarks:
   #break;
-  df = pd.read_csv(data_dir + '/' + bench + '_TXVC-4KB_txvc_mem_trace.csv', names=['address'], header=0)
+  df = pd.read_csv(data_dir + '/' + bench + '_TXVC-Inf_MFU-FREQ-2__.csv', names=['address'], header=0)
   
   # Create a DataFrame with the number of occurrences for each address
   address_counts = df['address'].value_counts().reset_index()

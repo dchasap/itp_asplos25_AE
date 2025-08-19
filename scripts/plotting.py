@@ -257,7 +257,7 @@ def plot_average_single_cache(	input_baseline_files, means_df, input_tags, cache
 									figsize=(plot_width, plot_height+2))
 
 		#sns.set_style('white')
-		sns.set_palette(sns.color_palette('Paired'))
+		#sns.set_palette(sns.color_palette('Paired'))
 
 		i = 0
 		hatch_idx = 0
@@ -369,7 +369,7 @@ def plot_average_single_cache(	input_baseline_files, means_df, input_tags, cache
 
 def plot_average_multiple_caches(	input_baseline_files, means_df, input_tags, cache_types, 
 																	op_type, stat_name, output_file):
-		sns.set_palette(sns.color_palette())
+		#sns.set_palette(sns.color_palette())
 		plot_width = plot_conf['plot_width']
 		plot_height = plot_conf['plot_height']
 		fig, axes = plt.subplots(	nrows=2, ncols=4, 
@@ -383,8 +383,8 @@ def plot_average_multiple_caches(	input_baseline_files, means_df, input_tags, ca
 		axes[0][3].remove()
 
 		#sns.set_style('white')
-		#sns.color_palette("tab10")
-		sns.set_palette(sns.color_palette('Paired'))
+		#sns.set_palette(sns.color_palette("tab10"))
+		color_palette = sns.color_palette('tab10', 8)
 
 		i = 0
 #		plt.yticks(fontsize=5)
@@ -395,12 +395,12 @@ def plot_average_multiple_caches(	input_baseline_files, means_df, input_tags, ca
 			plot_conf['ylabel'] = plot_conf['ylabel']
 
 			ax = sns.barplot(	data=means_df.loc[means_df['cache'] == cache],
-								x='cache', y=stat_name, hue='tag', width=0.8,
+								x='cache', y=stat_name, hue='tag', palette='tab10', width=0.8,
 								linewidth=.5, edgecolor='black', ax=axes[1][i])
 
 			#hatches = itertools.cycle(['/', '//', '+', '-', 'x', '\\', '*', 'o', 'O', '.'])
 			#for j, bar in enumerate(ax.patches):
-			#	if (j == 3):
+			#	if (j >= 10):
 			#		bar.set_hatch('////')
 			#	elif j == 7:
 			#		bar.set_hatch('...')
@@ -445,6 +445,7 @@ def plot_average_multiple_caches(	input_baseline_files, means_df, input_tags, ca
 
 			i += 1		
 
+		#sns.set_palette(sns.color_palette('Paired'))
 		fig.savefig(output_file, bbox_inches='tight')
 		matplotlib.pyplot.close()
 
@@ -458,7 +459,7 @@ def plot_histogram(data, output_file):
 
 		#sns.set_style('white')
 		#sns.color_palette("tab10")
-		sns.set_palette(sns.color_palette('Paired'))
+		#sns.set_palette(sns.color_palette('Paired'))
 
 		# Create a histogram
 		plt.hist(data, bins=30, density=True)

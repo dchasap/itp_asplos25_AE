@@ -278,6 +278,7 @@ public:
   std::deque<PACKET> inflight_writes;
 
 #if defined TRANSLATION_EXCLUSIVE_CACHE
+  std::string _CACHE_;
 	CACHE *tx_cache;
 	bool enable_tx_victim_cache = false;
   bool enable_tx_cache = false;
@@ -294,6 +295,7 @@ public:
       //std::queue<PACKET> rd_queue;
       std::vector<BLOCK>  blocks;
       ReplacementPolicy* replacementPol;
+      std::string _name_;
 
       bool enable_cache_filtering = false;
 
@@ -319,8 +321,8 @@ public:
       }
     
     public:
-      VICTIM_CACHE(uint64_t _num_set, uint64_t _num_way, uint64_t _offset_bits)
-        : num_set(_num_set), num_way(_num_way), offset_bits(_offset_bits), blocks(_num_set * _num_way) 
+      VICTIM_CACHE(uint64_t _num_set, uint64_t _num_way, uint64_t _offset_bits, std::string _name)
+        : num_set(_num_set), num_way(_num_way), offset_bits(_offset_bits), blocks(_num_set * _num_way), _name_(_name) 
       {
         std::cout << "TXVC initialized with " << num_set << " sets and " << num_way << " ways." << std::endl;
 				if (getenv("TXVC_REP_POLICY") != nullptr) {
@@ -340,18 +342,20 @@ public:
           exit(1);
         }
 
-        if (getenv("TXC_CACHE_FILTERING")) {
-					char* cache_filtering_flag = getenv("TXC_CACHE_FILTERING");
+        if (getenv("TXVC_CACHE_FILTERING")) {
+					char* cache_filtering_flag = getenv("TXVC_CACHE_FILTERING");
 					if (strcmp(cache_filtering_flag, "true") == 0) {
 						enable_cache_filtering = true;
 					}
-				}
+				} else {
+          std::cerr << "TXVC_CACHE_FILTERING not defined!" << std::endl;
+        }
 
         if (enable_cache_filtering) {
           
-          if (getenv("TXC_CACHE_FILTER") != nullptr) {
+          if (getenv("TXVC_CACHE_FILTER") != nullptr) {
 
-					  char* dbpred_name = getenv("TXC_CACHE_FILTER");
+					  char* dbpred_name = getenv("TXVC_CACHE_FILTER");
             if (strcmp(dbpred_name, "doa-simple") == 0) {
               std::cout << "\tTXVC: Using DOA-simpe filter" << std::endl;
 					    cacheFilter = new SimpleDOAFilter();
@@ -367,7 +371,7 @@ public:
             } else if (strcmp(dbpred_name, "oracle-mfu") == 0) {
               std::cout << "\tTXVC: Using Oracle MFU filter" << std::endl;
               cacheFilter = new OracleMFUFilter(num_set, num_way, true); 
-            } else if (strcmp(dbpred_name, "generate-trace") == 0) {
+            } else if (strcmp(dbpred_name, "trace-mem") == 0) {
               std::cout << "\tTXVC: Generating a memory trace for the cache filter" << std::endl;
               cacheFilter = new FilterTracer();   
             } else {
@@ -378,7 +382,7 @@ public:
             //std::cout << "\tCache filtering: " << dbpred_name << std::endl;
 				  
           } else {
-            std::cerr << "TXC_CACHE_FILTER not set!" << std::endl;
+            std::cerr << "TXVC_CACHE_FILTER not set!" << std::endl;
             exit(1);
           }
 
@@ -403,11 +407,18 @@ public:
         }
 
 #if defined ENABLE_EXTRA_CACHE_STATS        
-        std::string reuse_dist_filename_prefix = getenv("REUSE_DIST_FILENAME_PREFIX");
-	    
+        std::string reuse_dist_filename_prefix;
+        if (getenv("REUSE_DIST_FILENAME_PREFIX")) {
+				  reuse_dist_filename_prefix = getenv("REUSE_DIST_FILENAME_PREFIX");
+          std::cout << "REUSE_DIST_FILENAME_PREFIX set to " << reuse_dist_filename_prefix << std::endl;
+			  } else {
+				  std::cout << "REUSE_DIST_FILENAME_PREFIX not set!" << std::endl;
+				  exit(1);
+		  	}
+        
         reuseDistMon = new ReuseDistanceMonitor(num_set, num_way, offset_bits,
 																						    reuse_dist_filename_prefix + "_" + "TXVC" + ".csv",
-																						    true, true);
+																						    false, true);
 #endif
       }
 
@@ -491,7 +502,14 @@ public:
 				const auto hit = (way != set_end);
 
 #if defined ENABLE_EXTRA_CACHE_STATS
-        reuseDistMon->add_access(address);
+        if (enable_cache_filtering) {
+          bool bypass = cacheFilter->predict(address, false);
+          if (!bypass) {
+            //std::cout << "Block " << request.address " byapassed." << std::endl;
+            reuseDistMon->add_access(address);
+          }
+        }
+
 #endif
         if (save_mem_accesses)
           mem_access_list.push_back(address);
@@ -646,7 +664,7 @@ public:
 		if (force_hit) {
 			if (NAME.find("STLB") != std::string::npos) {
 				std::cout << "Using perfect instruction " << NAME << "." << std::endl;
-			}	else if (NAME.find("L1D") != std::string::npos) {
+			}	else if (NAME.find(_CACHE_) != std::string::npos) {
 				std::cout << "Using secret unlimited cache for data PTEs in " << NAME << "." << std::endl;
 			} else {
 				std::cout << "Force hit not supported for " << NAME << "!" << std::endl;
@@ -657,7 +675,7 @@ public:
 
 #if defined TRANSLATION_EXCLUSIVE_CACHE
 
-		if (NAME.find("L1D") != std::string::npos 
+		if (NAME.find(_CACHE_) != std::string::npos 
 				&& NAME.find("_TXC") == std::string::npos) {
 
       char* victim_cache_flag = getenv("ENABLE_TXVC");
@@ -673,7 +691,21 @@ public:
 */
 
 			if (enable_tx_victim_cache || enable_tx_cache) {
-
+        //FIXME: move this to victim cache and create a 
+        if (getenv("TXVC_CACHE_LEVEL")) {
+					uint32_t _level = atoi(getenv("TXVC_CACHE_LEVEL"));
+          switch (_level) {
+            case 1:
+              _CACHE_ = "cpu0_L1D";
+              break;
+            case 2:
+              _CACHE_ = "cpu0_L2C";
+              break;
+            case 3:
+              _CACHE_ = "LLC";
+              break; 
+					}
+				}
 				//FIXME: Not sure we should use braces for constructor - but maybe we need to (???)
 				// Create and connect a new victim cache between L1D and L2C
 				//uint32_t num_set = 64;
@@ -681,50 +713,51 @@ public:
 				//uint32_t mshr_size = 8; //64;
 				//NonTranslatingQueues* tx_cache_queues = new NonTranslatingQueues(1.0, num_set, num_way, mshr_size, 5, 4, champsim::lg2(64), 0);
 
-				uint32_t txc_num_set = 64;
-				uint32_t txc_num_way = 8;
-				uint32_t txc_latency = 1;
-				//uint32_t txc_mshr_size = 8; //64;
+				uint32_t txvc_num_set = 64;
+				uint32_t txvc_num_way = 8;
+				uint32_t txvc_latency = 1;
+				//uint32_t txvc_mshr_size = 8; //64;
 
-				if (getenv("TXC_LATENCY")) {
-					txc_latency = std::stoull(getenv("TXC_LATENCY"));
+				if (getenv("TXVC_LATENCY")) {
+					txvc_latency = std::stoull(getenv("TXVC_LATENCY"));
 				} else {
-					std::cerr << "TXC_LATENCY not set!" << std::endl;
+					std::cerr << "TXVC_LATENCY not set!" << std::endl;
 					exit(0);
 				}
 
-				if (getenv("TXC_NUM_SET")) {
-					txc_num_set = std::stoull(getenv("TXC_NUM_SET"));
+				if (getenv("TXVC_NUM_SET")) {
+					txvc_num_set = std::stoull(getenv("TXVC_NUM_SET"));
 				} else {
-					std::cerr << "TXC_NUM_SET not set!" << std::endl;
+					std::cerr << "TXVC_NUM_SET not set!" << std::endl;
 					exit(0);
 				}
 
-				if (getenv("TXC_NUM_WAY")) {
-					txc_num_way = std::stoull(getenv("TXC_NUM_WAY"));
+				if (getenv("TXVC_NUM_WAY")) {
+					txvc_num_way = std::stoull(getenv("TXVC_NUM_WAY"));
 				} else {
-					std::cerr << "TXC_NUM_WAY not set!" << std::endl;
+					std::cerr << "TXVC_NUM_WAY not set!" << std::endl;
 					exit(0);
 				}
 
-				if (getenv("TXC_INSTR_ONLY")) {
-					char* instr_only_flag = getenv("TXC_INSTR_ONLY");
+				if (getenv("TXVC_INSTR_ONLY")) {
+					char* instr_only_flag = getenv("TXVC_INSTR_ONLY");
 					if (strcmp(instr_only_flag, "true") == 0) {
 						enable_instr_only = true;
 					}
 				}
 
-				if (getenv("TXC_DATA_ONLY")) {
-					char* data_only_flag = getenv("TXC_DATA_ONLY");
+				if (getenv("TXVC_DATA_ONLY")) {
+					char* data_only_flag = getenv("TXVC_DATA_ONLY");
 					if (strcmp(data_only_flag, "true") == 0) {
 						enable_data_only = true;
 					}
 				}
 
 				std::cout << NAME << ": Using PTE " << (enable_tx_victim_cache?"victim":"exclusive")  << " cache." << std::endl;
-				std::cout << "\t\tLATENCY: " << txc_latency << std::endl;
-				std::cout << "\t\tSETS: " << txc_num_set << std::endl;
-				std::cout << "\t\tWAYS: " << txc_num_way << std::endl;
+        std::cout << "\t\tLEVEL: " << _CACHE_ << std::endl;
+				std::cout << "\t\tLATENCY: " << txvc_latency << std::endl;
+				std::cout << "\t\tSETS: " << txvc_num_set << std::endl;
+				std::cout << "\t\tWAYS: " << txvc_num_way << std::endl;
 				if (enable_instr_only) 
 					std::cout << "\t\tAllowing only instuction PTEs." << std::endl;
         else if (enable_data_only)
@@ -734,11 +767,11 @@ public:
         
         
 
-				//tx_cache = new CACHE( NAME+"_TXC", 1.0, txc_num_set, txc_num_way, txc_mshr_size, txc_latency, 2, 2, champsim::lg2(64), 0, 0, 0, 
+				//tx_cache = new CACHE( NAME+"_TXC", 1.0, txvc_num_set, txvc_num_way, txvc_mshr_size, txvc_latency, 2, 2, champsim::lg2(64), 0, 0, 0, 
 				//											(1 << LOAD) | (1 << PREFETCH), *tx_cache_queues, ll, 
 				//											CACHE::pprefetcherDno, CACHE::rreplacementDlfu, 0, 0, vmem);
 
-        tx_victim_cache = new VICTIM_CACHE(txc_num_set, txc_num_way, champsim::lg2(64));
+        tx_victim_cache = new VICTIM_CACHE(txvc_num_set, txvc_num_way, champsim::lg2(64), _CACHE_ + "_TXVC");
         
 			}
 		}
@@ -764,10 +797,10 @@ public:
 		if (NAME.find("STLB") != std::string::npos) {
 			enable_reuseDistMon = false;
 		} else if (NAME.find("L1D") != std::string::npos) {
-			enable_reuseDistMon = true;
+			enable_reuseDistMon = false;
 			if (NAME.find("TXC") != std::string::npos) {
 				std::cout << NAME << " enabled reuse distance monitor." << std::endl;
-				enable_reuseDistMon = true;
+				enable_reuseDistMon = false;
 			}
 		} else if ((NAME.find("L2C") != std::string::npos)) {
 			enable_reuseDistMon = false;

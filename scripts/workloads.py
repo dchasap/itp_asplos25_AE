@@ -21,6 +21,14 @@ def get_benchmark_traces(workload_name):
     traces = goole_srv_workloads.get_google_srv()
     traces_dir = google_srv_workloads_dir()
 
+  elif SPEC_CPU_2006 == "spec_cpu_2006":
+    traces = spec_cpu_workloads.get_spec_cpu_2006()
+    traces_dir = spec_cpu_workloads.get_spec_cpu_dir()
+  
+  elif SPEC_CPU_2017 == "spec_cpu_2017":
+    traces = spec_cpu_workloads.get_spec_cpu_2017()
+    traces_dir = spec_cpu_workloads.get_spec_cpu_dir()
+
   elif workload_name == "debug":
     traces = [ qualcomm_srv_workloads.get_selected_qualcomm_srv()[0] ]
     traces_dir = qualcomm_srv_workloads.get_qualcomm_srv_dir()

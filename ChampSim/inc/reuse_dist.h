@@ -21,6 +21,7 @@ class ReuseDistanceMonitor
 				
 			if (!enabled) return;
 
+			std::cout << "Reuse Distance Monitor: " << filename << std::endl;
 			dumpfile = std::ofstream(filename, std::ios::out);
 			num_set = _num_set;
 			num_way = _num_way;

@@ -169,7 +169,7 @@
 #endif // TRANSLATION_EXCLUSIVE_CACHE
 
 #if defined FORCE_HIT // check if evicted entry is a PTE
-							if (NAME.find("L1D") != std::string::npos) {
+							if (NAME.find(_CACHE_) != std::string::npos) {
 								if (force_hit && (way->is_pte)) {
 									// should use address or v_address
 									cached_PTEs[way->address] = *way;
@@ -537,7 +537,7 @@
 #endif // FORCED_HIT			
 #if 0 //defined TRANSLATION_EXCLUSIVE_CACHE
 
-						if (NAME.find("L1D") != std::string::npos) {
+						if (NAME.find(_CACHE_) != std::string::npos) {
 							//PACKET txc_copy_pkt{handle_pkt};
 							bool entry_found = false;
 							
@@ -593,7 +593,7 @@
 							const auto way_idx = static_cast<std::size_t>(std::distance(set_begin, way)); // cast protected by earlier assertion
 							impl_update_replacement_state(handle_pkt.cpu, get_set_index(handle_pkt.address), way_idx, way->address, handle_pkt.ip, 0, handle_pkt.type, true);
 				*/
-						if (NAME.find("L1D") != std::string::npos) {
+						if (NAME.find(_CACHE_) != std::string::npos) {
 							PACKET txc_copy_pkt{handle_pkt};
 							bool entry_found = false;
 							//FIXME: NEED TO ADD CHECK FRO ONLY DATA/INSTR
@@ -717,7 +717,7 @@
 #if defined TRANSLATION_EXCLUSIVE_CACHE
 					BLOCK txvc_block_entry;
 					bool entry_found = false;
-					if (NAME.find("L1D") != std::string::npos) {
+					if (NAME.find(_CACHE_) != std::string::npos) {
 						//PACKET txc_copy_pkt{handle_pkt};
 							
 						bool vc_entry_cond;
@@ -821,7 +821,7 @@
 					}
 
 #if defined TRANSLATION_EXCLUSIVE_CACHE
-					if (NAME.find("L1D") != std::string::npos) {
+					if (NAME.find(_CACHE_) != std::string::npos) {
 						//PACKET txc_copy_pkt{handle_pkt};
 						//bool entry_found = false;
 						/*	

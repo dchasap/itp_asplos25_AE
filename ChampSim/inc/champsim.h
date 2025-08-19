@@ -34,6 +34,7 @@
 #define PTP_REPLACEMENT_POLICY
 #define ENABLE_TRANSLATION_AWARE_REPLACEMENT
 #define ENABLE_FDIP
+//#define _CACHE_ "L1D"
 
 
 #define TRACK_BRANCH_HISTORY // needed for chirp
@@ -59,9 +60,9 @@ class DebugLogger {
 
   public:
     
-    DebugLogger() { enabled = false; };
+    DebugLogger() { enabled = false; }
 
-    void enable() { enabled = true; };
+    void enable() { enabled = true; }
     void disable() { enabled = false; }
 
     // Overload << to collect the message

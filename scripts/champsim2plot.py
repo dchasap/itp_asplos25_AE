@@ -10,7 +10,7 @@ xlabels = {
 			'selected_qualcomm_srv_ap': "Qualcomm Server Workloads",
 			'smt_qualcomm_srv_ap': "SMT Qualcomm Server Workloads",
 			'spec': "SPEC CPU 2006/2017",
-      'google_srv': "Google Server Workloads",
+      		'google_srv': "Google Server Workloads",
 			'debug': "srv105_ap"
 		}
 
@@ -386,16 +386,17 @@ def gen_plot(benchsuite, _tags, data_files, figure_name, figure_type, file_type,
 		input_data_files = []
 		#data_files = data_files.replace('\t', '')
 		#data_files = data_files.split('\n')
-
+		print("reust_dist option:")
+		print(data_files)
 		for data_file in data_files:
 
 			if (data_file == ""): continue
-			#print(data_file)	
-			input_data_files.append("./stats/" + benchsuite + "_" + data_file + "_recall_dist_TXVC.csv")	
+			print(data_file)	
+			#input_data_files.append(".//" + benchsuite + "_" + data_file + "_recall_dist_TXVC.csv")	
+			input_data_files.append(data_file)	
 
 		tags = 	[
-							"TXVC",
-							"TXVC-DOA"
+							"TXVC"
 						]
 
 		data_df = stats.load_reuse_dist_df(input_data_files, tags)
