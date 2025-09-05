@@ -55,6 +55,7 @@ def load_df(input_data_files, tags, cache_type, op_type, sort = False, sorted_in
 				i += 1 # that's for tags' list
 
 		#df.to_csv("data.csv", sep=',', index=False)
+
 		return df
 
 
@@ -92,8 +93,8 @@ def compute_variation(baseline_df, df, tags, col_name, new_col_name, revert=Fals
 	if (revert):
 		df[new_col_name] = ((baseline_df[col_name] - df[col_name]) * 100 / df[col_name])
 	else:
-		#print(len(df))
-		#print(len(baseline_df))
+		print(len(df))
+		print(len(baseline_df))
 		df[new_col_name] = ((df[col_name] - baseline_df[col_name]) * 100 / baseline_df[col_name])
 
 	return df

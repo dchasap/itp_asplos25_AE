@@ -707,8 +707,8 @@ class OracleMFUFilter : public CacheFilter {
           // eliminate all the elements with freq <= 1
           for (auto it = ordered_freq_map.begin(); it != ordered_freq_map.end(); ) {
             if (it->freq < freq_threshold) {
-            //if (it->freq > freq_threshold) {
-            //if (it->freq < freq_threshold || it->freq > freq_threshold) {
+            //if (it->freq > freq_threshold || it->freq == 1) {
+            //if (it->freq != freq_threshold) {
               it = ordered_freq_map.erase(it);
             } else {
               ++it;
@@ -733,6 +733,8 @@ class OracleMFUFilter : public CacheFilter {
     // Return true if address is not in the top N frequencies
     virtual bool predict(uint64_t address, bool) 
     {
+
+      //return false;
       /*
       auto access_it = std::find_if(ordered_freq_map.begin(), ordered_freq_map.end(), [address](auto x) { return x.key == address; });
       if (access_it != ordered_freq_map.end()) {
@@ -758,6 +760,8 @@ class OracleMFUFilter : public CacheFilter {
 
         i++;
       }
+
+      //assert(false);
 
       debugLog << "Address " << address << " not found"  << std::endl;
       return true;

@@ -85,7 +85,8 @@ def gen_plot(benchsuite, _tags, data_files, figure_name, figure_type, file_type,
 		data_df['benchmarks'] = data_df['benchmarks'].str.split('.').str[0]
 	
 		plotting.plot_conf['plot_type'] = 'box'
-		plotting.plot_conf['xlabel'] = xlabels[benchsuite]
+		#plotting.plot_conf['xlabel'] = xlabels[benchsuite]
+		plotting.plot_conf['xlabel'] = "Memory Access Frequency"
 		plotting.plot_conf['ylabel'] = "IPC Improvement (%)"
 		#plotting.plot_conf['ymax'] = 25
 		#plotting.plot_conf['ymin'] = 0

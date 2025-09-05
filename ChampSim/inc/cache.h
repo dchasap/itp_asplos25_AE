@@ -664,8 +664,8 @@ public:
 		if (force_hit) {
 			if (NAME.find("STLB") != std::string::npos) {
 				std::cout << "Using perfect instruction " << NAME << "." << std::endl;
-			}	else if (NAME.find(_CACHE_) != std::string::npos) {
-				std::cout << "Using secret unlimited cache for data PTEs in " << NAME << "." << std::endl;
+			//}	else if (NAME.find(_CACHE_) != std::string::npos) {
+			//	std::cout << "Using secret unlimited cache for data PTEs in " << NAME << "." << std::endl;
 			} else {
 				std::cout << "Force hit not supported for " << NAME << "!" << std::endl;
 				assert(false);
@@ -675,105 +675,106 @@ public:
 
 #if defined TRANSLATION_EXCLUSIVE_CACHE
 
-		if (NAME.find(_CACHE_) != std::string::npos 
-				&& NAME.find("_TXC") == std::string::npos) {
+    if (getenv("TXVC_CACHE_LEVEL")) {
+      uint32_t _level = atoi(getenv("TXVC_CACHE_LEVEL"));
+      switch (_level) {
+        case 1:
+            _CACHE_ = "cpu0_L1D";
+            break;
+          case 2:
+            _CACHE_ = "cpu0_L2C";
+            break;
+          case 3:
+            _CACHE_ = "LLC";
+            break; 
+      }
+    }
 
+    //TODO: remove this var, we can assume TXVC_CACHE_LEVEL enables it
+    if (NAME.find(_CACHE_) != std::string::npos) {
       char* victim_cache_flag = getenv("ENABLE_TXVC");
-			if (strcmp(victim_cache_flag, "true") == 0) {
-				enable_tx_victim_cache = true;
-			}
-
+      if (strcmp(victim_cache_flag, "true") == 0) {
+        enable_tx_victim_cache = true;
+      }
+    }
 /*
-      char*  TRANSLATION_EXCLUSIVE_CACHE_flag = getenv("ENABLE_TXC");
-			if (strcmp(TRANSLATION_EXCLUSIVE_CACHE_flag, "true") == 0) {
-				enable_tx_cache = true;
-			}
+    char*  TRANSLATION_EXCLUSIVE_CACHE_flag = getenv("ENABLE_TXC");
+    if (strcmp(TRANSLATION_EXCLUSIVE_CACHE_flag, "true") == 0) {
+      enable_tx_cache = true;
+    }
 */
 
-			if (enable_tx_victim_cache || enable_tx_cache) {
-        //FIXME: move this to victim cache and create a 
-        if (getenv("TXVC_CACHE_LEVEL")) {
-					uint32_t _level = atoi(getenv("TXVC_CACHE_LEVEL"));
-          switch (_level) {
-            case 1:
-              _CACHE_ = "cpu0_L1D";
-              break;
-            case 2:
-              _CACHE_ = "cpu0_L2C";
-              break;
-            case 3:
-              _CACHE_ = "LLC";
-              break; 
-					}
-				}
-				//FIXME: Not sure we should use braces for constructor - but maybe we need to (???)
-				// Create and connect a new victim cache between L1D and L2C
-				//uint32_t num_set = 64;
-				//uint32_t num_way = 8;
-				//uint32_t mshr_size = 8; //64;
-				//NonTranslatingQueues* tx_cache_queues = new NonTranslatingQueues(1.0, num_set, num_way, mshr_size, 5, 4, champsim::lg2(64), 0);
+    if (enable_tx_victim_cache || enable_tx_cache) {
+      
+      if (NAME.find(_CACHE_) != std::string::npos) {
+        //FIXME: Not sure we should use braces for constructor - but maybe we need to (???)
+        // Create and connect a new victim cache between L1D and L2C
+        //uint32_t num_set = 64;
+        //uint32_t num_way = 8;
+        //uint32_t mshr_size = 8; //64;
+        //NonTranslatingQueues* tx_cache_queues = new NonTranslatingQueues(1.0, num_set, num_way, mshr_size, 5, 4, champsim::lg2(64), 0);
 
-				uint32_t txvc_num_set = 64;
-				uint32_t txvc_num_way = 8;
-				uint32_t txvc_latency = 1;
-				//uint32_t txvc_mshr_size = 8; //64;
+        uint32_t txvc_num_set = 64;
+        uint32_t txvc_num_way = 8;
+        uint32_t txvc_latency = 1;
+        //uint32_t txvc_mshr_size = 8; //64;
 
-				if (getenv("TXVC_LATENCY")) {
-					txvc_latency = std::stoull(getenv("TXVC_LATENCY"));
-				} else {
-					std::cerr << "TXVC_LATENCY not set!" << std::endl;
-					exit(0);
-				}
+        if (getenv("TXVC_LATENCY")) {
+          txvc_latency = std::stoull(getenv("TXVC_LATENCY"));
+        } else {
+          std::cerr << "TXVC_LATENCY not set!" << std::endl;
+          exit(0);
+        }
 
-				if (getenv("TXVC_NUM_SET")) {
-					txvc_num_set = std::stoull(getenv("TXVC_NUM_SET"));
-				} else {
-					std::cerr << "TXVC_NUM_SET not set!" << std::endl;
-					exit(0);
-				}
+        if (getenv("TXVC_NUM_SET")) {
+          txvc_num_set = std::stoull(getenv("TXVC_NUM_SET"));
+        } else {
+          std::cerr << "TXVC_NUM_SET not set!" << std::endl;
+          exit(0);
+        }
 
-				if (getenv("TXVC_NUM_WAY")) {
-					txvc_num_way = std::stoull(getenv("TXVC_NUM_WAY"));
-				} else {
-					std::cerr << "TXVC_NUM_WAY not set!" << std::endl;
-					exit(0);
-				}
+        if (getenv("TXVC_NUM_WAY")) {
+          txvc_num_way = std::stoull(getenv("TXVC_NUM_WAY"));
+        } else {
+          std::cerr << "TXVC_NUM_WAY not set!" << std::endl;
+          exit(0);
+        }
 
-				if (getenv("TXVC_INSTR_ONLY")) {
-					char* instr_only_flag = getenv("TXVC_INSTR_ONLY");
-					if (strcmp(instr_only_flag, "true") == 0) {
-						enable_instr_only = true;
-					}
-				}
+        if (getenv("TXVC_INSTR_ONLY")) {
+          char* instr_only_flag = getenv("TXVC_INSTR_ONLY");
+          if (strcmp(instr_only_flag, "true") == 0) {
+            enable_instr_only = true;
+          }
+        }
 
-				if (getenv("TXVC_DATA_ONLY")) {
-					char* data_only_flag = getenv("TXVC_DATA_ONLY");
-					if (strcmp(data_only_flag, "true") == 0) {
-						enable_data_only = true;
-					}
-				}
+        if (getenv("TXVC_DATA_ONLY")) {
+          char* data_only_flag = getenv("TXVC_DATA_ONLY");
+          if (strcmp(data_only_flag, "true") == 0) {
+            enable_data_only = true;
+          }
+        }
 
-				std::cout << NAME << ": Using PTE " << (enable_tx_victim_cache?"victim":"exclusive")  << " cache." << std::endl;
+        std::cout << NAME << ": Using PTE " << (enable_tx_victim_cache?"victim":"exclusive")  << " cache." << std::endl;
         std::cout << "\t\tLEVEL: " << _CACHE_ << std::endl;
-				std::cout << "\t\tLATENCY: " << txvc_latency << std::endl;
-				std::cout << "\t\tSETS: " << txvc_num_set << std::endl;
-				std::cout << "\t\tWAYS: " << txvc_num_way << std::endl;
-				if (enable_instr_only) 
-					std::cout << "\t\tAllowing only instuction PTEs." << std::endl;
+        std::cout << "\t\tLATENCY: " << txvc_latency << std::endl;
+        std::cout << "\t\tSETS: " << txvc_num_set << std::endl;
+        std::cout << "\t\tWAYS: " << txvc_num_way << std::endl;
+        if (enable_instr_only) 
+          std::cout << "\t\tAllowing only instuction PTEs." << std::endl;
         else if (enable_data_only)
           std::cout << "\t\tAllowing only data PTEs." << std::endl;
-				else 
-					std::cout << "\t\tAllowing both instuction and data PTEs." << std::endl;
+        else 
+          std::cout << "\t\tAllowing both instuction and data PTEs." << std::endl;
         
         
 
-				//tx_cache = new CACHE( NAME+"_TXC", 1.0, txvc_num_set, txvc_num_way, txvc_mshr_size, txvc_latency, 2, 2, champsim::lg2(64), 0, 0, 0, 
-				//											(1 << LOAD) | (1 << PREFETCH), *tx_cache_queues, ll, 
-				//											CACHE::pprefetcherDno, CACHE::rreplacementDlfu, 0, 0, vmem);
+        //tx_cache = new CACHE( NAME+"_TXC", 1.0, txvc_num_set, txvc_num_way, txvc_mshr_size, txvc_latency, 2, 2, champsim::lg2(64), 0, 0, 0, 
+        //											(1 << LOAD) | (1 << PREFETCH), *tx_cache_queues, ll, 
+        //											CACHE::pprefetcherDno, CACHE::rreplacementDlfu, 0, 0, vmem);
 
         tx_victim_cache = new VICTIM_CACHE(txvc_num_set, txvc_num_way, champsim::lg2(64), _CACHE_ + "_TXVC");
         
-			}
+      }
 		}
 
     last_pte_entry.reserve(NUM_SET);

@@ -205,32 +205,58 @@ def parse_experimental_data(config):
 
 		parse_raw_data = config['PARSING'].getboolean('parse_raw_stats')
 		if parse_raw_data:
-			# get raw data filenames
-			raw_champsim_data_files = []
-			for bench in benchmarks:
-				raw_champsim_data_files.append(dump_dir + "/" + bench + "_" + sim + "_run.out")
-		
-			# parse data to stats csv files
+			
 			os.system("mkdir -p " + stats_dir)
-			csv_champsim_data_files = []
+			
 			print("Parsing results for " + sim + "...")
-			i = 0
-			for raw_file in raw_champsim_data_files:
-				csv_file = stats_dir + "/" + benchmarks[i] + "_" + sim + ".csv" 
-				try:
-					#print("Parsing " + raw_file + "...")
-					champsim2csv.parse_champsim_stats(raw_file, csv_file)
-					csv_champsim_data_files.append(csv_file)
-				except Exception as e:
-					print("Parsing Failed: " + raw_file)
-					print(e)
-					print(traceback.format_exc())
-				
-				i += 1
+			csv_benchmark_data_files = []
+			for bench in benchmarks:
+				simpoints, weights = workloads.get_simpoints_n_weights(workload_name, bench)
 		
+				if simpoints == None:
+					simpoints = [ "" ]
+					raw_file_suffix = dump_dir + "/" + bench
+					csv_file_suffix = stats_dir + "/" + bench
+				else: 
+					raw_file_suffix = dump_dir + "/" + bench + "-"
+					csv_file_suffix = stats_dir + "/" + bench + "-"
+
+				# get raw data filenames
+				raw_simpoint_data_files = []
+				for simpoint in simpoints:
+					raw_simpoint_data_files.append(raw_file_suffix + simpoint + "_" + sim + "_run.out")
+		
+				# parse data to stats csv files
+				csv_simpoints_data_files = []
+				i = 0
+				for raw_file in raw_simpoint_data_files:
+					csv_file = csv_file_suffix + simpoints[i] + "_" + sim + ".csv" 
+					try:
+						#print("Parsing " + raw_file + "...")
+						champsim2csv.parse_champsim_stats(raw_file, csv_file)
+						csv_simpoints_data_files.append(csv_file)
+					except Exception as e:
+						print("Parsing Failed: " + raw_file)
+						print(e)
+						print(traceback.format_exc())
+				
+					i += 1
+
+				# merge simpoint data files
+				if i > 1:
+					print("Merging simpoints of " + bench)
+					#weights = workloads.get_simpoints_weights(workload_name, bench)
+					csv_benchmark_data_file = stats_dir + "/" + bench + "_" + sim + ".csv"
+					# TODO: reduce to a single dataframe, taking weights into account
+					champsim2csv.merge_simpoint_data(csv_simpoints_data_files, weights, csv_benchmark_data_file)
+				else:
+					csv_benchmark_data_file = csv_simpoints_data_files[0] # nothing to reduce, just a single file
+
+				csv_benchmark_data_files.append(csv_benchmark_data_file)
+
 			# merge csv files
 			print("Merging results to " + stats_dir + "/" + workload_name + "_" + sim + ".csv")
-			champsim2csv.merge_champsim_data(csv_champsim_data_files, benchmarks, stats_dir + "/" + workload_name + "_" + sim + ".csv")
+			champsim2csv.merge_champsim_data(csv_benchmark_data_files, benchmarks, stats_dir + "/" + workload_name + "_" + sim + ".csv")
 
 
 
@@ -261,7 +287,7 @@ def plot_experimental_data(config):
 	if config.has_option('PLOTTING', 'alternative_tags'):
 		simulations = config['PLOTTING']['alternative_tags'].replace(" ", "").split(",")
 
-	print(simulations)
+	#print(simulations)
 
 	os.system("mkdir -p " + figures_dir)
 	print("Plotting " + plot_name + " for " + workload_name)

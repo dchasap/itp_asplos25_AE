@@ -1,3 +1,4 @@
+
 SPEC_CPU_2006= [
 "400.perlbench-41B.champsimtrace.xz",
 "400.perlbench-50B.champsimtrace.xz",
@@ -190,15 +191,17 @@ SPEC_CPU_2017= [
 "657.xz_s-56B.champsimtrace.xz"
 ]
 
-SPEC_CPU_WORKLOADS_DIR="google_srv"
+SPEC_CPU_WORKLOADS_DIR="spec"
 
 SPEC_SIMPOINT_WEIGHTS_DIR="./weights"
 
-def get_spec_cpu_2006(simpoints=False):
-  if simpoints:
+def get_benchmarks(version):
+  if version == "2006":
     return SPEC_CPU_2006
-  else:
-    return SPEC_CPU_2006
+  elif version == "2017":
+    return SPEC_CPU_2017
+  else :
+    return None
 
 def get_spec_cpu_2017():
   if simpoints:
@@ -206,9 +209,9 @@ def get_spec_cpu_2017():
   else:
     return SPEC_CPU_2017
 
-def get_spec_cpu_dir():
+def get_traces_dir(version):
   return  SPEC_CPU_WORKLOADS_DIR
 
-def get_spec_cpu_weights_dir():
+def get_weights_dir():
   return SPEC_SIMPOINT_WEIGHTS_DIR
 

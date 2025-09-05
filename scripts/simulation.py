@@ -49,7 +49,7 @@ def run_simulation_batch(root_dir, trace_dir, dump_dir, sim_name, exp_name, work
 
   traces, trace_path = workloads.get_benchmark_traces(workload_name)
   trace_dir = trace_dir + "/" + trace_path
-  benchmarks = workloads.get_benchmark_names(workload_name)
+  benchmarks = workloads.get_benchmark_names(workload_name, with_simpoints=True)
 
   if debug_run:
     print("Simulating in Debug mode.")

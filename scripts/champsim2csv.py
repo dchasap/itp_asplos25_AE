@@ -170,7 +170,6 @@ def parse_champsim_stats(input_file, output_file):
             writer.writerow(new_row)
 
 
-
 """
 __name__ = merge_champsim_data.py 
 __author__ = Dimitrios Chasapis
@@ -199,3 +198,44 @@ def merge_champsim_data(input_files, benchmarks, output_file):
 
     final_df.to_csv(output_file, index=False)
 
+
+
+def merge_simpoint_data(input_files, weights, output_file):
+    
+    dfs = []
+    for input_file in input_files:
+        df = pd.read_csv(input_file, sep=',')
+        dfs.append(df)
+
+    # Ensure weights sum to 1
+    weights = np.array(weights) / sum(weights)
+
+    # Auto-detect column types if not specified
+    sample_df = dfs[0]
+    numeric_cols = sample_df.select_dtypes(include=[np.number]).columns.tolist()
+    categorical_cols = sample_df.select_dtypes(exclude=[np.number]).columns.tolist()
+    
+    #print(f"Numeric columns: {numeric_cols}")
+    #print(f"Categorical columns: {categorical_cols}")
+
+    # Create weighted dataframes
+    weighted_dfs = []
+    for df, weight in zip(dfs, weights):
+        weighted_df = df[numeric_cols] * weight
+        weighted_dfs.append(weighted_df)
+
+    # Sum the weighted dataframes
+    numeric_df = pd.concat(weighted_dfs).groupby(level=0).sum()
+
+    # For categorical columns, just take the first dataframe's values
+    # (assuming they're identical across all dataframes)
+    categorical_df = dfs[0][categorical_cols].copy()
+    
+    # Combine the results
+    final_df = pd.concat([numeric_df, categorical_df], axis=1)
+    
+    # Reorder columns to match original order
+    original_order = dfs[0].columns.tolist()
+    final_df = final_df[original_order]
+    #print(final_df)
+    final_df.to_csv(output_file, index=False)

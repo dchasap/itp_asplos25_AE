@@ -231,8 +231,10 @@ int main(int argc, char** argv)
     cache.pageAddressStatsMon->dump();
     cache.reuseDistMon->dump();
   #if defined TRANSLATION_EXCLUSIVE_CACHE
-    if (cache.enable_tx_victim_cache)
+    if (cache.enable_tx_victim_cache) {
+      std::cout << cache.NAME << std::endl;
       cache.tx_victim_cache->print_stats();
+    }
 
 		delete cache.reuseDistMon;
 	}
