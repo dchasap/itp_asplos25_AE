@@ -1,2 +1,0 @@
-sshfs -o allow_other,workaround=rename,reconnect,ServerAliveInterval=15,ServerAliveCountMax=3 bsc018186@transfer2.bsc.es://gpfs/scratch/bsc18/bsc018186/ mn5
-#sshfs -o workaround=rename,reconnect,ServerAliveInterval=15,ServerAliveCountMax=3 bsc018186@transfer1.bsc.es://gpfs/projects/bsc18/MN4/bsc18/romol/ mn5
