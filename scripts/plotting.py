@@ -372,15 +372,15 @@ def plot_average_multiple_caches(	input_baseline_files, means_df, input_tags, ca
 		#sns.set_palette(sns.color_palette())
 		plot_width = plot_conf['plot_width']
 		plot_height = plot_conf['plot_height']
-		fig, axes = plt.subplots(	nrows=2, ncols=4, 
+		fig, axes = plt.subplots(	nrows=2, ncols=3, 
 									figsize=(plot_width, plot_height+2),
-									gridspec_kw={	'width_ratios': [plot_width/4, plot_width/4, plot_width/4, plot_width/4], 
+									gridspec_kw={	'width_ratios': [plot_width/3, plot_width/3, plot_width/3], 
 													'height_ratios': [2, plot_height]})
 
 		axes[0][0].remove()
 		axes[0][1].remove()
 		axes[0][2].remove()
-		axes[0][3].remove()
+		#axes[0][3].remove()
 
 		#sns.set_style('white')
 		#sns.set_palette(sns.color_palette("tab10"))

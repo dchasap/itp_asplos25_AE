@@ -228,8 +228,10 @@ int main(int argc, char** argv)
 #if defined ENABLE_EXTRA_CACHE_STATS
   for (CACHE& cache : caches) {
     //std::cout << cache.NAME << std::endl;
+    cache.check_touched_indices();
     cache.pageAddressStatsMon->dump();
     cache.reuseDistMon->dump();
+    cache.addressAccessStatsMon->dump();
   #if defined TRANSLATION_EXCLUSIVE_CACHE
     if (cache.enable_tx_victim_cache) {
       std::cout << cache.NAME << std::endl;

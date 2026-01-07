@@ -43,7 +43,9 @@ def unpack_template(config, simulations):
           # return new config and simulation list
           simulations.pop(0)
           for new_sim in expanded_simulations:
-            simulations.insert(0, new_sim)
+            #print(new_sim)
+            #simulations.insert(0, new_sim)
+            simulations.append(new_sim)
 
           #print("sims:" + str(simulations))
           config, unpacked_simulations = unpack_template(config, simulations)

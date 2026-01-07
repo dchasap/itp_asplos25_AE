@@ -34,10 +34,10 @@ def get_benchmark_traces(workload_name):
     traces_dir = spec_cpu_workloads.get_traces_dir("all")
 
   elif workload_name == "debug":
-    #traces = [ qualcomm_srv_workloads.get_selected_qualcomm_srv()[0] ]
-    #traces_dir = qualcomm_srv_workloads.get_qualcomm_srv_dir()
-    traces = [ spec_cpu_workloads.get_benchmarks("2017")[0] ]
-    traces_dir = spec_cpu_workloads.get_traces_dir("2017")
+    traces = [ qualcomm_srv_workloads.get_selected_qualcomm_srv()[0] ]
+    traces_dir = qualcomm_srv_workloads.get_qualcomm_srv_dir()
+    #traces = [ spec_cpu_workloads.get_benchmarks("2017")[0] ]
+    #traces_dir = spec_cpu_workloads.get_traces_dir("2017")
 
 
   return traces, traces_dir
@@ -54,6 +54,8 @@ def get_benchmark_names(workload_name, with_simpoints=False):
         name = trace.split('.')[0] + '.' + trace.split('.')[1]
       else:
         name = trace.split('-')[0]
+    elif ("sierra" in trace):
+        name = trace.split('.' )[2]
     else:
       name = trace.split('.')[0]
     names.append(name)

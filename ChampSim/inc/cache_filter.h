@@ -22,7 +22,7 @@ class CacheFilter {
     bool skip_lookups = false;
 
     virtual ~CacheFilter() {}
-    virtual bool predict(uint64_t address, bool seems_dead) = 0;
+    virtual bool predict(uint64_t address, bool seems_dead, uint64_t access_freq) = 0;
     virtual void update(uint64_t address, bool is_doa, bool is_lookup, uint64_t cycle) = 0;
     virtual void print_stats() = 0;
 
@@ -51,7 +51,7 @@ class FilterTracer : public CacheFilter {
     
     }
 
-    virtual bool predict(uint64_t, bool) 
+    virtual bool predict(uint64_t, bool, uint64_t) 
     {
       return false;
     };
@@ -71,7 +71,29 @@ class FilterTracer : public CacheFilter {
     }
 };
 
+class DummyFilter : public CacheFilter {
 
+  private:
+    // stats
+    uint64_t total_predictions;
+
+  public: 
+    DummyFilter() {};
+
+    virtual bool predict(uint64_t, bool, uint64_t) 
+    {
+      total_predictions++;
+      return false;
+    }
+
+    virtual void update(uint64_t, bool, bool, uint64_t) {}
+
+    virtual void print_stats() 
+    {
+      std::cout << "FreqFilter: total predictions: " << total_predictions << std::endl;
+      std::cout << "FreqFilter: total bypasses: " << 0 << std::endl;
+    }
+};
 
 class OracleDOAFilter : public CacheFilter {
 
@@ -171,7 +193,7 @@ class OracleDOAFilter : public CacheFilter {
     
     
     // Return true if address is not in the top N frequencies
-    virtual bool predict(uint64_t address, bool seems_dead) 
+    virtual bool predict(uint64_t address, bool seems_dead, uint64_t) 
     {
       total_predictions++;
       for (auto access_it = ordered_freq_map.begin(); access_it != ordered_freq_map.end(); ++access_it) {
@@ -220,7 +242,7 @@ class SimpleDOAFilter : public CacheFilter {
   public: 
     SimpleDOAFilter() {};
 
-    virtual bool predict(uint64_t address, bool seems_dead) 
+    virtual bool predict(uint64_t address, bool seems_dead, uint64_t) 
     {
       last_prediction_map.insert({address, seems_dead}); // this is for statistics
       return seems_dead;
@@ -345,7 +367,7 @@ class DOAPredictor : public CacheFilter {
     }
 
 #if defined _DOA_BUDGETED
-    virtual bool predict(uint64_t address, bool seems_dead) 
+    virtual bool predict(uint64_t address, bool seems_dead, uint64_t) 
     {  
         // Implement prediction logic here
         // std::cout << "Predicting for address: " << address << std::endl;
@@ -395,7 +417,7 @@ class DOAPredictor : public CacheFilter {
 
 #else
 
-    virtual bool predict(uint64_t address, bool seems_dead) 
+    virtual bool predict(uint64_t address, bool seems_dead, uint64_t) 
     {
 
 				uint32_t bias = 0;
@@ -529,7 +551,7 @@ class MFUFilter : public CacheFilter {
     
     
     // Return true if address is not in the top N frequencies
-    virtual bool predict(uint64_t address, bool) 
+    virtual bool predict(uint64_t address, bool, uint64_t) 
     {
       // search the N top elements for the address
       uint64_t _N = std::min(top_N, ordered_freq_map.size());
@@ -587,19 +609,7 @@ class OracleMFUFilter : public CacheFilter {
       uint64_t last_cycle;
     };
 
-    uint64_t top_N, last_cycle_cleanup, cleanup_cycle_interval, freq_threshold;
-    //OrderedFrequencyMap<uint64_t, uint64_t> top_accessed_blocks;
-    //unordered_map<uint64_t, uint64_t> blocks;
-    //unordered_map<uint64_t, uint64_t> freq_map;
-
-    /*
-    struct FrequencyNodeComparator {
-      bool operator()(const FrequencyNode& a, const FrequencyNode& b) const
-      {
-        return a.freq < b.freq;
-      }
-    };
-    */
+    uint64_t top_N, last_cycle_cleanup, cleanup_cycle_interval, lower_freq_threshold, upper_freq_threshold;
 
     std::vector<FrequencyNode> ordered_freq_map;
 
@@ -607,6 +617,9 @@ class OracleMFUFilter : public CacheFilter {
     MemoryTracer memTracer;
     MemoryTraceReader memTraceReader;
     std::vector<uint64_t> accesses_vector;
+
+    // stats
+    uint64_t total_predictions = 0, total_bypasses = 0;
 
     champsim::DebugLogger debugLog;
 
@@ -626,29 +639,33 @@ class OracleMFUFilter : public CacheFilter {
 			}
       */
 
-      freq_threshold = 2; // default will remove freq < 2
+      //lower_freq_threshold = 2; // default will remove freq < 2
       if (getenv("CACHE_FILTER_FREQ_THRESHOLD")) {
-				freq_threshold = std::stoll(getenv("CACHE_FILTER_FREQ_THRESHOLD"));
+				std::string freq_threshold = getenv("CACHE_FILTER_FREQ_THRESHOLD");
+        size_t start = 0, end = 0;
+        while ((end = freq_threshold.find("-", start)) != std::string::npos) {
+          lower_freq_threshold = std::stoll(freq_threshold.substr(start, end - start));
+          std::cout << "lower_freq_threshold:" << lower_freq_threshold << std::endl;
+          start = end + 1;
+          upper_freq_threshold = std::stoll(freq_threshold.substr(start));
+          std::cout << "upper_freq_threshold:" << lower_freq_threshold << std::endl;
+          break;
+        }
+
+        if (end == std::string::npos) {
+          lower_freq_threshold = upper_freq_threshold = std::stoll(freq_threshold.substr(start));
+        }
+        
 			} else {
 				std::cerr << "CACHE_FILTER_FREQ_THRESHOLD not set!" << std::endl;
 				exit(0);
 			}
-      
+
       /*
       if (getenv("TXC_FILTER_CLEANUP_INTERVAL")) {
 				cleanup_cycle_interval = std::stoull(getenv("TXC_FILTER_CLEANUP_INTERVAL"));
 			} else {
 				std::cerr << "TXC_FILTER_CLEANUP_INTERVAL not set!" << std::endl;
-				exit(0);
-			}
-
-      char* _histogram_filename = nullptr;
-      if (getenv("TXC_FILTER_HISTOGRAM_DATA_FILE")) {
-				_histogram_filename = getenv("TXC_FILTER_HISTOGRAM_DATA_FILE");
-        histogram_filename.assign(histogram_filename);
-        histogram_file.open(_histogram_filename, 'w');
-			} else {
-				std::cerr << "TXC_FILTER_HISTOGRAM_DATA_FILE not set!" << std::endl;
 				exit(0);
 			}
       */
@@ -660,7 +677,8 @@ class OracleMFUFilter : public CacheFilter {
 
       std::cout << "CACHE_FILTER: Oracle MFU" << std::endl;
       std::cout << "\t-N: " << top_N << std::endl;
-      std::cout << "\t-Frequency threshold: " << freq_threshold << std::endl;
+      std::cout << "\t-Lower Frequency threshold: " << lower_freq_threshold << std::endl;
+      std::cout << "\t-Upper Frequency threshold: " << upper_freq_threshold << std::endl;
 
       save_mem_trace = true;
       if (getenv("CACHE_FILTER_MEMORY_TRACE_PATH") != nullptr) { 
@@ -689,6 +707,7 @@ class OracleMFUFilter : public CacheFilter {
                   i = j;
                 }
               }
+
             } else {
               
               //debugLog << "\tfreq:1" << std::endl;
@@ -706,9 +725,11 @@ class OracleMFUFilter : public CacheFilter {
 
           // eliminate all the elements with freq <= 1
           for (auto it = ordered_freq_map.begin(); it != ordered_freq_map.end(); ) {
-            if (it->freq < freq_threshold) {
+            //if (it->freq < freq_threshold) {
             //if (it->freq > freq_threshold || it->freq == 1) {
             //if (it->freq != freq_threshold) {
+            //if (it->freq < lower_freq_threshold || it->freq >= upper_freq_threshold) {
+            if (it->freq < lower_freq_threshold) {
               it = ordered_freq_map.erase(it);
             } else {
               ++it;
@@ -731,10 +752,11 @@ class OracleMFUFilter : public CacheFilter {
     
     
     // Return true if address is not in the top N frequencies
-    virtual bool predict(uint64_t address, bool) 
+    virtual bool predict(uint64_t address, bool, uint64_t) 
     {
 
-      //return false;
+      total_predictions++;
+
       /*
       auto access_it = std::find_if(ordered_freq_map.begin(), ordered_freq_map.end(), [address](auto x) { return x.key == address; });
       if (access_it != ordered_freq_map.end()) {
@@ -764,6 +786,7 @@ class OracleMFUFilter : public CacheFilter {
       //assert(false);
 
       debugLog << "Address " << address << " not found"  << std::endl;
+      total_bypasses++;
       return true;
     }
 
@@ -784,12 +807,12 @@ class OracleMFUFilter : public CacheFilter {
       if (access_it != ordered_freq_map.end()) {
         debugLog << "Address " << address << " found and reducing frequency"  << std::endl;
         ordered_freq_map[i].freq--;
-        
+        /*
         if (access_it->freq <= freq_threshold) {
           ordered_freq_map.erase(access_it);
           return;
         }
-        
+        */
         // sort the frequency map - maybe we can sort it after populating it?
         for (uint64_t j = i+1; j < ordered_freq_map.size(); j++) {
           if (ordered_freq_map[i].freq < ordered_freq_map[j].freq) {
@@ -807,9 +830,460 @@ class OracleMFUFilter : public CacheFilter {
 
     virtual void print_stats() 
     {
-      if (save_mem_trace)
+      if (save_mem_trace) {
         memTracer.save_tracefile();
+      } else {
+        std::cout << "FreqFilter: total predictions: " << total_predictions << std::endl;
+        std::cout << "FreqFilter: total bypasses: " << total_bypasses << std::endl;
+      }
     }
 };
 
+class BeladyOPTSetFilter : public CacheFilter {
+
+  private:
+
+    uint64_t sets, ways, offset_bits;
+
+    bool save_mem_trace;
+    MemoryTracer memTracer;
+    MemoryTraceReader memTraceReader;
+    std::vector<uint64_t> accesses_vector;
+    std::map<uint64_t, std::vector<uint64_t>> access_map; // set -> address in access order
+
+    // stats
+    uint64_t total_predictions = 0, total_bypasses = 0;
+
+    champsim::DebugLogger debugLog;
+
+    uint32_t get_set(uint64_t address) 
+    {
+      return (address >> offset_bits) & champsim::bitmask(champsim::lg2(sets));
+    }
+
+  public: 
+    BeladyOPTSetFilter(uint64_t _sets, uint64_t _ways, uint64_t _offset_bits): sets(_sets), ways(_ways), offset_bits(_offset_bits)
+    {
+
+      debugLog.enable();
+      
+      debugLog << "sets:" << sets << std::endl;
+      debugLog << "ways:" << ways << std::endl;
+      debugLog << "offset_bits:" << offset_bits << std::endl;
+      /*
+      double top_N_scale = 1.0;
+      if (getenv("TXC_FILTER_TOP_N_FACTOR")) {
+				top_N_scale = std::stod(getenv("TXC_FILTER_TOP_N_FACTOR"));
+			} else {
+				std::cerr << "TXC_FILTER_TOP_N_FACTOR not set!" << std::endl;
+				exit(0);
+			}
+      */
+
+      //lower_freq_threshold = 2; // default will remove freq < 2
+      /*
+      if (getenv("CACHE_FILTER_FREQ_THRESHOLD")) {
+				std::string freq_threshold = getenv("CACHE_FILTER_FREQ_THRESHOLD");
+        size_t start = 0, end = 0;
+        while ((end = freq_threshold.find("-", start)) != std::string::npos) {
+          lower_freq_threshold = std::stoll(freq_threshold.substr(start, end - start));
+          std::cout << "lower_freq_threshold:" << lower_freq_threshold << std::endl;
+          start = end + 1;
+          upper_freq_threshold = std::stoll(freq_threshold.substr(start));
+          std::cout << "upper_freq_threshold:" << lower_freq_threshold << std::endl;
+          break;
+        }
+
+        if (end == std::string::npos) {
+          lower_freq_threshold = upper_freq_threshold = std::stoll(freq_threshold.substr(start));
+        }
+        
+			} else {
+				std::cerr << "CACHE_FILTER_FREQ_THRESHOLD not set!" << std::endl;
+				exit(0);
+			}
+      */
+
+      /*
+      if (getenv("TXC_FILTER_CLEANUP_INTERVAL")) {
+				cleanup_cycle_interval = std::stoull(getenv("TXC_FILTER_CLEANUP_INTERVAL"));
+			} else {
+				std::cerr << "TXC_FILTER_CLEANUP_INTERVAL not set!" << std::endl;
+				exit(0);
+			}
+      */
+
+      std::cout << "CACHE_FILTER: Oracle MFU per set" << std::endl;
+      std::cout << "\t-N: " << ways << std::endl;
+
+      save_mem_trace = false;
+      if (getenv("CACHE_FILTER_MEMORY_TRACE_PATH") != nullptr) { 
+        std::string memtrace_filename = getenv("CACHE_FILTER_MEMORY_TRACE_PATH");
+        if (memTraceReader.open_tracefile(memtrace_filename)) {
+          std::cout << "\tReading memory trace from " << memtrace_filename << std::endl;
+          save_mem_trace = false;
+          accesses_vector = memTraceReader.get_accesses();
+          memTraceReader.close_tracefile();
+
+          for (auto it = accesses_vector.begin(); it != accesses_vector.end(); ++it) {
+            
+            //debugLog << "Add Access: " << *it << std::endl;
+            uint64_t set = get_set(*it);
+            //debugLog << "Add set: " << set << std::endl;
+            auto set_it = access_map.find(set);
+            if (set_it != access_map.end()) {
+              access_map[set].push_back(*it);
+            } else {
+              access_map[set] = std::vector<uint64_t>();
+              access_map[set].push_back(*it);
+            }
+            
+          }
+          
+        } else {
+          assert(0);
+          std::cerr << "\tSaving memory trace to " << memtrace_filename << std::endl;
+          memTracer.open_tracefile(memtrace_filename);
+        }
+
+      } else {
+        std::cerr << "CACHE_FILTER_MEMORY_TRACE_PATH not set!" << std::endl;
+        exit(1);
+      }
+
+    }
+    
+    
+    // Return true if address is not in the top N frequencies
+    virtual bool predict(uint64_t address, bool, uint64_t) 
+    {
+
+      total_predictions++;
+
+      //std::cout << "Looking up address: " << address << std::endl;
+      uint64_t set = get_set(address);
+      //std::cout << "Looking up set: " << set << std::endl;
+      auto set_it = access_map.find(set);
+      if (set_it != access_map.end()) {
+
+        std::vector<uint64_t>& accesses = set_it->second;
+        // uint64_t _address = accesses[0];
+        // find the address and remove all those before
+        // it's better to be wrong and not bypass than to be wrong and bypass
+        uint32_t i;
+        for (i = 0; i < accesses.size(); i++) {
+          if (accesses[i] != address) {
+            //std::cout << "next address: " << accesses[i+1] << std::endl;
+            break;
+          }
+        }
+        
+        //std::cout << "i: " << i << std::endl;
+        //std::cout << "accesses.size(): " << accesses.size() << std::endl;
+        if (i < accesses.size()) {
+          accesses.erase(accesses.begin() + i);
+        }
+        //std::cout << "next address: " << accesses[0] << std::endl;
+        //assert(address == _address);
+        //auto access_it = std::find_if(set_it->second.begin(), set_it->second.end(), [address](auto x) { return x == address; });
+        //exit(0);
+        for (i = 0; i < ways; i++) {
+          
+          if (accesses[i] == address) {
+            return false;
+          }
+        }
+
+      } else {
+        assert(0);  
+      }
+      
+      total_bypasses++;
+      return true;
+
+    }
+
+    virtual void update(uint64_t address, bool, bool is_lookup, uint64_t) 
+    {
+
+      return;
+      if (skip_lookups && is_lookup) return;
+
+      if (save_mem_trace) {
+        memTracer.add_access(address);
+        return;
+      }
+
+    }
+
+    virtual void print_stats() 
+    {
+      if (save_mem_trace) {
+        memTracer.save_tracefile();
+      } else {
+        std::cout << "FreqFilter: total predictions: " << total_predictions << std::endl;
+        std::cout << "FreqFilter: total bypasses: " << total_bypasses << std::endl;
+      }
+    }
+};
+
+
+class SimpleFreqFilter : public CacheFilter {
+
+  private:
+    uint64_t freq_threshold;
+    // stats
+    uint64_t total_predictions, total_bypasses; 
+
+  public: 
+    SimpleFreqFilter() 
+    {
+      if (getenv("CACHE_FILTER_FREQ_THRESHOLD")) {
+				freq_threshold = std::stoull(getenv("CACHE_FILTER_FREQ_THRESHOLD"));
+			} else {
+				std::cerr << "CACHE_FILTER_FREQ_THRESHOLD not set!" << std::endl;
+				exit(0);
+			}
+
+      std::cout << "CACHE_FILTER: Simple Frequency Filter" << std::endl;
+      std::cout << "\t-Frequency threshold: " << freq_threshold << std::endl;
+
+      total_predictions = 0;
+      total_bypasses = 0;
+    };
+
+    virtual bool predict(uint64_t, bool, uint64_t access_freq) override 
+    {
+
+      total_predictions++;
+
+      //last_prediction_map.insert({address, seems_dead}); // this is for statistics
+      if (freq_threshold > access_freq) {
+	      total_bypasses++;
+	      return true;
+      }
+	
+      return false;
+    }
+
+    virtual void update(uint64_t, bool, bool, uint64_t) {}
+    
+    virtual void print_stats() 
+    {
+    	std::cout << "FreqFilter: total predictions: " << total_predictions << std::endl;
+	    std::cout << "FreqFilter: total bypasses: " << total_bypasses << std::endl;	
+    } 
+};
+
+class BloomFreqFilter : public CacheFilter {
+
+  private:
+    uint64_t FREQ_THRESHOLD;
+
+    uint32_t FILTER_SIZE; 
+    std::vector<uint64_t> prediction_table;
+    uint32_t NUM_HASHES;
+    std::hash<uint64_t> hasher; 
+    
+    // stats
+    uint64_t total_predictions, total_bypasses; 
+    
+    // Generate different hash values using the same base hash function
+    size_t hash(uint64_t key, size_t seed) {
+        return hasher(key + seed * 0xdeadbeef);
+    }
+
+  public: 
+    BloomFreqFilter() 
+    {
+
+      if (getenv("CACHE_FILTER_BLOOM_FILTER_SIZE")) {
+				FILTER_SIZE = std::stoull(getenv("CACHE_FILTER_BLOOM_FILTER_SIZE"));
+			} else {
+				std::cerr << "CACHE_FILTER_BLOOM_FILTER_SIZE not set!" << std::endl;
+				exit(0);
+			}
+
+      if (getenv("CACHE_FILTER_NUM_HASHES")) {
+				NUM_HASHES = std::stoi(getenv("CACHE_FILTER_NUM_HASHES"));
+			} else {
+				std::cerr << "CACHE_FILTER_NUM_HASHES not set!" << std::endl;
+				exit(0);
+			}
+      
+      if (getenv("CACHE_FILTER_FREQ_THRESHOLD")) {
+				FREQ_THRESHOLD = std::stoull(getenv("CACHE_FILTER_FREQ_THRESHOLD"));
+			} else {
+				std::cerr << "CACHE_FILTER_FREQ_THRESHOLD not set!" << std::endl;
+				exit(0);
+			}
+      
+      std::cout << "CACHE_FILTER: Bloom Frequency Filter" << std::endl;
+      std::cout << "\t-Bloom Filter size: " << FILTER_SIZE << " elements" << std::endl;
+      std::cout << "\t-Bloom Filter hashes: " << NUM_HASHES << std::endl;
+      std::cout << "\t-Frequency threshold: " << FREQ_THRESHOLD << std::endl;
+       
+      prediction_table.resize(FILTER_SIZE, 0);
+
+      total_predictions = 0;
+      total_bypasses = 0;
+    };
+
+    virtual bool predict(uint64_t addr, bool, uint64_t) override 
+    {
+      total_predictions++;
+
+      // Lookup the minimum count in the prediction table, the min should 
+      // represent the frequency counter for the cache line
+      uint32_t min_count = UINT32_MAX;
+        
+      for (size_t i = 0; i < NUM_HASHES; ++i) {
+        size_t index = hash(addr, i) % FILTER_SIZE;
+        uint32_t count = prediction_table[index];
+        min_count = std::min(min_count, count);
+      }
+
+      if (min_count < FREQ_THRESHOLD) {
+	      total_bypasses++;
+	      return true;
+      }
+	
+      return false;
+    }
+
+    virtual void update(uint64_t addr, bool, bool is_lookup, uint64_t) 
+    {
+
+      if (!is_lookup) return;
+
+      for (size_t i = 0; i < NUM_HASHES; ++i) {
+        size_t index = hash(addr, i) % FILTER_SIZE;
+        prediction_table[index]++;
+      }
+    }
+    
+    virtual void print_stats() 
+    {
+    	std::cout << "FreqFilter: total predictions: " << total_predictions << std::endl;
+	    std::cout << "FreqFilter: total bypasses: " << total_bypasses << std::endl;	
+
+      uint64_t avg_freq = 0;
+      uint64_t total_bypass_cells = 0;
+      for (auto it = prediction_table.begin(); it != prediction_table.end(); ++it) {
+        avg_freq += *it;
+        if (*it < FREQ_THRESHOLD) {
+          total_bypass_cells++;
+        }
+      }
+      std::cout << "FreqFilter: average frequency: " << (avg_freq / prediction_table.size()) << std::endl;
+      std::cout << "FreqFilter: total bypass cells: " << total_bypass_cells << std::endl;
+    } 
+    
+    /*
+    // Reset the bloom filter (call periodically to avoid saturation)
+    void reset() {
+        for (auto& counter : filter) {
+            counter.store(0, std::memory_order_relaxed);
+        }
+    }
+    */
+
+};
+
+
+class FreqFilter : public CacheFilter {
+
+  private:
+    uint64_t FREQ_THRESHOLD;
+
+    //uint32_t FILTER_SIZE; 
+    std::map<uint64_t, uint64_t> prediction_table; 
+    
+    // stats
+    uint64_t total_predictions, total_bypasses; 
+
+  public: 
+    FreqFilter() 
+    {
+      
+      if (getenv("CACHE_FILTER_FREQ_THRESHOLD")) {
+				FREQ_THRESHOLD = std::stoull(getenv("CACHE_FILTER_FREQ_THRESHOLD"));
+			} else {
+				std::cerr << "CACHE_FILTER_FREQ_THRESHOLD not set!" << std::endl;
+				exit(0);
+			}
+      
+      std::cout << "CACHE_FILTER: Frequency Filter" << std::endl;
+      std::cout << "\t-Frequency threshold: " << FREQ_THRESHOLD << std::endl;
+       
+      //prediction_table.resize(FILTER_SIZE, 0);
+
+      total_predictions = 0;
+      total_bypasses = 0;
+    };
+
+    virtual bool predict(uint64_t addr, bool, uint64_t) override 
+    {
+      
+      total_predictions++;
+
+      // Lookup the minimum count in the prediction table, the min should 
+      // represent the frequency counter for the cache line
+      uint32_t access_freq = UINT32_MAX;
+        
+      auto it = prediction_table.find(addr);
+      if (it != prediction_table.end()) {
+        access_freq = it->second;
+      }
+
+      if (access_freq < FREQ_THRESHOLD) {
+	      total_bypasses++;
+	      return true;
+      }
+	
+      return false;
+    }
+
+    virtual void update(uint64_t addr, bool, bool is_lookup, uint64_t) 
+    {
+
+      if (!is_lookup) return;
+
+      auto it = prediction_table.find(addr);
+      if (it == prediction_table.end()) {
+        prediction_table[addr] = 1;
+      } else {
+        it->second++;
+      }
+    }
+    
+    virtual void print_stats() 
+    {
+
+    	std::cout << "FreqFilter: total predictions: " << total_predictions << std::endl;
+	    std::cout << "FreqFilter: total bypasses: " << total_bypasses << std::endl;	
+
+      uint64_t avg_freq = 0;
+      uint64_t total_bypass_cells = 0;
+      for (auto it = prediction_table.begin(); it != prediction_table.end(); ++it) {
+        avg_freq += it->second;
+        if (it->second >= FREQ_THRESHOLD) {
+          total_bypass_cells++;
+        }
+      }
+
+      //std::cout << "BoomFreqFilter: average frequency: " << (avg_freq / prediction_table.size()) << std::endl;
+      //std::cout << "BoomFreqFilter: total bypass cells: " << total_bypass_cells << std::endl;
+    } 
+    
+    /*
+    // Reset the bloom filter (call periodically to avoid saturation)
+    void reset() {
+        for (auto& counter : filter) {
+            counter.store(0, std::memory_order_relaxed);
+        }
+    }
+    */
+
+};
 #endif // DOA_PREDICTOR_H

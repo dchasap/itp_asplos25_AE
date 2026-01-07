@@ -18,10 +18,15 @@
 #define MSL_BITS_H
 
 #include <limits>
+#include <cmath>
 
 namespace champsim::msl
 {
-constexpr unsigned lg2(uint64_t n) { return n < 2 ? 0 : 1 + lg2(n / 2); }
+constexpr unsigned lg2(uint64_t n) 
+{ 
+  //return n < 2 ? 0 : 1 + lg2(n / 2); 
+  return log2(n);
+}
 
 constexpr uint64_t bitmask(std::size_t begin, std::size_t end = 0)
 {
@@ -29,6 +34,13 @@ constexpr uint64_t bitmask(std::size_t begin, std::size_t end = 0)
 }
 
 constexpr uint64_t splice_bits(uint64_t upper, uint64_t lower, std::size_t bits) { return (upper & ~bitmask(bits)) | (lower & bitmask(bits)); }
+
+constexpr bool is_power_of_two(std::size_t x) 
+{
+  return x != 0 && ((x & (x - 1)) == 0);
+}
+
 } // namespace champsim::msl
+
 
 #endif

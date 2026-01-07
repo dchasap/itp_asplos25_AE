@@ -41,6 +41,7 @@
 #if defined ENABLE_EXTRA_CACHE_STATS
 #include "reuse_dist.h"
 #include "page_address_stats.h"
+#include "address_access_stats.h"
 #endif
 
 #if defined PTP_REPLACEMENT_POLICY
@@ -156,6 +157,7 @@ class CACHE : public champsim::operable, public MemoryRequestConsumer, public Me
 
 #if defined TRANSLATION_EXCLUSIVE_CACHE
 		bool is_doa = true;
+    uint64_t access_freq = 0;
 #endif 
 
 /*
@@ -180,7 +182,12 @@ class CACHE : public champsim::operable, public MemoryRequestConsumer, public Me
   std::pair<set_type::iterator, set_type::iterator> get_set_span(uint64_t address, uint8_t type);
  	std::pair<set_type::const_iterator, set_type::const_iterator> get_set_span(uint64_t address, uint8_t type) const;
   std::size_t get_set_index(uint64_t address, uint8_t type) const;
-#else
+#elif defined TX_SPLIT_CACHE
+  std::pair<set_type::iterator, set_type::iterator> get_set_span(uint64_t address, uint8_t type);
+ 	std::pair<set_type::const_iterator, set_type::const_iterator> get_set_span(uint64_t address, uint8_t type) const;
+  std::size_t get_set_index(uint64_t address, uint8_t type) const;
+  std::size_t _get_set_index(uint64_t address, uint32_t num_set) const;
+#else 
   std::pair<set_type::iterator, set_type::iterator> get_set_span(uint64_t address);
  	std::pair<set_type::const_iterator, set_type::const_iterator> get_set_span(uint64_t address) const;
   std::size_t get_set_index(uint64_t address) const;
@@ -270,12 +277,54 @@ public:
 #if defined ENABLE_EXTRA_CACHE_STATS
 	ReuseDistanceMonitor* reuseDistMon;
 	PageAddressStatsHanlder* pageAddressStatsMon;
+  AddressAccessStatsHanlder* addressAccessStatsMon;
   bool cache_is_full = false;
+#endif
+
+#if defined TX_SPLIT_CACHE
+  uint32_t TX_NUM_SET;
+  bool enable_tx_split_cache;
+#endif 
+
+#if defined TX_SPLIT_CACHE
+   __uint128_t barret_reciprocal;
+   __uint128_t tx_barret_reciprocal;
+#else 
+   __uint128_t barret_reciprocal; 
 #endif
 
   NonTranslatingQueues& queues;
   std::deque<PACKET> MSHR;
   std::deque<PACKET> inflight_writes;
+
+  //TODO: THIS IS TEMP REMOVE AFTER DEBUGGING
+  std::vector<uint64_t> touched_indices;
+
+
+  void check_touched_indices() {
+    
+    std::string set_access_filename_prefix = getenv("SET_ACCESS_FILENAME_PREFIX");
+    std::ofstream dumpfile = std::ofstream(set_access_filename_prefix + "_" + NAME + ".csv", std::ios::out);
+    std::cout << "Saving set accesses to " << set_access_filename_prefix << "_" << NAME << ".csv" << std::endl;
+    
+    std::cout << NAME + ": Checking that all sets were used." << std::endl;
+    
+    dumpfile << "set,accesses" << std::endl;
+
+    uint64_t num_sets_untouched = 0;
+    std::cout << "Sets map size:" << touched_indices.size() << std::endl;
+    for (uint64_t i = 0; i < NUM_SET; i++) {
+      uint64_t accesses = touched_indices[i];
+      dumpfile << i << "," << accesses << std::endl;
+      if(accesses == 0) {
+        num_sets_untouched++;
+        std::cout << "Set " << i << " was not touched." << std::endl;
+      }
+    }
+
+    dumpfile.close();
+    std::cout << "Done for " << NAME << " with " << num_sets_untouched << " sets not touched." << std::endl;
+  }
 
 #if defined TRANSLATION_EXCLUSIVE_CACHE
   std::string _CACHE_;
@@ -374,6 +423,21 @@ public:
             } else if (strcmp(dbpred_name, "trace-mem") == 0) {
               std::cout << "\tTXVC: Generating a memory trace for the cache filter" << std::endl;
               cacheFilter = new FilterTracer();   
+            } else if (strcmp(dbpred_name, "simple-freq-filter") == 0) {
+              std::cout << "\tTXVC: Using simple freq filter" << std::endl;
+					    cacheFilter = new SimpleFreqFilter();
+            } else if (strcmp(dbpred_name, "bloom-freq-filter") == 0) {
+              std::cout << "\tTXVC: Using bloom freq filter" << std::endl;
+					    cacheFilter = new BloomFreqFilter();
+            } else if (strcmp(dbpred_name, "freq-filter") == 0) {
+              std::cout << "\tTXVC: Using freq filter" << std::endl;
+              cacheFilter = new FreqFilter();
+            } else if (strcmp(dbpred_name, "none") == 0) {
+              std::cout << "\tTXVC: Using dummy freq filter" << std::endl;
+              cacheFilter = new DummyFilter();
+            } else if (strcmp(dbpred_name, "beladyOPT-set") == 0) {
+              std::cout << "\tTXVC: Using BeladyOPT per set filter" << std::endl;
+              cacheFilter = new BeladyOPTSetFilter(num_set, num_way, offset_bits);
             } else {
               std::cerr << "TXVC: Unknown cache filter " << dbpred_name << "!" << std::endl;
               exit(1);
@@ -420,6 +484,7 @@ public:
 																						    reuse_dist_filename_prefix + "_" + "TXVC" + ".csv",
 																						    false, true);
 #endif
+
       }
 
 
@@ -433,11 +498,12 @@ public:
       }
 
 
-      void add_request(PACKET& request, uint64_t curr_cycle, bool seems_dead) 
+      void add_request(PACKET& request, uint64_t curr_cycle, bool seems_dead, uint64_t access_freq) 
       {
 
         if (enable_cache_filtering) {
-          bool bypass = cacheFilter->predict(request.address, seems_dead);
+          //std::cout << "access_freq:" << access_freq << std::endl;
+          bool bypass = cacheFilter->predict(request.address, seems_dead, access_freq);
           if (bypass) {
             //std::cout << "Block " << request.address " byapassed." << std::endl;
             return;
@@ -477,6 +543,7 @@ public:
 #if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT || defined TRANSLATION_EXCLUSIVE_CACHE
 				way->is_instr = request.is_instr;
 				way->is_pte = request.is_pte;
+        way->access_freq = request.access_freq;
 #endif
 
 #if defined MULTIPLE_PAGE_SIZE
@@ -503,7 +570,7 @@ public:
 
 #if defined ENABLE_EXTRA_CACHE_STATS
         if (enable_cache_filtering) {
-          bool bypass = cacheFilter->predict(address, false);
+          bool bypass = cacheFilter->predict(address, false, 0);
           if (!bypass) {
             //std::cout << "Block " << request.address " byapassed." << std::endl;
             reuseDistMon->add_access(address);
@@ -610,6 +677,10 @@ public:
   [[deprecated("Use get_set_index() instead.")]] uint64_t get_set(uint64_t address, uint8_t type) const;
   [[deprecated("This function should not be used to access the blocks directly.")]] uint64_t get_way(uint64_t address, uint8_t type, uint64_t set) const;
   uint64_t invalidate_entry(uint64_t inval_addr, uint8_t type);
+#elif defined TX_SPLIT_CACHE
+  [[deprecated("Use get_set_index() instead.")]] uint64_t get_set(uint64_t address, uint8_t type) const;
+  [[deprecated("This function should not be used to access the blocks directly.")]] uint64_t get_way(uint64_t address, uint8_t type, uint64_t set) const;
+  uint64_t invalidate_entry(uint64_t inval_addr, uint8_t type);
 #else
   [[deprecated("Use get_set_index() instead.")]] uint64_t get_set(uint64_t address) const;
   [[deprecated("This function should not be used to access the blocks directly.")]] uint64_t get_way(uint64_t address, uint64_t set) const;
@@ -660,6 +731,7 @@ public:
         pref_activate_mask(pref_mask), queues(queue_set), repl_type(repl), pref_type(pref)
 #endif
   {
+
 #if defined FORCE_HIT 
 		if (force_hit) {
 			if (NAME.find("STLB") != std::string::npos) {
@@ -697,12 +769,7 @@ public:
         enable_tx_victim_cache = true;
       }
     }
-/*
-    char*  TRANSLATION_EXCLUSIVE_CACHE_flag = getenv("ENABLE_TXC");
-    if (strcmp(TRANSLATION_EXCLUSIVE_CACHE_flag, "true") == 0) {
-      enable_tx_cache = true;
-    }
-*/
+
 
     if (enable_tx_victim_cache || enable_tx_cache) {
       
@@ -780,6 +847,65 @@ public:
     last_pte_entry.reserve(NUM_SET);
 #endif
 
+#if defined TX_SPLIT_CACHE
+
+    enable_tx_split_cache = false;
+    std::string _TX_SPLIT_CACHE_ = "none";
+    if (getenv("TX_SPLIT_CACHE_LEVEL")) {
+      uint32_t _level = atoi(getenv("TX_SPLIT_CACHE_LEVEL"));
+      switch (_level) {
+        case 1:
+            _TX_SPLIT_CACHE_ = "cpu0_L1D";
+            break;
+          case 2:
+            _TX_SPLIT_CACHE_ = "cpu0_L2C";
+            break;
+          case 3:
+            _TX_SPLIT_CACHE_ = "LLC";
+            break; 
+      }
+
+
+      if (NAME.find(_TX_SPLIT_CACHE_) != std::string::npos) {
+        
+        enable_tx_split_cache = true;
+        if (getenv("TX_NUM_SETS")) {  
+          
+          TX_NUM_SET = std::stoull(getenv("TX_NUM_SETS"));
+
+          std::cout << NAME << ": Using PTE exclusive sets:" << std::endl;
+          std::cout << "\t\tSETS: " << TX_NUM_SET << std::endl;
+        
+        } else {
+          std::cerr << "TX_NUM_SETS not set!" << std::endl;
+          exit(0);
+        }
+
+      } else {
+        std::cout << NAME + " is not using any Translations exclusive cache sets." << std::endl; 
+      }
+    } else {
+      std::cout << "TX_SPLIT_CACHE_LEVEL not set." << std::endl;
+    }
+
+#endif
+
+#if defined TX_SPLIT_CACHE
+  // Only used if num_sets is NOT a power of two
+  std::cout << "check_1" << std::endl;
+  barret_reciprocal = ( ( __uint128_t)1 << 64 ) / (NUM_SET - TX_NUM_SET);
+  
+  if (TX_NUM_SET != 0) {
+    tx_barret_reciprocal = ( ( __uint128_t)1 << 64 ) / (TX_NUM_SET);
+  } else {
+    tx_barret_reciprocal = 0;
+  }
+    std::cout << "check_2" << std::endl;
+#else 
+  // Only used if num_sets is NOT a power of two
+  barret_reciprocal = ( ( __uint128_t)1 << 64 ) / (NUM_SET - TX_NUM_SET);
+#endif
+
 #if defined ENABLE_EXTRA_CACHE_STATS
 		if (NAME.find("STLB") != std::string::npos) {
 			std::string page_address_stats_file_prefix = getenv("PAGE_ADDRESS_STATS_FILENAME_PREFIX");
@@ -791,6 +917,19 @@ public:
 
 			pageAddressStatsMon = new PageAddressStatsHanlder(OFFSET_BITS, "", false);
 		}
+
+    if (getenv("ACCESS_FREQ_STATS_FILENAME_PREFIX")) {
+          std::string access_freq_stats_filename_prefix = getenv("ACCESS_FREQ_STATS_FILENAME_PREFIX");
+          if (NAME.find("cpu0_L2C") != std::string::npos) {
+            addressAccessStatsMon = new AddressAccessStatsHanlder(access_freq_stats_filename_prefix + "_" + NAME + ".csv", true);
+          } else {
+            addressAccessStatsMon = new AddressAccessStatsHanlder(access_freq_stats_filename_prefix + "_" + NAME + ".csv", false);
+          }
+
+    } else {
+        std::cerr << "ACCESS_FREQ_STATS_FILENAME_PREFIX not set!" << std::endl;
+        exit(0);
+    }
 
 		std::string reuse_dist_filename_prefix = getenv("REUSE_DIST_FILENAME_PREFIX");
 
@@ -813,7 +952,13 @@ public:
 																						reuse_dist_filename_prefix + "_" + NAME + ".csv",
 																						false, enable_reuseDistMon);
 #endif
-  }
+  
+    // other debugging and stats 
+    touched_indices.reserve(NUM_SET);
+    for (uint32_t i = 0; i < NUM_SET; i++) {
+      touched_indices[i] = 0;
+    }
+}
 
 #if defined ENABLE_EXTRA_CACHE_STATS
   void hit_hook(const PACKET&);

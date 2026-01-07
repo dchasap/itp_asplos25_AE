@@ -182,6 +182,16 @@ public:
 	FDIP fdip = FDIP(16);
 #endif
 
+#if defined ENABLE_EXTRA_CPU_STATS
+  uint64_t itlb_stall_potential_cycles = 0;
+  uint64_t dtlb_stall_potential_cycles = 0;
+  //uint64_t page_walk_stall_cycles = 0;
+  
+  // Track pending translations
+  //std::set<uint64_t> pending_itlb_translations;
+  //std::set<uint64_t> pending_dtlb_translations;
+#endif
+
 /*
 #if defined TRACK_BRANCH_HISTORY 
 	historyTracker *histTracker;

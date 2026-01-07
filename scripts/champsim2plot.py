@@ -10,7 +10,7 @@ xlabels = {
 			'selected_qualcomm_srv_ap': "Qualcomm Server Workloads",
 			'smt_qualcomm_srv_ap': "SMT Qualcomm Server Workloads",
 			'spec': "SPEC CPU 2006/2017",
-      		'google_srv': "Google Server Workloads",
+      'google_srv': "Google Server Workloads",
 			'debug': "srv105_ap"
 		}
 
@@ -60,6 +60,7 @@ def gen_plot(benchsuite, _tags, data_files, figure_name, figure_type, file_type,
 		input_baseline_files = []
 		tags = []
 		i = 0
+
 		for file in data_files:
 			if "BASELINE" in file:
 				input_baseline_files.append(file)
@@ -79,14 +80,16 @@ def gen_plot(benchsuite, _tags, data_files, figure_name, figure_type, file_type,
 
 
 		data_df = stats.compute_variation(baseline_df, data_df, tags, 'IPC', 'IPC_IMPROVEMENT')
-		#means_df = stats.compute_mean(data_df, tags, 'IPC_IMPROVEMENT', 'mean')
+		means_df = stats.compute_mean(data_df, tags, 'IPC_IMPROVEMENT', 'mean')
+		print(means_df)
 
 		#print(data_df['benchmarks'].str.split('.').str[0])
 		data_df['benchmarks'] = data_df['benchmarks'].str.split('.').str[0]
 	
 		plotting.plot_conf['plot_type'] = 'box'
 		#plotting.plot_conf['xlabel'] = xlabels[benchsuite]
-		plotting.plot_conf['xlabel'] = "Memory Access Frequency"
+		#plotting.plot_conf['xlabel'] = "Memory Access Frequency"
+		plotting.plot_conf['xlabel'] = "TXVC Size"
 		plotting.plot_conf['ylabel'] = "IPC Improvement (%)"
 		#plotting.plot_conf['ymax'] = 25
 		#plotting.plot_conf['ymin'] = 0
@@ -114,6 +117,7 @@ def gen_plot(benchsuite, _tags, data_files, figure_name, figure_type, file_type,
 		input_data_files, tags = get_data_files(data_files, _tags, False)
 
 		cache_types=["cpu0_L1I", "cpu0_L1D", "cpu0_L2C", "LLC"]
+		cache_types=["cpu0_L2C", "TXVC", "LLC"]
 		op_type = "TOTAL"
 
 		df = stats.load_df(input_data_files, tags, cache_types, op_type)
@@ -237,21 +241,21 @@ def gen_plot(benchsuite, _tags, data_files, figure_name, figure_type, file_type,
 																					output_file)
 
 
-		plotting.plot_conf['ylabel'] = "Hit Ratio(%)"
-		stat_names = [ "HIT_RATIO" ] 
-		for cache_type in cache_types:
+		#plotting.plot_conf['ylabel'] = "Hit Ratio(%)"
+		#stat_names = [ "HIT_RATIO" ] 
+		#for cache_type in cache_types:
 
-			means_df_single_cache = means_df.loc[(means_df['cache'] == cache_type)]
+		#	means_df_single_cache = means_df.loc[(means_df['cache'] == cache_type)]
 
-			plotting.plot_conf['plot_width'] = 8
-			plotting.plot_conf['plot_height'] = 1.8
-			plotting.plot_conf['fontsize'] = 18
+		#	plotting.plot_conf['plot_width'] = 8
+		#	plotting.plot_conf['plot_height'] = 1.8
+		#	plotting.plot_conf['fontsize'] = 18
 
-			output_file = figure_dir + "/" + figure_name + "_" + cache_type + "_" + benchsuite + "." + file_type
-			print(output_file)
-			plotting.plot_average_single_cache(	input_data_files, means_df_single_cache, tags, 
-																					cache_types, op_type, stat_names, 
-																					output_file)
+		#	output_file = figure_dir + "/" + figure_name + "_" + cache_type + "_" + benchsuite + "." + file_type
+		#	print(output_file)
+		#	plotting.plot_average_single_cache(	input_data_files, means_df_single_cache, tags, 
+		#																			cache_types, op_type, stat_names, 
+		#																			output_file)
 
 	if (figure_type == "plot_cache_filter_accuracy"):
 		#print(data_files)
@@ -299,6 +303,51 @@ def gen_plot(benchsuite, _tags, data_files, figure_name, figure_type, file_type,
 		plotting.plot_average_single_cache(input_data_files, means_df, tags, cache_types, 
 																			op_type, stat_names, output_file)
 
+
+	if (figure_type == "plot_txvc_bypass"):
+		
+		input_data_files, tags = get_data_files(data_files, _tags, True)
+
+		cache_types=["TXVC"]
+		op_type = "TOTAL"
+
+		df = stats.load_df(input_data_files, tags, cache_types, op_type)
+
+		df = stats.compute_stat(df, "TXVC_BYPASS_RATIO")
+		stat_names = [ "TXVC_BYPASS_RATIO" ] 
+		# compute means
+		means = {}
+		for stat in stat_names:
+				means[stat] = []
+		caches = []
+		confs = []
+		means_hr = []
+		for cache in cache_types:
+			for tag in tags:
+				for stat in stat_names:
+					mean = gmean(df.loc[(df['tag'] == tag) & (df['CACHE'] == cache)][stat])
+					means[stat].append(mean)
+				caches.append(cache)
+				confs.append(tag)
+
+		means_df = pd.DataFrame({'benchmarks':'geomean', 'cache':caches, 'tag': confs, 'mean':means['TXVC_BYPASS_RATIO']})
+		for stat in stat_names:
+			means_df[stat] = means[stat]
+		print(means_df)
+
+		plotting.plot_conf['plot_type'] = 'bar'
+		plotting.plot_conf['plot_width'] = 16
+		plotting.plot_conf['plot_height'] = 1.8
+		plotting.plot_conf['fontsize'] = 14
+		plotting.plot_conf['ylabel'] = "Bypasses"
+		plotting.plot_conf['show_legend'] = True
+		plotting.plot_conf['extra_xlabels'] = True
+
+		output_file = figure_dir + "/" + figure_name + "_txvc_bypass_" + benchsuite + "." + file_type
+		print(output_file)
+		#plotting.plot_stat(df, tags, 'CACHE_FILTER_ACCURACY', output_file)
+		plotting.plot_average_single_cache(input_data_files, means_df, tags, cache_types, 
+																			op_type, stat_names, output_file)
 
 	if (figure_type == "plot_occupancy"):
 	

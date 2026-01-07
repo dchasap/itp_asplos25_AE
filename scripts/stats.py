@@ -114,7 +114,9 @@ def compute_stat(df, stat_name):
 		speedup = 1.00 + (df["IPC_IMPROVEMENT"] / 100)
 		df["MISS_CYCLES"] = (1 - (1/speedup)) * 100
 	elif stat_name == "HIT_RATIO":
-		df['HIT_RATIO'] = (df['HIT'] / df['ACCESS']) * 100
+		df['HIT_RATIO'] = ((df['itHIT'] + df['dtHIT']) / (df['itACCESS'] + df['dtACCESS'])) * 100
+	elif stat_name == "TXVC_BYPASS_RATIO":
+		df['TXVC_BYPASS_RATIO'] = (df['TXVC_BYPASSES'] / df['TXVC_PREDICTIONS']) * 100
 
 	return df
 

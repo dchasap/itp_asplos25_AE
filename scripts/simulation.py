@@ -19,6 +19,10 @@ def export_env_variables(benchmark, sim_name, dump_dir, enviromental_variables):
       export_cmd += "export " + var + "=" + enviromental_variables[var] + "/" + benchmark + "_txvc_mem_trace.csv\n"
     elif (var == "REUSE_DIST_FILENAME_PREFIX"):
       export_cmd += "export REUSE_DIST_FILENAME_PREFIX=" + dump_dir + "/" + benchmark + "_" + sim_name + "_reuse_dist\n"
+    elif (var == "ACCESS_FREQ_STATS_FILENAME_PREFIX"):
+      export_cmd += "export " + var + "=" + dump_dir + "/" + benchmark + "_" + sim_name + "_address_access_stats\n"
+    elif (var == "SET_ACCESS_FILENAME_PREFIX"):
+      export_cmd += "export SET_ACCESS_FILENAME_PREFIX=" + dump_dir + "/" + benchmark + "_" + sim_name + "_set_access_stats\n"
     else:
       export_cmd += "export " + var + "=" + enviromental_variables[var] + "\n"
 

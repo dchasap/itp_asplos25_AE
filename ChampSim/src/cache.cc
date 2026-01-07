@@ -44,6 +44,12 @@
 					if (way == set_end)
 						way = std::next(set_begin, impl_find_victim(fill_mshr.cpu, fill_mshr.instr_id, get_set_index(fill_mshr.address, fill_mshr.is_instr), &*set_begin, fill_mshr.ip,
 																												fill_mshr.address, fill_mshr.type));
+#elif defined TX_SPLIT_CACHE
+					auto [set_begin, set_end] = get_set_span(fill_mshr.address, fill_mshr.is_pte);
+					auto way = std::find_if_not(set_begin, set_end, [](auto x) { return x.valid; });
+					if (way == set_end)
+						way = std::next(set_begin, impl_find_victim(fill_mshr.cpu, fill_mshr.instr_id, get_set_index(fill_mshr.address, fill_mshr.is_instr), &*set_begin, fill_mshr.ip,
+																												fill_mshr.address, fill_mshr.type));
 #else
 					auto [set_begin, set_end] = get_set_span(fill_mshr.address);
 					auto way = std::find_if_not(set_begin, set_end, [](auto x) { return x.valid; });
@@ -62,6 +68,8 @@
 						std::cout << " full_v_addr: " << fill_mshr.v_address << std::dec;
 #if defined SPLIT_STLB
 						std::cout << " set: " << get_set_index(fill_mshr.address, fill_mshr.is_instr);
+#elif defined TX_SPLIT_CACHE
+						std::cout << " set: " << get_set_index(fill_mshr.address, fill_mshr.is_pte);
 #else 
 						std::cout << " set: " << get_set_index(fill_mshr.address);
 #endif
@@ -90,6 +98,7 @@
 #if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT
 							writeback_packet.is_instr = way->is_instr;
 							writeback_packet.is_pte = way->is_pte;
+							//writeback_packet.access_freq = way->access_freq;
 #endif	
 
 #if defined MULTIPLE_PAGE_SIZE
@@ -130,6 +139,8 @@
 #endif
 								bool is_dead = way->is_doa;
 								way->is_doa = true; // reset the flag
+								uint64_t access_freq = way->access_freq;
+								way->access_freq = 0;
 
 								bool vc_entry_cond;
 								if (enable_instr_only)
@@ -141,6 +152,8 @@
 
 #if defined SPLIT_STLB
 								uint64_t set_idx = get_set_index(victim_packet.address, fill_mshr.is_instr);
+#elif defined TX_SPLIT_CACHE
+								uint64_t set_idx = get_set_index(victim_packet.address, fill_mshr.is_pte);
 #else 
 								uint64_t set_idx = get_set_index(victim_packet.address);
 #endif
@@ -162,7 +175,8 @@
 									//std::cout << "adding address: " << way->address << std::endl; 
 									//tx_victim_cache[way->address] = *way;
 									// get set index
-									tx_victim_cache->add_request(victim_packet, current_cycle, is_dead);
+									///std::cout << "victim_pkt@" << victim_packet.address << " access freq: " << access_freq << std::endl;
+									tx_victim_cache->add_request(victim_packet, current_cycle, is_dead, access_freq);
 									//std::cout << "tx_cache size:" << tx_victim_cache.size() << std::endl;
 								}
 							}
@@ -202,6 +216,7 @@
 #if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT || defined TRANSLATION_EXCLUSIVE_CACHE
 							way->is_instr = fill_mshr.is_instr;
 							way->is_pte = fill_mshr.is_pte;
+							way->access_freq = fill_mshr.access_freq;
 #endif
 
 #if defined MULTIPLE_PAGE_SIZE
@@ -212,6 +227,9 @@
 #if defined SPLIT_STLB
 							metadata_thru =
 									impl_prefetcher_cache_fill(pkt_address, get_set_index(fill_mshr.address, fill_mshr.is_instr), way_idx, fill_mshr.type == PREFETCH, evicting_address, metadata_thru);
+#elif defined TX_SPLIT_CACHE
+							metadata_thru =
+									impl_prefetcher_cache_fill(pkt_address, get_set_index(fill_mshr.address, fill_mshr.is_pte), way_idx, fill_mshr.type == PREFETCH, evicting_address, metadata_thru);
 #else 
 							metadata_thru =
 									impl_prefetcher_cache_fill(pkt_address, get_set_index(fill_mshr.address), way_idx, fill_mshr.type == PREFETCH, evicting_address, metadata_thru);
@@ -226,6 +244,10 @@
 	#if defined SPLIT_STLB
 							impl_update_replacement_state(fill_mshr.cpu, get_set_index(fill_mshr.address, fill_mshr.is_instr), way_idx, 
 																						fill_mshr.address, fill_mshr.ip, evicting_address, 
+																						fill_mshr.type, false, xargs);
+	#elif defined TX_SPLIT_CACHE
+							impl_update_replacement_state(fill_mshr.cpu, get_set_index(fill_mshr.address, fill_mshr.is_pte), way_idx, 
+																						fill_mshr.address, fill_mshr.ip, evicting_address,	
 																						fill_mshr.type, false, xargs);
 	#else
 							impl_update_replacement_state(fill_mshr.cpu, get_set_index(fill_mshr.address), way_idx, 
@@ -246,6 +268,8 @@
 
 #if defined (SPLIT_STLB)
 						metadata_thru = impl_prefetcher_cache_fill(pkt_address, get_set_index(fill_mshr.address, fill_mshr.is_instr), way_idx, fill_mshr.type == PREFETCH, 0, metadata_thru);
+#elif defined (TX_SPLIT_CACHE)
+						metadata_thru = impl_prefetcher_cache_fill(pkt_address, get_set_index(fill_mshr.address, fill_mshr.is_pte), way_idx, fill_mshr.type == PREFETCH, 0, metadata_thru);
 #else 
 						metadata_thru = impl_prefetcher_cache_fill(pkt_address, get_set_index(fill_mshr.address), way_idx, fill_mshr.type == PREFETCH, 0, metadata_thru);
 #endif 
@@ -260,7 +284,11 @@
 						impl_update_replacement_state(fill_mshr.cpu, get_set_index(fill_mshr.address, fill_mshr.is_instr), way_idx, 
 																					fill_mshr.address, fill_mshr.ip, 0, 
 																					fill_mshr.type, false, xargs);
-	#else
+	#elif defined (TX_SPLIT_CACHE)
+						impl_update_replacement_state(fill_mshr.cpu, get_set_index(fill_mshr.address, fill_mshr.is_pte), way_idx, 
+																					fill_mshr.address, fill_mshr.ip, 0, 
+																					fill_mshr.type, false, xargs);
+	#else 
 						impl_update_replacement_state(fill_mshr.cpu, get_set_index(fill_mshr.address), way_idx, 
 																					fill_mshr.address, fill_mshr.ip, 0, 
 																					fill_mshr.type, false, xargs);
@@ -270,7 +298,9 @@
 
 	#if defined (SPLIT_STLB)
 						impl_update_replacement_state(fill_mshr.cpu, get_set_index(fill_mshr.address, fill_mshr.is_instr), way_idx, fill_mshr.address, fill_mshr.ip, 0, fill_mshr.type, false);
-	#else 
+	#elif defined (TX_SPLIT_CACHE)
+						impl_update_replacement_state(fill_mshr.cpu, get_set_index(fill_mshr.address, fill_mshr.is_pte), way_idx, fill_mshr.address, fill_mshr.ip, 0, fill_mshr.type, false); 
+	#else
 						impl_update_replacement_state(fill_mshr.cpu, get_set_index(fill_mshr.address), way_idx, fill_mshr.address, fill_mshr.ip, 0, fill_mshr.type, false);
 	#endif 
 
@@ -361,7 +391,9 @@
 					// access cache
 #if defined SPLIT_STLB
 					auto [set_begin, set_end] = get_set_span(handle_pkt.address, handle_pkt.is_instr);
-#else 
+#elif defined TX_SPLIT_CACHE
+					auto [set_begin, set_end] = get_set_span(handle_pkt.address, handle_pkt.is_pte);
+#else
 					auto [set_begin, set_end] = get_set_span(handle_pkt.address);
 #endif
 					auto way = std::find_if(set_begin, set_end, eq_addr<BLOCK>(handle_pkt.address, OFFSET_BITS));
@@ -374,6 +406,8 @@
 						std::cout << " full_v_addr: " << handle_pkt.v_address << std::dec;
 #if defined SPLIT_STLB
 						std::cout << " set: " << get_set_index(handle_pkt.address, handle_pkt.is_instr);
+#elif defined TX_SPLIT_CACHE
+						std::cout << " set: " << get_set_index(handle_pkt.address, handle_pkt.is_pte);
 #else
 						std::cout << " set: " << get_set_index(handle_pkt.address);
 #endif
@@ -394,6 +428,8 @@
 						// we should also store the evicting address to last_pte_entry in the set (if it's pte)
 #if defined SPLIT_STLB
 						uint64_t set_idx = get_set_index(handle_pkt.address, fill_mshr.is_instr);
+#elif defined TX_SPLIT_CACHE
+						uint64_t set_idx = get_set_index(handle_pkt.address, handle_pkt.is_pte);
 #else 
 						uint64_t set_idx = get_set_index(handle_pkt.address);
 #endif
@@ -422,7 +458,11 @@
 						impl_update_replacement_state(handle_pkt.cpu, get_set_index(handle_pkt.address, handle_pkt.is_instr), way_idx, 
 																					handle_pkt.address, handle_pkt.ip, 0, 
 																					handle_pkt.type, false, xargs);
-	#else
+	#elif defined TX_SPLIT_CACHE
+						impl_update_replacement_state(handle_pkt.cpu, get_set_index(handle_pkt.address, handle_pkt.is_pte), way_idx, 
+																					handle_pkt.address, handle_pkt.ip, 0, 
+																					handle_pkt.type, false, xargs);
+	#else 
 						impl_update_replacement_state(handle_pkt.cpu, get_set_index(handle_pkt.address), way_idx, 
 																					handle_pkt.address, handle_pkt.ip, 0, 
 																					handle_pkt.type, false, xargs);
@@ -432,6 +472,8 @@
 
 	#if defined SPLIT_STLB
 						impl_update_replacement_state(handle_pkt.cpu, get_set_index(handle_pkt.address, handle_pkt.is_instr), way_idx, way->address, handle_pkt.ip, 0, handle_pkt.type, true);
+	#elif defined TX_SPLIT_CACHE
+						impl_update_replacement_state(handle_pkt.cpu, get_set_index(handle_pkt.address, handle_pkt.is_pte), way_idx, way->address, handle_pkt.ip, 0, handle_pkt.type, true);
 	#else
 						impl_update_replacement_state(handle_pkt.cpu, get_set_index(handle_pkt.address), way_idx, way->address, handle_pkt.ip, 0, handle_pkt.type, true);
 	#endif 
@@ -467,6 +509,9 @@
 						// If we have a hit, we need to change doa status at the block in the cache
 						//if (enable_tx_victim_cache) {
 						way->is_doa = false;
+						if (NAME.find(_CACHE_) != std::string::npos) {
+							way->access_freq++; //FIXME: This is currently only for hits, need to handle misses as well
+						}
 						//}
 #endif
 
@@ -581,7 +626,7 @@
  			
 									handle_fill(txvc_mshr_packet);
 								
-									//return false; // This skips pushing the miss to the L2C
+									//return true; // This skips pushing the miss to the L2C
 								}
 							}
 						} 
@@ -787,16 +832,16 @@
 						fwd_pkt.prefetch_from_this = false;
 #if defined TRANSLATION_EXCLUSIVE_CACHE
 							
-							if (!entry_found) {
-								bool success = false;
-								if (prefetch_as_load || handle_pkt.type != PREFETCH)
-									success = lower_level->add_rq(fwd_pkt);
-								else
-									success = lower_level->add_pq(fwd_pkt);
+						if (!entry_found) {
+							bool success = false;
+							if (prefetch_as_load || handle_pkt.type != PREFETCH)
+								success = lower_level->add_rq(fwd_pkt);
+							else
+								success = lower_level->add_pq(fwd_pkt);
 
-								if (!success)
-									return false;
-							}
+							if (!success)
+								return false;
+						}
 #else
 						bool success = false;
 						if (prefetch_as_load || handle_pkt.type != PREFETCH)
@@ -856,6 +901,7 @@
 #if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT
 								txvc_mshr_packet.is_instr = txvc_block_entry.is_instr;
 								txvc_mshr_packet.is_pte = txvc_block_entry.is_pte;
+								//txvc_mshr_packet.access_freq = txvc_block_entry.access_freq;
 #endif	
 
 #if defined MULTIPLE_PAGE_SIZE
@@ -955,116 +1001,203 @@
 
 #if defined SPLIT_STLB
 
-				uint64_t CACHE::get_set(uint64_t address, uint8_t type) const { return get_set_index(address, type); }
+	uint64_t CACHE::get_set(uint64_t address, uint8_t type) const { return get_set_index(address, type); }
 
-				std::size_t CACHE::get_set_index(uint64_t address, uint8_t type) const { 
+	std::size_t CACHE::get_set_index(uint64_t address, uint8_t type) const { 
 
-				/*
-					if (NAME.find("STLB") != std::string::npos) {
-						std::cout << "address:" << address << " (" << std::bitset<64>(address) << ")" << std::endl;
-						std::cout << "OFFSET_BITS:" << OFFSET_BITS << std::endl;
-						std::cout << "OFFSETTED ADDRESS:" << (address >> OFFSET_BITS) << " (" << std::bitset<64>((address >> OFFSET_BITS)) << ")" << std::endl; 
-						std::cout << "bitmask:" << champsim::bitmask(champsim::lg2(NUM_SET)) << " (" << std::bitset<64>(champsim::bitmask(champsim::lg2(NUM_SET))) << std::endl;
-						std::cout << "old set:" << ((address >> OFFSET_BITS) & champsim::bitmask(champsim::lg2(NUM_SET))) << std::endl; 
+	/*
+		if (NAME.find("STLB") != std::string::npos) {
+			std::cout << "address:" << address << " (" << std::bitset<64>(address) << ")" << std::endl;
+			std::cout << "OFFSET_BITS:" << OFFSET_BITS << std::endl;
+			std::cout << "OFFSETTED ADDRESS:" << (address >> OFFSET_BITS) << " (" << std::bitset<64>((address >> OFFSET_BITS)) << ")" << std::endl; 
+			std::cout << "bitmask:" << champsim::bitmask(champsim::lg2(NUM_SET)) << " (" << std::bitset<64>(champsim::bitmask(champsim::lg2(NUM_SET))) << std::endl;
+			std::cout << "old set:" << ((address >> OFFSET_BITS) & champsim::bitmask(champsim::lg2(NUM_SET))) << std::endl; 
 
-						std::cout << "bitmask:" << champsim::bitmask(champsim::lg2(NUM_SET))/2 << " (" << std::bitset<64>(champsim::bitmask(champsim::lg2(NUM_SET))/2) << std::endl;
-						std::cout << "new set:" << ((address >> OFFSET_BITS) & champsim::bitmask((champsim::lg2(NUM_SET))/2)) << std::endl; 
-					}
-				*/
-					std::size_t orig_set = (address >> OFFSET_BITS) & champsim::bitmask(champsim::lg2(NUM_SET)); 
+			std::cout << "bitmask:" << champsim::bitmask(champsim::lg2(NUM_SET))/2 << " (" << std::bitset<64>(champsim::bitmask(champsim::lg2(NUM_SET))/2) << std::endl;
+			std::cout << "new set:" << ((address >> OFFSET_BITS) & champsim::bitmask((champsim::lg2(NUM_SET))/2)) << std::endl; 
+		}
+	*/
+		std::size_t orig_set = (address >> OFFSET_BITS) & champsim::bitmask(champsim::lg2(NUM_SET)); 
 
-					if (NAME.find("STLB") != std::string::npos) {
+		if (NAME.find("STLB") != std::string::npos) {
 
-						if (type == 0) {
-							return orig_set % (NUM_SET/2);
-						} else {
-							return (orig_set < (NUM_SET/2))?(orig_set+(NUM_SET/2)):orig_set;
-						}
-					}
-					return orig_set;
-				}
+			if (type == 0) {
+				return orig_set % (NUM_SET/2);
+			} else {
+				return (orig_set < (NUM_SET/2))?(orig_set+(NUM_SET/2)):orig_set;
+			}
+		}
+		return orig_set;
+	}
 
-				template <typename It>
-				std::pair<It, It> get_span(It anchor, typename std::iterator_traits<It>::difference_type set_idx, typename std::iterator_traits<It>::difference_type num_way)
-				{
-					auto begin = std::next(anchor, set_idx * num_way);
-					return {std::move(begin), std::next(begin, num_way)};
-				}
+	template <typename It>
+	std::pair<It, It> get_span(It anchor, typename std::iterator_traits<It>::difference_type set_idx, typename std::iterator_traits<It>::difference_type num_way)
+	{
+		auto begin = std::next(anchor, set_idx * num_way);
+		return {std::move(begin), std::next(begin, num_way)};
+	}
 
-				auto CACHE::get_set_span(uint64_t address, uint8_t type) -> std::pair<std::vector<BLOCK>::iterator, std::vector<BLOCK>::iterator>
-				{
-					const auto set_idx = get_set_index(address, type);
-					assert(set_idx < NUM_SET);
-					return get_span(std::begin(block), static_cast<std::vector<BLOCK>::difference_type>(set_idx), NUM_WAY); // safe cast because of prior assert
-				}
+	auto CACHE::get_set_span(uint64_t address, uint8_t type) -> std::pair<std::vector<BLOCK>::iterator, std::vector<BLOCK>::iterator>
+	{
+		const auto set_idx = get_set_index(address, type);
+		assert(set_idx < NUM_SET);
+		return get_span(std::begin(block), static_cast<std::vector<BLOCK>::difference_type>(set_idx), NUM_WAY); // safe cast because of prior assert
+	}
 
-				auto CACHE::get_set_span(uint64_t address, uint8_t type) const -> std::pair<std::vector<BLOCK>::const_iterator, std::vector<BLOCK>::const_iterator>
-				{
-					const auto set_idx = get_set_index(address, type);
-					assert(set_idx < NUM_SET);
-					return get_span(std::cbegin(block), static_cast<std::vector<BLOCK>::difference_type>(set_idx), NUM_WAY); // safe cast because of prior assert
-				}
+	auto CACHE::get_set_span(uint64_t address, uint8_t type) const -> std::pair<std::vector<BLOCK>::const_iterator, std::vector<BLOCK>::const_iterator>
+	{
+		const auto set_idx = get_set_index(address, type);
+		assert(set_idx < NUM_SET);
+		return get_span(std::cbegin(block), static_cast<std::vector<BLOCK>::difference_type>(set_idx), NUM_WAY); // safe cast because of prior assert
+	}
 
-				uint64_t CACHE::get_way(uint64_t address, uint8_t type, uint64_t) const
-				{
-					auto [begin, end] = get_set_span(address, type);
-					return std::distance(begin, std::find_if(begin, end, eq_addr<BLOCK>(address, OFFSET_BITS)));
-				}
+	uint64_t CACHE::get_way(uint64_t address, uint8_t type, uint64_t) const
+	{
+		auto [begin, end] = get_set_span(address, type);
+		return std::distance(begin, std::find_if(begin, end, eq_addr<BLOCK>(address, OFFSET_BITS)));
+	}
 
-uint64_t CACHE::invalidate_entry(uint64_t inval_addr, uint8_t type)
-{
-  auto [begin, end] = get_set_span(inval_addr, type);
-  auto inv_way = std::find_if(begin, end, eq_addr<BLOCK>(inval_addr, OFFSET_BITS));
+	uint64_t CACHE::invalidate_entry(uint64_t inval_addr, uint8_t type)
+	{
+		auto [begin, end] = get_set_span(inval_addr, type);
+		auto inv_way = std::find_if(begin, end, eq_addr<BLOCK>(inval_addr, OFFSET_BITS));
 
-  if (inv_way != end)
-    inv_way->valid = 0;
+		if (inv_way != end)
+			inv_way->valid = 0;
 
-  return std::distance(begin, inv_way);
-}
+		return std::distance(begin, inv_way);
+	}
+
+#elif defined TX_SPLIT_CACHE
+
+	uint64_t CACHE::get_set(uint64_t address, uint8_t type) const { return get_set_index(address, type); }
+
+	std::size_t CACHE::get_set_index(uint64_t address, uint8_t type) const 
+	{   
+
+		if (enable_tx_split_cache) {
+
+			uint64_t CACHE_NUM_SET = NUM_SET - TX_NUM_SET;
+
+			if (type == 0) {
+				return _get_set_index(address, CACHE_NUM_SET);
+			} else {
+				return CACHE_NUM_SET + _get_set_index(address, TX_NUM_SET);
+			}
+		
+		} else {
+
+			return _get_set_index(address, NUM_SET);
+		}
+		
+	}
+
+	std::size_t CACHE::_get_set_index(uint64_t address, uint32_t num_set) const 
+	{
+		if (champsim::is_power_of_two(num_set))
+			return (address >> OFFSET_BITS) & champsim::bitmask(log2(num_set));
+			
+		//return (address >> OFFSET_BITS) % num_set;
+		
+		// If not a power of two, use Barrett reduction
+    	__uint128_t t = ( __uint128_t)address * barret_reciprocal;
+    	std::size_t q = (std::size_t)(t >> 64);
+    	std::size_t r = address - q * num_set;
+
+    	// At most two corrections needed
+    	if (r >= num_set) r -= num_set;
+    	if (r >= num_set) r -= num_set;
+
+    	return r;
+		
+	}
+
+	template <typename It>
+	std::pair<It, It> get_span(It anchor, typename std::iterator_traits<It>::difference_type set_idx, typename std::iterator_traits<It>::difference_type num_way)
+	{
+		auto begin = std::next(anchor, set_idx * num_way);
+		return {std::move(begin), std::next(begin, num_way)};
+	}
+
+	auto CACHE::get_set_span(uint64_t address, uint8_t type) -> std::pair<std::vector<BLOCK>::iterator, std::vector<BLOCK>::iterator>
+	{
+		const auto set_idx = get_set_index(address, type);
+		assert(set_idx < NUM_SET);
+		touched_indices[set_idx]++;
+		return get_span(std::begin(block), static_cast<std::vector<BLOCK>::difference_type>(set_idx), NUM_WAY); // safe cast because of prior assert
+	}
+
+	auto CACHE::get_set_span(uint64_t address, uint8_t type) const -> std::pair<std::vector<BLOCK>::const_iterator, std::vector<BLOCK>::const_iterator>
+	{
+		const auto set_idx = get_set_index(address, type);
+		assert(set_idx < NUM_SET);
+		return get_span(std::cbegin(block), static_cast<std::vector<BLOCK>::difference_type>(set_idx), NUM_WAY); // safe cast because of prior assert
+	}
+
+	uint64_t CACHE::get_way(uint64_t address, uint8_t type, uint64_t) const
+	{
+		auto [begin, end] = get_set_span(address, type);
+		return std::distance(begin, std::find_if(begin, end, eq_addr<BLOCK>(address, OFFSET_BITS)));
+	}
+
+	uint64_t CACHE::invalidate_entry(uint64_t inval_addr, uint8_t type)
+	{
+		auto [begin, end] = get_set_span(inval_addr, type);
+		auto inv_way = std::find_if(begin, end, eq_addr<BLOCK>(inval_addr, OFFSET_BITS));
+
+		if (inv_way != end)
+			inv_way->valid = 0;
+
+		return std::distance(begin, inv_way);
+	}
 
 #else
 
-uint64_t CACHE::get_set(uint64_t address) const { return get_set_index(address); }
+	uint64_t CACHE::get_set(uint64_t address) const { return get_set_index(address); }
 
-std::size_t CACHE::get_set_index(uint64_t address) const { return (address >> OFFSET_BITS) & champsim::bitmask(champsim::lg2(NUM_SET)); }
+	std::size_t CACHE::get_set_index(uint64_t address) const 
+	{ 
+		return (address >> OFFSET_BITS) & champsim::bitmask(champsim::lg2(NUM_SET)); 
+	}
 
-template <typename It>
-std::pair<It, It> get_span(It anchor, typename std::iterator_traits<It>::difference_type set_idx, typename std::iterator_traits<It>::difference_type num_way)
-{
-  auto begin = std::next(anchor, set_idx * num_way);
-  return {std::move(begin), std::next(begin, num_way)};
-}
+	template <typename It>
+	std::pair<It, It> get_span(It anchor, typename std::iterator_traits<It>::difference_type set_idx, typename std::iterator_traits<It>::difference_type num_way)
+	{
+		auto begin = std::next(anchor, set_idx * num_way);
+		return {std::move(begin), std::next(begin, num_way)};
+	}
 
-auto CACHE::get_set_span(uint64_t address) -> std::pair<std::vector<BLOCK>::iterator, std::vector<BLOCK>::iterator>
-{
-  const auto set_idx = get_set_index(address);
-  assert(set_idx < NUM_SET);
-  return get_span(std::begin(block), static_cast<std::vector<BLOCK>::difference_type>(set_idx), NUM_WAY); // safe cast because of prior assert
-}
+	auto CACHE::get_set_span(uint64_t address) -> std::pair<std::vector<BLOCK>::iterator, std::vector<BLOCK>::iterator>
+	{
+		const auto set_idx = get_set_index(address);
+		assert(set_idx < NUM_SET);
+		touched_indices[set_idx]++;
+		return get_span(std::begin(block), static_cast<std::vector<BLOCK>::difference_type>(set_idx), NUM_WAY); // safe cast because of prior assert
+	}
 
-auto CACHE::get_set_span(uint64_t address) const -> std::pair<std::vector<BLOCK>::const_iterator, std::vector<BLOCK>::const_iterator>
-{
-  const auto set_idx = get_set_index(address);
-  assert(set_idx < NUM_SET);
-  return get_span(std::cbegin(block), static_cast<std::vector<BLOCK>::difference_type>(set_idx), NUM_WAY); // safe cast because of prior assert
-}
+	auto CACHE::get_set_span(uint64_t address) const -> std::pair<std::vector<BLOCK>::const_iterator, std::vector<BLOCK>::const_iterator>
+	{
+		const auto set_idx = get_set_index(address);
+		assert(set_idx < NUM_SET);
+		return get_span(std::cbegin(block), static_cast<std::vector<BLOCK>::difference_type>(set_idx), NUM_WAY); // safe cast because of prior assert
+	}
 
-uint64_t CACHE::get_way(uint64_t address, uint64_t) const
-{
-  auto [begin, end] = get_set_span(address);
-  return std::distance(begin, std::find_if(begin, end, eq_addr<BLOCK>(address, OFFSET_BITS)));
-}
+	uint64_t CACHE::get_way(uint64_t address, uint64_t) const
+	{
+		auto [begin, end] = get_set_span(address);
+		return std::distance(begin, std::find_if(begin, end, eq_addr<BLOCK>(address, OFFSET_BITS)));
+	}
 
-uint64_t CACHE::invalidate_entry(uint64_t inval_addr)
-{
-  auto [begin, end] = get_set_span(inval_addr);
-  auto inv_way = std::find_if(begin, end, eq_addr<BLOCK>(inval_addr, OFFSET_BITS));
+	uint64_t CACHE::invalidate_entry(uint64_t inval_addr)
+	{
+		auto [begin, end] = get_set_span(inval_addr);
+		auto inv_way = std::find_if(begin, end, eq_addr<BLOCK>(inval_addr, OFFSET_BITS));
 
-  if (inv_way != end)
-    inv_way->valid = 0;
+		if (inv_way != end)
+			inv_way->valid = 0;
 
-  return std::distance(begin, inv_way);
-}
+		return std::distance(begin, inv_way);
+	}
 
 #endif 
 
@@ -1128,6 +1261,7 @@ int CACHE::prefetch_line(uint64_t pf_addr, bool fill_this_level, uint32_t prefet
 	// prefetches which are issued by L2C (we don't care for them however, since 
 	// they go to main memory)
 	pf_packet.is_pte = false;
+	pf_packet.access_freq = 0;
 
 	if (NAME.find("L1I") != std::string::npos) {
 		pf_packet.is_instr = true;
@@ -1385,12 +1519,13 @@ void CACHE::print_deadlock()
 			assert(false);
 		}
 						
-		//pageAddressStatsMon->add_access(handle_pkt.address, handle_pkt.is_instr);
-		//reuseDistMon->add_access(handle_pkt.address);
+		pageAddressStatsMon->add_access(handle_pkt.address, handle_pkt.is_instr);
+		reuseDistMon->add_access(handle_pkt.address);
+		addressAccessStatsMon->add_access(handle_pkt.address, true);
 	}
 
 	void CACHE::miss_hook(const PACKET& handle_pkt) {
-						
+				
 		if (handle_pkt.is_instr && !handle_pkt.is_pte) {
 			sim_stats.back().imisses[handle_pkt.type][handle_pkt.cpu]++;
 		} else if (!handle_pkt.is_instr && !handle_pkt.is_pte) {
@@ -1408,5 +1543,6 @@ void CACHE::print_deadlock()
 
 		pageAddressStatsMon->add_access(handle_pkt.address, handle_pkt.is_instr);
 		reuseDistMon->add_access(handle_pkt.address);
+		addressAccessStatsMon->add_access(handle_pkt.address, false);
 	}
 #endif

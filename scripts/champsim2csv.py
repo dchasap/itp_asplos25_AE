@@ -114,6 +114,29 @@ def parse_champsim_stats(input_file, output_file):
         cache_filter_accuracy = lines[0].split()[3].replace('%', '')
         #print(cache_filter_accuracy)
 
+    #TODO: Add cache filter specific stats 
+    #CACHE_FILTER_STATS = [ '' ]
+
+    # Get total TXVC bypass predictions
+    #print(data)
+    lines = re.findall(r'FreqFilter: total predictions:\s+\d+', data)
+    if (len(lines) == 0):
+        total_txvc_predictions = 'N/A'
+    else:
+        #print(lines)
+        total_txvc_predictions = lines[0].split()[3]
+        #print(total_txvc_bypasses)
+
+    # Get total TXVC bypasses
+    #print(data)
+    lines = re.findall(r'FreqFilter: total bypasses:\s+\d+', data)
+    if (len(lines) == 0):
+        total_txvc_bypasses = 'N/A'
+    else:
+        #print(lines)
+        total_txvc_bypasses = lines[0].split()[3]
+        #print(total_txvc_bypasses)
+
     # Get IPC
     lines = re.findall(r'CPU 0 cumulative IPC:\s+\d+[\.]?\d*', data)
     ipc = lines[len(lines)-1].split()[4]
@@ -144,6 +167,8 @@ def parse_champsim_stats(input_file, output_file):
     header.append('PAGE_CROSS_MISSES')
 
     header.append('CACHE_FILTER_ACCURACY')
+    header.append('TXVC_PREDICTIONS')
+    header.append('TXVC_BYPASSES')
 
     header.append('IPC')
     header.append('INSTRUCTIONS')
@@ -164,6 +189,8 @@ def parse_champsim_stats(input_file, output_file):
             new_row.append(PAGE_CROSSING[cache]['PAGE_CROSS_HITS'])
             new_row.append(PAGE_CROSSING[cache]['PAGE_CROSS_MISSES'])
             new_row.append(cache_filter_accuracy)
+            new_row.append(total_txvc_predictions)
+            new_row.append(total_txvc_bypasses)
             new_row.append(ipc)
             new_row.append(instructions)
             new_row.append(cycles)

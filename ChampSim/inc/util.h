@@ -61,6 +61,7 @@ using msl::bitmask;
 using msl::lg2;
 using msl::lru_table;
 using msl::splice_bits;
+using msl::is_power_of_two;
 
 template <typename It>
 std::pair<It, It> get_span(It begin, It end, typename std::iterator_traits<It>::difference_type sz)

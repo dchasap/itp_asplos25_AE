@@ -1,4 +1,5 @@
-GOOGLE_SRV_WORKLOADS = [
+
+_GOOGLE_SRV_WORKLOADS = [
 "benchbase-twitter.champsimtrace.gz",
 "benchbase-wikipedia.champsimtrace.gz",
 "charlie.1006518.champsimtrace.gz",
@@ -14,7 +15,55 @@ GOOGLE_SRV_WORKLOADS = [
 "whiskey.426708.champsimtrace.gz"
 ]
 
-GOOGLE_SRV_WORKLOADS_DIR="google_srv"
+GOOGLE_SRV_WORKLOADS= [
+"arizona_0000.champsim.gz",
+"arizona_0001.champsim.gz",
+"arizona_0002.champsim.gz",
+"charlie_0000.champsim.gz",
+"charlie_0001.champsim.gz",
+"charlie_0002.champsim.gz",
+"charlie_0003.champsim.gz",
+"charlie_0004.champsim.gz",
+"merced_0000.champsim.gz",
+"merced_0001.champsim.gz",
+"merced_0002.champsim.gz",
+"merced_0003.champsim.gz",
+"merced_0004.champsim.gz",
+"sierra.a.3_0000.champsim.gz",
+"sierra.a.3_0001.champsim.gz",
+"sierra.a.3_0002.champsim.gz",
+"sierra.a.3_0003.champsim.gz",
+"sierra.a.3_0004.champsim.gz",
+"sierra.a.4_0000.champsim.gz",
+"sierra.a.4_0001.champsim.gz",
+"sierra.a.4_0002.champsim.gz",
+"sierra.a.4_0003.champsim.gz",
+"sierra.a.4_0004.champsim.gz",
+"sierra.a.6_0000.champsim.gz",
+"sierra.a.6_0001.champsim.gz",
+"sierra.a.6_0002.champsim.gz",
+"sierra.a.6_0003.champsim.gz",
+"sierra.a.6_0004.champsim.gz",
+"tahoe_0000.champsim.gz",
+"tahoe_0001.champsim.gz",
+"tahoe_0002.champsim.gz",
+"tahoe_0003.champsim.gz",
+"tahoe_0004.champsim.gz",
+"tango_0000.champsim.gz",
+"tango_0001.champsim.gz",
+"tango_0002.champsim.gz",
+"tango_0003.champsim.gz",
+"tango_0004.champsim.gz",
+"yankee_0000.champsim.gz",
+"yankee_0001.champsim.gz",
+"yankee_0002.champsim.gz",
+"yankee_0003.champsim.gz",
+"yankee_0004.champsim.gz"
+]
+
+#GOOGLE_SRV_WORKLOADS_DIR="google_srv"
+
+GOOGLE_SRV_WORKLOADS_DIR="google_traces_dpc4"
 
 def get_google_srv():
   return GOOGLE_SRV_WORKLOADS

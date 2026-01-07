@@ -79,6 +79,7 @@ public:
 
 #if defined TRANSLATION_EXCLUSIVE_CACHE
 	bool is_doa = true;
+  uint64_t access_freq = 0;
 #endif
 /*
 PACKET() = default;

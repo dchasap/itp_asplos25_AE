@@ -470,6 +470,18 @@ void O3_CPU::fetch_instruction()
   };
 
   auto l1i_req_begin = std::find_if(std::begin(IFETCH_BUFFER), std::end(IFETCH_BUFFER), fetch_ready);
+
+#if defined ENABLE_EXTRA_CPU_STATS
+  // Check if instructions are stalled due to I-TLB misses
+  for (auto it = l1i_req_begin; it != std::end(IFETCH_BUFFER); ++it) {
+    if (it->dib_checked == COMPLETED && !it->fetched) {
+      // This instruction is ready to fetch but hasn't been fetched
+      // Could be stalled due to I-TLB miss
+      itlb_stall_potential_cycles++;
+    }
+  }
+#endif
+
   for (auto to_read = L1I_BANDWIDTH; to_read > 0 && l1i_req_begin != std::end(IFETCH_BUFFER); --to_read) {
     auto l1i_req_end = std::adjacent_find(l1i_req_begin, std::end(IFETCH_BUFFER), no_match_ip);
     if (l1i_req_end != std::end(IFETCH_BUFFER))
@@ -827,6 +839,16 @@ void O3_CPU::operate_lsq()
   };
 
   auto unfetched_begin = std::partition_point(std::begin(SQ), std::end(SQ), [](const auto& x) { return x.fetch_issued; });
+  
+#if defined ENABLE_EXTRA_CPU_STATS
+  for (auto it = unfetched_begin; it != std::end(SQ); ++it) {
+    if (it->event_cycle <= current_cycle && !it->fetch_issued) {
+      // Store ready but not issued - could be TLB stall
+      dtlb_stall_potential_cycles++;
+    }
+  }
+#endif
+  
   auto [fetch_begin, fetch_end] = champsim::get_span_p(unfetched_begin, std::end(SQ), store_bw,
                                                        [cycle = current_cycle](const auto& x) { return !x.fetch_issued && x.event_cycle <= cycle; });
   store_bw -= std::distance(fetch_begin, fetch_end);
@@ -849,6 +871,11 @@ void O3_CPU::operate_lsq()
       if (success) {
         --load_bw;
         lq_entry->fetch_issued = true;
+
+#if defined ENABLE_EXTRA_CPU_STATS
+        dtlb_stall_potential_cycles++;
+#endif
+
       }
     }
   }
