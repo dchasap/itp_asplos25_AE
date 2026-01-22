@@ -213,7 +213,8 @@ def parse_experimental_data(config):
 		stats_dir = config['BASE']['STATS_DIR'] + "/" + exp_name + "/" + sim
 		workload_name = config['EXPERIMENT']['workload']
 
-		benchmarks = workloads.get_benchmark_names(workload_name)
+		workload = workloads.Workloads(workload_name)
+		benchmarks = workload.get_benchmark_names()
 
 		parse_raw_data = config['PARSING'].getboolean('parse_raw_stats')
 		if parse_raw_data:
@@ -223,7 +224,7 @@ def parse_experimental_data(config):
 			printer.print_default("Parsing results for " + sim + "...")
 			csv_benchmark_data_files = []
 			for bench in benchmarks:
-				simpoints, weights = workloads.get_simpoints_n_weights(workload_name, bench)
+				simpoints, weights = workload.get_simpoints_n_weights(bench)
 		
 				if simpoints == None:
 					simpoints = [ "" ]

@@ -105,12 +105,24 @@ def gen_plot(benchsuite, _tags, data_files, figure_name, figure_type, file_type,
 		output_file = figure_dir + "/" + figure_name + "_" + benchsuite + "." + file_type
 		print(output_file)
 		plotting.plot_stat(data_df, tags, 'IPC_IMPROVEMENT', output_file)
-	
-		#print(data_df)
-		#data_df = data_df[data_df['tag'] == tags[2]]
-		#data_df = data_df[data_df['IPC_IMPROVEMENT'] < -1]
-		#print(data_df['IPC_IMPROVEMENT'])
-		#print(len(data_df))
+
+
+		#df = data_df
+
+		#top_n = df.sort_values('IPC_IMPROVEMENT', ascending=False).head(200)
+		#print(len(top_n))
+
+		#for bench in top_n['benchmarks'].to_list():
+		#	print("\"" + bench + ".champsimtrace.xz\",") 
+
+		#print(len(df))
+		#df = df[df['IPC_IMPROVEMENT'] >= 0.1]
+		#print(len(df))
+		#df = df[df['IPC_IMPROVEMENT'] >= 0.2]
+		#print(len(df))
+		#print(df['benchmarks'].to_list())
+		#df = df[df['IPC_IMPROVEMENT'] >= 0.3]
+		#print(len(df))
 
 	if (figure_type == "plot_mpki"):
 	
@@ -158,7 +170,6 @@ def gen_plot(benchsuite, _tags, data_files, figure_name, figure_type, file_type,
 																					cache_types, op_type, "MPKI", 
 																					output_file)
 
-
 		#plotting.plot_conf['ylabel'] = "Hit Ratio(%)"	
 		#output_file = figure_dir + "/" + figure_name + "_" + benchsuite + "." + file_type
 		#print(output_file)
@@ -175,9 +186,21 @@ def gen_plot(benchsuite, _tags, data_files, figure_name, figure_type, file_type,
 		#plots.plot_average_multiple_caches_single_fig(	input_st_data_files, input_smt_data_files, 
 		#																								input_tags, cache_types, op_type, 
 		#																								"AVERAGE_MISS_LATENCY", plot_conf, output_file)
+		cache_types=["cpu0_L2C"]
+		op_type = "TOTAL"
 
-		plotting.plot_conf['ylabel'] = "MPKI"
-		stat_names = [ "MPKI" ] 
+		df = stats.load_df(input_data_files, tags, cache_types, op_type)
+
+		print(len(df))
+		df = df[df['MPKI'] >= 2]
+		print(len(df))
+		df = df[df['MPKI'] >= 5]
+		print(len(df))
+		df = df[df['MPKI'] >= 10]
+		print(len(df))
+		plotting.plot_conf['plot_type'] = 'scatter'
+		output_file = figure_dir + "/" + figure_name + "_l2c_mpki_" + benchsuite + "." + file_type
+		plotting.plot_stat(df, tags, 'MPKI', output_file)
 		#for cache_type in cache_types:
 
 		#	means_df_single_cache = means_df.loc[(means_df['cache'] == cache_type)]

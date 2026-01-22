@@ -1094,10 +1094,10 @@
 
 	std::size_t CACHE::_get_set_index(uint64_t address, uint32_t num_set) const 
 	{
-		if (champsim::is_power_of_two(num_set))
-			return (address >> OFFSET_BITS) & champsim::bitmask(log2(num_set));
+		//if (champsim::is_power_of_two(num_set))
+		//	return (address >> OFFSET_BITS) & champsim::bitmask(log2(num_set));
 			
-		//return (address >> OFFSET_BITS) % num_set;
+		return (address >> OFFSET_BITS) % num_set;
 		
 		// If not a power of two, use Barrett reduction
     	__uint128_t t = ( __uint128_t)address * barret_reciprocal;
@@ -1157,7 +1157,17 @@
 
 	std::size_t CACHE::get_set_index(uint64_t address) const 
 	{ 
-		return (address >> OFFSET_BITS) & champsim::bitmask(champsim::lg2(NUM_SET)); 
+		//return (address >> OFFSET_BITS) & champsim::bitmask(champsim::lg2(NUM_SET)); 
+		return _get_set_index(address, NUM_SET);
+	}
+
+	std::size_t CACHE::_get_set_index(uint64_t address, uint32_t num_set) const 
+	{
+		//if (champsim::is_power_of_two(num_set))
+		//	return (address >> OFFSET_BITS) & champsim::bitmask(log2(num_set));
+			
+		return (address >> OFFSET_BITS) % num_set;
+		
 	}
 
 	template <typename It>

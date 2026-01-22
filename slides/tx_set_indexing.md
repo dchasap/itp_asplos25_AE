@@ -47,9 +47,36 @@ lang:
 ![Modulo](../figures/l2c_set_access_dist_BASELINE-L2C-1536KB.pdf){width=45%}
 
 
-# Performance of TX setsL: L2C 1.5MB
+# Performance of TX sets: L2C 1.5MB, LLC 1.5MB
 ![](../figures/tx-sets_vs_l2c_budget_analysis/tx-sets_vs_l2c_1536KB_budget_analysis_selected_qualcomm_srv_ap.pdf)
 
-# Performance of TX setsL: L2C 2MB
+# Performance of TX sets: L2C 2MB, LLC 1.5MB
 ![](../figures/tx-sets_vs_l2c_budget_analysis/tx-sets_vs_l2c_2048KB_budget_analysis_selected_qualcomm_srv_ap.pdf)
 
+# Performance of TX sets: L2C 1.5MB, LLC 1MB
+![](../figures/tx-sets_vs_l2c_llc-1MB_budget_analysis/tx-sets_vs_l2c_1536KB_budget_analysis_selected_qualcomm_srv_ap.pdf)
+
+# Compare results for LLC 1MB vs 1.5MB
+![LLC-1MB](../figures/tx-sets_vs_l2c_llc-1MB_budget_analysis/tx-sets_vs_l2c_1536KB_budget_analysis_selected_qualcomm_srv_ap.pdf){width=45%}
+![LLC-1.5MB](../figures/tx-sets_vs_l2c_budget_analysis/tx-sets_vs_l2c_1536KB_budget_analysis_selected_qualcomm_srv_ap.pdf){width=45%}
+
+# Performance of TXVC 64KB: L2C 2MB, LLC 1MB
+![](../figures/txvc_vs_l2c_budget_analysis/txvc_64KB_vs_l2c_2048KB_budget_analysis2_selected_qualcomm_srv_ap.pdf) 
+
+# Performance of TXVC 128KB: L2C 2MB, LLC 1MB
+![](../figures/txvc_vs_l2c_budget_analysis/txvc_128KB_vs_l2c_2048KB_budget_analysis2_selected_qualcomm_srv_ap.pdf) 
+
+# Performance of TXVC 128KB: L2C 2MB, LLC 1MB (MPKI)
+![](../figures/txvc_vs_l2c_budget_analysis/txvc_128KB_vs_l2c_2048KB_budget_analysis2_mpki_selected_qualcomm_srv_ap.pdf) 
+
+# Performance of TXVC 64KB: L2C 1.5MB, LLC 1MB
+![](../figures/txvc_vs_l2c_budget_analysis/txvc_64KB_vs_l2c_1536KB_budget_analysis2_selected_qualcomm_srv_ap.pdf) 
+
+# Performance of TXVC 128KB: L2C 1.5MB, LLC 1MB (MPKI)
+![](../figures/txvc_vs_l2c_budget_analysis/txvc_64KB_vs_l2c_1536KB_budget_analysis2_mpki_selected_qualcomm_srv_ap.pdf) 
+
+# Performance of TXVC 128KB: L2C 1.5MB, LLC 1MB
+![](../figures/txvc_vs_l2c_budget_analysis/txvc_128KB_vs_l2c_1536KB_budget_analysis2_selected_qualcomm_srv_ap.pdf) 
+
+# Performance of TXVC 128KB: L2C 1.5MB, LLC 1MB (MPKI)
+![](../figures/txvc_vs_l2c_budget_analysis/txvc_128KB_vs_l2c_1536KB_budget_analysis2_mpki_selected_qualcomm_srv_ap.pdf) 

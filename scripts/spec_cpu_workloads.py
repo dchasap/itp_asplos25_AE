@@ -1,3 +1,4 @@
+from workload import Workload
 
 SPEC_CPU_2006= [
 "400.perlbench-41B.champsimtrace.xz",
@@ -191,27 +192,83 @@ SPEC_CPU_2017= [
 "657.xz_s-56B.champsimtrace.xz"
 ]
 
-SPEC_CPU_WORKLOADS_DIR="spec"
+class SpecCPU(Workload):
 
-SPEC_SIMPOINT_WEIGHTS_DIR="./weights"
+  def __init__(self, version):
 
-def get_benchmarks(version):
-  if version == "2006":
-    return SPEC_CPU_2006
-  elif version == "2017":
-    return SPEC_CPU_2017
-  else :
-    return None
+    if version == "2006":
+      self.benchmarks = SPEC_CPU_2006
+    elif version == "2017":
+      self.benchmarks = SPEC_CPU_2017
+    self.benchmarks_dir = "spec"
+    self.weights_dir = "weights"
+    super().__init__()
 
-def get_spec_cpu_2017():
-  if simpoints:
-    return SPEC_CPU_2017
-  else:
-    return SPEC_CPU_2017
 
-def get_traces_dir(version):
-  return  SPEC_CPU_WORKLOADS_DIR
+  def get_benchmarks(self, with_simpoints=False):
+    traces = self.benchmarks
 
-def get_weights_dir():
-  return SPEC_SIMPOINT_WEIGHTS_DIR
+    names = []
+    for trace in traces:
+      if with_simpoints:
+        name = trace.split('.')[0] + '.' + trace.split('.')[1]
+      else:
+        name = trace.split('-')[0]
 
+      names.append(name)
+  
+    # cleanup duplicates (possible with simpoints for example)
+    names = [x for i, x in enumerate(names) if x not in names[:i]]
+    return names
+
+
+  def get_trace_dir(self):
+    return self.benchmarks_dir
+
+
+  def get_traces(self):
+    return self.benchmarks
+
+
+  def has_simpoints(self):
+    return True
+
+
+  def get_simpoints(self, benchmark):
+    
+    simpoints_n_weights_file = open("./weights/" + benchmark + "/concat.txt")
+    simpoints = []
+    for line in simpoints_n_weights_file:
+        simpoint_n_weight = line.split(";")
+        simpoint = simpoint_n_weight[0].strip()
+        weight = float(simpoint_n_weight[1].strip())
+        if weight > 0.05: #TODO: check if that's the correct threshold
+          simpoints.append(simpoint + "B") 
+    
+    return simpoints
+
+
+  def get_weights(self, benchmark):
+
+    simpoints_n_weights_file = open("./weights/" + benchmark + "/concat.txt")
+    weights = []
+    for line in simpoints_n_weights_file:
+        simpoint_n_weight = line.split(";")
+        weight = float(simpoint_n_weight[1].strip())
+        if weight > 0.05: #TODO: check if that's the correct threshold
+          weights.append(weight)
+    
+    return weights
+
+
+  def get_simpoints_idx(self):
+
+    simpoints_idx_file = open("./weights/" + benchmark + "/concat.txt")
+    simpoints_idx = []
+    for line in simpoints_idx_file:
+      simpoint_idx = line.split(";")
+      #print(simpoint_idx)
+      if float(simpoint_idx[1]) > 0.05: #TODO: check if that's the correct threshold
+        simpoints_idx.append(simpoint_idx[0].strip() + "B")
+  
+    return simpoints_idx

@@ -51,9 +51,11 @@ def run_simulation_batch(root_dir, trace_dir, dump_dir, sim_name, exp_name, work
   
   os.system("mkdir -p " + dump_dir)
 
-  traces, trace_path = workloads.get_benchmark_traces(workload_name)
+  workload = workloads.Workloads(workload_name)
+  traces = workload.get_traces() 
+  trace_path = workload.get_trace_dir()
   trace_dir = trace_dir + "/" + trace_path
-  benchmarks = workloads.get_benchmark_names(workload_name, with_simpoints=True)
+  benchmarks = workload.get_benchmark_names(with_simpoints=True)
 
   if debug_run:
     print("Simulating in Debug mode.")
@@ -123,7 +125,7 @@ def run_simulation_batch(root_dir, trace_dir, dump_dir, sim_name, exp_name, work
       #os.system(cmd)
       #job.write(run_cmd)
       if (parallel_run):
-        job.write(run_cmd + " &\n")
+        job.write("srun --exclusive -n 1 " + run_cmd + " &\n")
         #job.write(' &\n')
       else:
         job.write(run_cmd + "\n")
@@ -137,6 +139,6 @@ def run_simulation_batch(root_dir, trace_dir, dump_dir, sim_name, exp_name, work
 
     job.close()
     os.system("sbatch " + job_name + ".run")
-    os.system("rm " + job_name + ".run")
+    #os.system("rm " + job_name + ".run")
     
     ti += batch_size

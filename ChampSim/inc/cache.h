@@ -191,6 +191,7 @@ class CACHE : public champsim::operable, public MemoryRequestConsumer, public Me
   std::pair<set_type::iterator, set_type::iterator> get_set_span(uint64_t address);
  	std::pair<set_type::const_iterator, set_type::const_iterator> get_set_span(uint64_t address) const;
   std::size_t get_set_index(uint64_t address) const;
+  std::size_t _get_set_index(uint64_t address, uint32_t num_set) const;
 #endif
 
 public:
@@ -892,7 +893,6 @@ public:
 
 #if defined TX_SPLIT_CACHE
   // Only used if num_sets is NOT a power of two
-  std::cout << "check_1" << std::endl;
   barret_reciprocal = ( ( __uint128_t)1 << 64 ) / (NUM_SET - TX_NUM_SET);
   
   if (TX_NUM_SET != 0) {
@@ -900,10 +900,6 @@ public:
   } else {
     tx_barret_reciprocal = 0;
   }
-    std::cout << "check_2" << std::endl;
-#else 
-  // Only used if num_sets is NOT a power of two
-  barret_reciprocal = ( ( __uint128_t)1 << 64 ) / (NUM_SET - TX_NUM_SET);
 #endif
 
 #if defined ENABLE_EXTRA_CACHE_STATS

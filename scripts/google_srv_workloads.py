@@ -1,3 +1,4 @@
+from workload import Workload
 
 _GOOGLE_SRV_WORKLOADS = [
 "benchbase-twitter.champsimtrace.gz",
@@ -61,12 +62,34 @@ GOOGLE_SRV_WORKLOADS= [
 "yankee_0004.champsim.gz"
 ]
 
-#GOOGLE_SRV_WORKLOADS_DIR="google_srv"
 
-GOOGLE_SRV_WORKLOADS_DIR="google_traces_dpc4"
+class GoogleSRV(Workload):
 
-def get_google_srv():
-  return GOOGLE_SRV_WORKLOADS
+  def __init__(self):
+    self.benchmarks = GOOGLE_SRV_WORKLOADS
+    self.benchmarks_dir = "google_traces_dpc4"
+    super().__init__()
 
-def get_google_srv_dir():
-  return GOOGLE_SRV_WORKLOADS_DIR
+
+  def get_benchmarks(self):
+    traces = self.benchmarks
+
+    names = []
+    for trace in traces:
+
+      if ("sierra" in trace):
+        name = trace.split('.' )[2]
+      else:
+        name = trace.split('.')[0]
+
+      names.append(name)
+  
+    # cleanup duplicates (possible with simpoints for example)
+    names = [x for i, x in enumerate(names) if x not in names[:i]]
+    return names
+
+  def get_trace_dir(self):
+    return self.benchmarks_dir
+  
+  def get_traces(self):
+    return self.benchmarks
