@@ -68,17 +68,19 @@ class GoogleSRV(Workload):
   def __init__(self):
     self.benchmarks = GOOGLE_SRV_WORKLOADS
     self.benchmarks_dir = "google_traces_dpc4"
+    self.name = "Google Server DPC-4"
     super().__init__()
 
 
-  def get_benchmarks(self):
+  def get_benchmarks(self, with_simpoints=False):
     traces = self.benchmarks
 
     names = []
     for trace in traces:
 
       if ("sierra" in trace):
-        name = trace.split('.' )[2]
+        name_parts = trace.split('.')
+        name = name_parts[0] + '.' + name_parts[1] + '.' + name_parts[2] 
       else:
         name = trace.split('.')[0]
 

@@ -94,7 +94,10 @@ SPEC_CPU_2006= [
 "483.xalancbmk-736B.champsimtrace.xz"
 ]
 
-
+# Issue with OOM and freq-filter
+#"607.cactuBSSN_s-2421B.champsimtrace.xz",
+#"607.cactuBSSN_s-3477B.champsimtrace.xz",
+#"607.cactuBSSN_s-4004B.champsimtrace.xz",
 SPEC_CPU_2017= [
 "600.perlbench_s-1273B.champsimtrace.xz",
 "600.perlbench_s-210B.champsimtrace.xz",
@@ -119,9 +122,6 @@ SPEC_CPU_2017= [
 "605.mcf_s-665B.champsimtrace.xz",
 "605.mcf_s-782B.champsimtrace.xz",
 "605.mcf_s-994B.champsimtrace.xz",
-"607.cactuBSSN_s-2421B.champsimtrace.xz",
-"607.cactuBSSN_s-3477B.champsimtrace.xz",
-"607.cactuBSSN_s-4004B.champsimtrace.xz",
 "619.lbm_s-2676B.champsimtrace.xz",
 "619.lbm_s-2677B.champsimtrace.xz",
 "619.lbm_s-3766B.champsimtrace.xz",
@@ -198,8 +198,14 @@ class SpecCPU(Workload):
 
     if version == "2006":
       self.benchmarks = SPEC_CPU_2006
+      self.name = "SPEC CPU 2006"
     elif version == "2017":
       self.benchmarks = SPEC_CPU_2017
+      self.name = "SPEC CPU 2017"
+    elif version == "all":
+      self.benchmarks = SPEC_CPU_2006 + SPEC_CPU_2017
+      self.name = "SPEC CPU 2006/17"
+
     self.benchmarks_dir = "spec"
     self.weights_dir = "weights"
     super().__init__()

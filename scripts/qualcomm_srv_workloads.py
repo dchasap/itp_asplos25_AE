@@ -1,6 +1,6 @@
 from workload import Workload
 
-QAULCOMM_SRV_AP = [
+QUALCOMM_SRV_AP = [
 "srv0_ap.champsimtrace.xz",
 "srv100_ap.champsimtrace.xz",
 "srv101_ap.champsimtrace.xz",
@@ -891,8 +891,8 @@ SELECTED_QUALCOMM_SRV_AP = [
 "srv85_ap.champsimtrace.xz"
 ]
 
+
 SELECTED_TXVC_TOP200_QUALCOMM_SRV_AP = [
-"srv669_ap.champsimtrace.xz",
 "srv207_ap.champsimtrace.xz",
 "srv194_ap.champsimtrace.xz",
 "srv276_ap.champsimtrace.xz",
@@ -1094,6 +1094,109 @@ SELECTED_TXVC_TOP200_QUALCOMM_SRV_AP = [
 "srv726_ap.champsimtrace.xz"
 ]
 
+SELECTED_TXVC_TOP100_QUALCOMM_SRV_AP = [
+"srv461_ap.champsimtrace.xz",
+"srv366_ap.champsimtrace.xz",
+"srv72_ap.champsimtrace.xz",
+"srv776_ap.champsimtrace.xz",
+"srv137_ap.champsimtrace.xz",
+"srv160_ap.champsimtrace.xz",
+"srv132_ap.champsimtrace.xz",
+"srv602_ap.champsimtrace.xz",
+"srv276_ap.champsimtrace.xz",
+"srv426_ap.champsimtrace.xz",
+"srv155_ap.champsimtrace.xz",
+"srv509_ap.champsimtrace.xz",
+"srv742_ap.champsimtrace.xz",
+"srv73_ap.champsimtrace.xz",
+"srv564_ap.champsimtrace.xz",
+"srv757_ap.champsimtrace.xz",
+"srv527_ap.champsimtrace.xz",
+"srv58_ap.champsimtrace.xz",
+"srv717_ap.champsimtrace.xz",
+"srv194_ap.champsimtrace.xz",
+"srv207_ap.champsimtrace.xz",
+"srv617_ap.champsimtrace.xz",
+"srv233_ap.champsimtrace.xz",
+"srv507_ap.champsimtrace.xz",
+"srv616_ap.champsimtrace.xz",
+"srv175_ap.champsimtrace.xz",
+"srv12_ap.champsimtrace.xz",
+"srv528_ap.champsimtrace.xz",
+"srv406_ap.champsimtrace.xz",
+"srv441_ap.champsimtrace.xz",
+"srv311_ap.champsimtrace.xz",
+"srv121_ap.champsimtrace.xz",
+"srv669_ap.champsimtrace.xz",
+"srv637_ap.champsimtrace.xz",
+"srv100_ap.champsimtrace.xz",
+"srv520_ap.champsimtrace.xz",
+"srv501_ap.champsimtrace.xz",
+"srv9_ap.champsimtrace.xz",
+"srv323_ap.champsimtrace.xz",
+"srv419_ap.champsimtrace.xz",
+"srv635_ap.champsimtrace.xz",
+"srv376_ap.champsimtrace.xz",
+"srv195_ap.champsimtrace.xz",
+"srv65_ap.champsimtrace.xz",
+"srv334_ap.champsimtrace.xz",
+"srv710_ap.champsimtrace.xz",
+"srv281_ap.champsimtrace.xz",
+"srv762_ap.champsimtrace.xz",
+"srv111_ap.champsimtrace.xz",
+"srv103_ap.champsimtrace.xz",
+"srv143_ap.champsimtrace.xz",
+"srv538_ap.champsimtrace.xz",
+"srv200_ap.champsimtrace.xz",
+"srv720_ap.champsimtrace.xz",
+"srv628_ap.champsimtrace.xz",
+"srv587_ap.champsimtrace.xz",
+"srv43_ap.champsimtrace.xz",
+"srv550_ap.champsimtrace.xz",
+"srv287_ap.champsimtrace.xz",
+"srv692_ap.champsimtrace.xz",
+"srv171_ap.champsimtrace.xz",
+"srv198_ap.champsimtrace.xz",
+"srv141_ap.champsimtrace.xz",
+"srv715_ap.champsimtrace.xz",
+"srv585_ap.champsimtrace.xz",
+"srv61_ap.champsimtrace.xz",
+"srv459_ap.champsimtrace.xz",
+"srv623_ap.champsimtrace.xz",
+"srv540_ap.champsimtrace.xz",
+"srv702_ap.champsimtrace.xz",
+"srv506_ap.champsimtrace.xz",
+"srv32_ap.champsimtrace.xz",
+"srv727_ap.champsimtrace.xz",
+"srv582_ap.champsimtrace.xz",
+"srv259_ap.champsimtrace.xz",
+"srv609_ap.champsimtrace.xz",
+"srv147_ap.champsimtrace.xz",
+"srv486_ap.champsimtrace.xz",
+"srv120_ap.champsimtrace.xz",
+"srv764_ap.champsimtrace.xz",
+"srv133_ap.champsimtrace.xz",
+"srv393_ap.champsimtrace.xz",
+"srv664_ap.champsimtrace.xz",
+"srv760_ap.champsimtrace.xz",
+"srv598_ap.champsimtrace.xz",
+"srv21_ap.champsimtrace.xz",
+"srv56_ap.champsimtrace.xz",
+"srv537_ap.champsimtrace.xz",
+"srv662_ap.champsimtrace.xz",
+"srv425_ap.champsimtrace.xz",
+"srv743_ap.champsimtrace.xz",
+"srv401_ap.champsimtrace.xz",
+"srv359_ap.champsimtrace.xz",
+"srv45_ap.champsimtrace.xz",
+"srv526_ap.champsimtrace.xz",
+"srv131_ap.champsimtrace.xz",
+"srv128_ap.champsimtrace.xz",
+"srv642_ap.champsimtrace.xz",
+"srv358_ap.champsimtrace.xz",
+"srv225_ap.champsimtrace.xz"
+]
+
 SMT_QUALCOMM_SRV_AP = [
 "smt_srv12_ap_srv128_ap_1024i.champsimtrace.xz",
 "smt_srv12_ap_srv180_ap_1024i.champsimtrace.xz",
@@ -1177,11 +1280,16 @@ class QualcommSRV_AP(Workload):
   def __init__(self, selected = False, smt = False):
 
     if selected:
-      self.benchmarks = SELECTED_TXVC_TOP200_QUALCOMM_SRV_AP
+      #self.benchmarks = SELECTED_QUALCOMM_SRV_AP
+      #self.name = "Qualcomm SRV AP selected by translation MPKI"
+      self.benchmarks = SELECTED_TXVC_TOP100_QUALCOMM_SRV_AP
+      self.name = "Qualcomm SRV AP Selected Top200 for TXVC"
     elif smt:
       self.benchmarks = SMT_QUALCOMM_SRV_AP
+      self.name = "Qualcomm SRV AP SMT"
     else:
       self.benchmarks = QUALCOMM_SRV_AP
+      self.name = "Qualcomm SRV AP Full Suite"
 
     self.benchmarks_dir = "qualcomm_srv"
     super().__init__()

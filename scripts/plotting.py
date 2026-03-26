@@ -30,7 +30,8 @@ plot_conf = {
 								'legend_yoffset': 0, 
 								'legend_xoffset': 0,
                 'show_legend': False,
-								'alpha': 1.0 
+								'alpha': 1.0,
+								'group_size': 0
 						}
 
 
@@ -140,7 +141,28 @@ def plot_stat(df, tags, stat_name, output_file):
 #    sns.set_palette(sns.color_palette(['#999999', '#777777', '#555555', '#333333']))
 
     axes = plot(df, x='benchmarks', y=stat_name, hue='tag', axes=axes)
-    
+		
+    #bg_colors = [ "#D9D9D9", "#9C9C9C" , "#D9D9D9", "#9C9C9C" ]
+    bg_colors = [ "#A5C792", "#C79292", "#82C25D", "#CA5D5D" ]
+   	#"#FCDADA"
+
+    # How many boxes per group
+    group_size = plot_conf['group_size']   # change to 4 or 5 in your case
+    if group_size !=0:
+      n_boxes = len(axes.get_xticks())
+
+		  # Add background shading
+      for i in range(0, n_boxes, group_size):
+        group_idx = i // group_size
+        color_idx = group_idx % len(bg_colors)
+        axes.axvspan(
+          i - 0.5,
+          i + group_size - 0.5,
+          color=bg_colors[color_idx],
+          alpha=0.5,
+          zorder=0
+    	  )
+
     fig.savefig(output_file, bbox_inches='tight')
 
 
@@ -247,6 +269,7 @@ def plot_reuse_distance_3d(df, tags, output_file):
     #fig = ax.get_figure()
     plt.show()
     fig.savefig(output_file, bbox_inches='tight')
+
 
 def plot_average_single_cache(	input_baseline_files, means_df, input_tags, cache_types, 
 																op_type, stat_names, output_file):

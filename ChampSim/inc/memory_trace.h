@@ -15,7 +15,7 @@ class MemoryTracer
   public:
     MemoryTracer() {};
     
-    bool open_tracefile(std::string filename) 
+    bool open_tracefile(const std::string& filename) 
     {
       tracefilename = filename;
       tracefile = std::ofstream(filename, std::ios::out);

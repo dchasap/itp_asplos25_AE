@@ -1,0 +1,11 @@
+{
+  "emeraldwalk.runonsave": {
+    "commands": [
+      {
+        // Run whenever any file is saved
+        "match": ".*",
+        "cmd": "./scripts/synch_to_mn5.sh",
+      },
+    ],
+  },
+}

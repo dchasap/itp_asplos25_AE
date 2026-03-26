@@ -14,7 +14,7 @@ def export_env_variables(benchmark, sim_name, dump_dir, enviromental_variables):
 
   for var in enviromental_variables:
     if (var == "TXVC_MEMORY_TRACE_PATH"):
-      export_cmd += "export " + var + "=" + enviromental_variables[var] + "/" + benchmark + "_txvc_mem_trace.csv\n"
+      export_cmd += "export " + var + "=" + dump_dir + "/" + benchmark + "_" + sim_name + "_txvc_mem_trace.csv\n"
     elif (var == "CACHE_FILTER_MEMORY_TRACE_PATH"):
       export_cmd += "export " + var + "=" + enviromental_variables[var] + "/" + benchmark + "_txvc_mem_trace.csv\n"
     elif (var == "REUSE_DIST_FILENAME_PREFIX"):
@@ -59,12 +59,12 @@ def run_simulation_batch(root_dir, trace_dir, dump_dir, sim_name, exp_name, work
 
   if debug_run:
     print("Simulating in Debug mode.")
-    workload = 'debug'
+    #workload = 'debug'
     debug_flags = 'gdb -batch -ex "run" -ex "bt" --args'
     job_queue = 'gp_debug'
     sim_time = '00:00:30'
     warmup_instr = '500000'
-    run_instr = '1000000'
+    run_instr = '5000000'
     job_prefix = 'debug'
   else: 
     debug_flags = 'gdb -batch -ex "run" -ex "bt" --args'
@@ -139,6 +139,6 @@ def run_simulation_batch(root_dir, trace_dir, dump_dir, sim_name, exp_name, work
 
     job.close()
     os.system("sbatch " + job_name + ".run")
-    #os.system("rm " + job_name + ".run")
+    os.system("rm " + job_name + ".run")
     
     ti += batch_size

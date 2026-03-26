@@ -50,13 +50,27 @@
 					if (way == set_end)
 						way = std::next(set_begin, impl_find_victim(fill_mshr.cpu, fill_mshr.instr_id, get_set_index(fill_mshr.address, fill_mshr.is_instr), &*set_begin, fill_mshr.ip,
 																												fill_mshr.address, fill_mshr.type));
-#else
+#elif defined TX_SPLIT_CACHE_WAYS
+					if (!fill_mshr.is_pte) {
+						std::cout << "Filling non-PTE cache line" << std::endl;
+						auto [set_begin, set_end] = get_set_span(fill_mshr.address);
+						auto way = std::find_if_not(set_begin, set_end, [](auto x) { return x.valid; });
+						if (way == set_end)
+							way = std::next(set_begin, impl_find_victim(fill_mshr.cpu, fill_mshr.instr_id, get_set_index(fill_mshr.address), &*set_begin, fill_mshr.ip,
+																												fill_mshr.address, fill_mshr.type));
+					} else {
+						std::cout << "Filling PTE cache line" << std::endl;
+						auto [set_begin, set_end] = get_set_span(fill_mshr.address);
+						auto way = std::next(set_begin, NUM_WAY-1);
+					}
+#else 
 					auto [set_begin, set_end] = get_set_span(fill_mshr.address);
 					auto way = std::find_if_not(set_begin, set_end, [](auto x) { return x.valid; });
 					if (way == set_end)
 						way = std::next(set_begin, impl_find_victim(fill_mshr.cpu, fill_mshr.instr_id, get_set_index(fill_mshr.address), &*set_begin, fill_mshr.ip,
 																												fill_mshr.address, fill_mshr.type));
 #endif
+
 					assert(set_begin <= way);
 					assert(way <= set_end);
 					const auto way_idx = static_cast<std::size_t>(std::distance(set_begin, way)); // cast protected by earlier assertion
@@ -98,6 +112,7 @@
 #if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT
 							writeback_packet.is_instr = way->is_instr;
 							writeback_packet.is_pte = way->is_pte;
+							writeback_packet.translation_level = way->pte_level; // not necessary, ptes are not written back
 							//writeback_packet.access_freq = way->access_freq;
 #endif	
 
@@ -131,6 +146,7 @@
 #if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT
 								victim_packet.is_instr = way->is_instr;
 								victim_packet.is_pte = way->is_pte;
+								victim_packet.translation_level = way->pte_level;
 #endif	
 
 #if defined MULTIPLE_PAGE_SIZE
@@ -144,9 +160,11 @@
 
 								bool vc_entry_cond;
 								if (enable_instr_only)
+									//std::cout << "instr only!" << std::endl;
 									vc_entry_cond = way->is_pte && way->is_instr;
 								else if (enable_data_only)
 									vc_entry_cond = way->is_pte && !way->is_instr;
+									//std::cout << "data only!" << std::endl;
 								else 
 									vc_entry_cond = way->is_pte;
 
@@ -170,6 +188,11 @@
 
 								//std::cout << "add_req" << std::endl;
 								if (vc_entry_cond) {
+
+									if (enable_instr_only)
+										assert(victim_packet.is_instr);
+									else if (enable_data_only)
+										assert(!victim_packet.is_instr);
 									//success = tx_cache->add_wq(writeback_packet);
 									//tx_cache->add_rq(victim_packet);
 									//std::cout << "adding address: " << way->address << std::endl; 
@@ -217,6 +240,7 @@
 							way->is_instr = fill_mshr.is_instr;
 							way->is_pte = fill_mshr.is_pte;
 							way->access_freq = fill_mshr.access_freq;
+							way->pte_level = fill_mshr.translation_level;
 #endif
 
 #if defined MULTIPLE_PAGE_SIZE
@@ -241,6 +265,7 @@
 							xargs.is_pte = fill_mshr.is_pte;
 							xargs.is_replay = !fill_mshr.is_translated;
 							xargs.translation_level = fill_mshr.translation_level;
+							xargs.access_freq = fill_mshr.access_freq;
 	#if defined SPLIT_STLB
 							impl_update_replacement_state(fill_mshr.cpu, get_set_index(fill_mshr.address, fill_mshr.is_instr), way_idx, 
 																						fill_mshr.address, fill_mshr.ip, evicting_address, 
@@ -280,6 +305,7 @@
 						xargs.is_pte = fill_mshr.is_pte;
 						xargs.is_replay = !fill_mshr.is_translated;
 						xargs.translation_level = fill_mshr.translation_level;
+						xargs.access_freq = fill_mshr.access_freq;
 	#if defined (SPLIT_STLB)
 						impl_update_replacement_state(fill_mshr.cpu, get_set_index(fill_mshr.address, fill_mshr.is_instr), way_idx, 
 																					fill_mshr.address, fill_mshr.ip, 0, 
@@ -454,6 +480,7 @@
 						xargs.is_pte = handle_pkt.is_pte;
 						xargs.is_replay = !handle_pkt.is_translated;
 						xargs.translation_level = handle_pkt.translation_level;
+						xargs.access_freq = handle_pkt.access_freq;
 	#if defined SPLIT_STLB
 						impl_update_replacement_state(handle_pkt.cpu, get_set_index(handle_pkt.address, handle_pkt.is_instr), way_idx, 
 																					handle_pkt.address, handle_pkt.ip, 0, 
@@ -590,13 +617,13 @@
 							if (enable_instr_only)
 								vc_entry_cond = handle_pkt.is_pte && handle_pkt.is_instr;
 							else if (enable_data_only)
-								vc_entry_cond = handle_pkt.is_pte && handle_pkt.is_instr;
+								vc_entry_cond = handle_pkt.is_pte && !handle_pkt.is_instr;
 							else 
 								vc_entry_cond = handle_pkt.is_pte;
 							
 							if (enable_tx_victim_cache && vc_entry_cond) {
 
-								auto [_entry, _entry_found] = tx_victim_cache->lookup(handle_pkt.address, current_cycle);
+								auto [_entry, _entry_found] = tx_victim_cache->lookup(handle_pkt.address, handle_pkt.is_instr, current_cycle, handle_pkt.ip);
 								entry_found = _entry_found;
 								//copy_pkt.data = _entry.data;
 
@@ -653,7 +680,7 @@
 									entry_found = true;	
 								}
 								*/
-								auto [_entry, _entry_found] = tx_victim_cache->lookup(handle_pkt.address, current_cycle);
+								auto [_entry, _entry_found] = tx_victim_cache->lookup(handle_pkt.address, handle_pkt.is_instr, current_cycle, handle_pkt.ip);
 								entry_found = _entry_found;
 								//std::cout << "segfault" << std::endl;	
 								copy_pkt.data = _entry.data;
@@ -769,13 +796,13 @@
 						if (enable_instr_only)
 							vc_entry_cond = handle_pkt.is_pte && handle_pkt.is_instr;
 						else if (enable_data_only)
-							vc_entry_cond = handle_pkt.is_pte && handle_pkt.is_instr;
+							vc_entry_cond = handle_pkt.is_pte && !handle_pkt.is_instr;
 						else 
 							vc_entry_cond = handle_pkt.is_pte;
 							
 						if (enable_tx_victim_cache && vc_entry_cond) {
 
-							auto [_entry, _entry_found] = tx_victim_cache->lookup(handle_pkt.address, current_cycle);
+							auto [_entry, _entry_found] = tx_victim_cache->lookup(handle_pkt.address, handle_pkt.is_instr, current_cycle, handle_pkt.ip);
 							entry_found = _entry_found;
 							txvc_block_entry = _entry;
 							//copy_pkt.data = _entry.data;
@@ -874,13 +901,8 @@
 						if (enable_instr_only)
 							vc_entry_cond = handle_pkt.is_pte && handle_pkt.is_instr;
 						else if (enable_data_only)
-							vc_entry_cond = handle_pkt.is_pte && handle_pkt.is_instr;
-						else 
-							vc_entry_cond = handle_pkt.is_pte;
-							
-						if (enable_tx_victim_cache && vc_entry_cond) {
-
-							auto [_entry, _entry_found] = tx_victim_cache->lookup(handle_pkt.address, current_cycle);
+						vc_entry_cond = handle_pkt.is_pte && !handle_pkt.is_instr;
+							auto [_entry, _entry_found] = tx_victim_cache->lookup(handle_pkt.address, handle_pkt.is_instr, current_cycle, handle_pkt.ip);
 							entry_found = _entry_found;
 							//copy_pkt.data = _entry.data;
 						*/
@@ -901,6 +923,7 @@
 #if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT
 								txvc_mshr_packet.is_instr = txvc_block_entry.is_instr;
 								txvc_mshr_packet.is_pte = txvc_block_entry.is_pte;
+								txvc_mshr_packet.translation_level = txvc_block_entry.pte_level;
 								//txvc_mshr_packet.access_freq = txvc_block_entry.access_freq;
 #endif	
 
@@ -1519,9 +1542,9 @@ void CACHE::print_deadlock()
 		} else if (!handle_pkt.is_instr && !handle_pkt.is_pte) {
 			sim_stats.back().dhits[handle_pkt.type][handle_pkt.cpu]++;
 		} else if (handle_pkt.is_instr && handle_pkt.is_pte) {
-			sim_stats.back().ithits[handle_pkt.cpu][handle_pkt.type]++;
+			sim_stats.back().ithits[handle_pkt.type][handle_pkt.cpu]++;
 		} else if (!handle_pkt.is_instr && handle_pkt.is_pte) {
-			sim_stats.back().dthits[handle_pkt.cpu][handle_pkt.type]++;
+			sim_stats.back().dthits[handle_pkt.type][handle_pkt.cpu]++;
 		} else {
 			std::cout << "Oups, something went wrong..." << std::endl;
 			std::cout << "\ttype:" << (uint32_t)handle_pkt.type << std::endl;
@@ -1541,9 +1564,9 @@ void CACHE::print_deadlock()
 		} else if (!handle_pkt.is_instr && !handle_pkt.is_pte) {
 			sim_stats.back().dmisses[handle_pkt.type][handle_pkt.cpu]++;
 		} else if (handle_pkt.is_instr && handle_pkt.is_pte) {
-			sim_stats.back().itmisses[handle_pkt.cpu][handle_pkt.type]++;
+			sim_stats.back().itmisses[handle_pkt.type][handle_pkt.cpu]++;
 		} else if (!handle_pkt.is_instr && handle_pkt.is_pte) {
-			sim_stats.back().dtmisses[handle_pkt.cpu][handle_pkt.type]++;
+			sim_stats.back().dtmisses[handle_pkt.type][handle_pkt.cpu]++;
 		} else {
 			std::cout << "Oups, something went wrong..." << std::endl;
 			std::cout << "\ttype:" << (uint32_t)handle_pkt.type << std::endl;

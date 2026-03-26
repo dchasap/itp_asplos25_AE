@@ -2,6 +2,7 @@ from spec_cpu_workloads import SpecCPU
 from gapp_workloads import GAPP
 from qualcomm_srv_workloads import QualcommSRV_AP
 from google_srv_workloads import GoogleSRV
+from test_workloads import TEST
 
 
 class Workloads:
@@ -48,6 +49,9 @@ class Workloads:
       #traces_dir = spec_cpu_workloads.get_traces_dir("all")
       self.workload = SpecCPU(version="all")
 
+    elif workload_name == "test":
+      self.workload = TEST()
+      
     else:
       print("Workload " + workload_name + " not recognized.")
       exit(1)
@@ -58,11 +62,12 @@ class Workloads:
   def get_traces(self):
     return self.workload.get_traces()
 
+
   def get_trace_dir(self):
     return self.workload.get_trace_dir()
 
-  def get_benchmark_names(self, with_simpoints=False):
 
+  def get_benchmark_names(self, with_simpoints=False):
     return self.workload.get_benchmarks(with_simpoints=with_simpoints)
 
 

@@ -52,25 +52,53 @@ def get_baseline_files(_data_files, _tags):
 	return input_data_files, tags
 
 
-def gen_plot(benchsuite, _tags, data_files, figure_name, figure_type, file_type, figure_dir):
+def update_configuration(orig_conf, new_conf):
+	
+	for key in orig_conf:
+		#print("looking for key: " + key)
+		if key == 'plot_type':
+			#print("skipping " + key)
+			continue
+		if key in new_conf:
+			#print("updating key: " + key + " from " + str(orig_conf[key]) + " to " + str(new_conf[key]))
+			if type(orig_conf[key]) == int:
+				orig_conf[key] = int(new_conf[key])
+			elif type(orig_conf[key]) == float:
+				orig_conf[key] = float(new_conf[key])
+			else:
+				orig_conf[key] = new_conf[key]
+	
+	return orig_conf
 
-	if (figure_type == "plot_ipc"): 
+
+def gen_plot(benchsuite, _tags, data_files, figure_name, figure_type, file_type, figure_dir, extra_conf=None):
+
+	if extra_conf is not None:
+		plotting.plot_conf = update_configuration(plotting.plot_conf, extra_conf)
+
+	if (figure_type == "ipc"): 
 		
 		input_data_files = []
 		input_baseline_files = []
 		tags = []
 		i = 0
-
+		#print(_tags)
 		for file in data_files:
 			if "BASELINE" in file:
 				input_baseline_files.append(file)
+				#print(file)
+				#print(_tags[i])
 			else:
 				input_data_files.append(file)
+				#print(i)
+				#print(file)
+				#print(_tags[i])
 				tags.append(_tags[i])
 
 			i += 1
 
 		#tags = tags[1:] # this only works if baseline is only one file and is the first
+		#print(len(tags))
 
 		cache_type = "cpu0_STLB"
 		op_type = "TOTAL"
@@ -80,6 +108,14 @@ def gen_plot(benchsuite, _tags, data_files, figure_name, figure_type, file_type,
 
 
 		data_df = stats.compute_variation(baseline_df, data_df, tags, 'IPC', 'IPC_IMPROVEMENT')
+
+		#df = data_df
+		#data_df = df.sort_values('IPC_IMPROVEMENT', ascending=False).head(100)
+		#print(data_df)
+
+		#for bench in data_df['benchmarks'].to_list():
+		#	print("\"" + bench + ".champsimtrace.xz\",")
+
 		means_df = stats.compute_mean(data_df, tags, 'IPC_IMPROVEMENT', 'mean')
 		print(means_df)
 
@@ -102,7 +138,7 @@ def gen_plot(benchsuite, _tags, data_files, figure_name, figure_type, file_type,
 		plotting.plot_conf['legend_yoffset'] = 0.5
 		plotting.plot_conf['legend_xoffset'] = 1.2
 
-		output_file = figure_dir + "/" + figure_name + "_" + benchsuite + "." + file_type
+		output_file = figure_dir + "/" + figure_name + "_ipc_" + benchsuite + "." + file_type
 		print(output_file)
 		plotting.plot_stat(data_df, tags, 'IPC_IMPROVEMENT', output_file)
 
@@ -124,12 +160,13 @@ def gen_plot(benchsuite, _tags, data_files, figure_name, figure_type, file_type,
 		#df = df[df['IPC_IMPROVEMENT'] >= 0.3]
 		#print(len(df))
 
-	if (figure_type == "plot_mpki"):
+	if (figure_type == "mpki"):
 	
 		input_data_files, tags = get_data_files(data_files, _tags, False)
 
 		cache_types=["cpu0_L1I", "cpu0_L1D", "cpu0_L2C", "LLC"]
 		cache_types=["cpu0_L2C", "TXVC", "LLC"]
+		#cache_types=["LLC"]	
 		op_type = "TOTAL"
 
 		df = stats.load_df(input_data_files, tags, cache_types, op_type)
@@ -170,53 +207,62 @@ def gen_plot(benchsuite, _tags, data_files, figure_name, figure_type, file_type,
 																					cache_types, op_type, "MPKI", 
 																					output_file)
 
-		#plotting.plot_conf['ylabel'] = "Hit Ratio(%)"	
-		#output_file = figure_dir + "/" + figure_name + "_" + benchsuite + "." + file_type
-		#print(output_file)
-		#plotting.plot_average_multiple_caches(input_data_files, means_df, tags, 
-		#																			cache_types, op_type, "HIT_RATIO", 
-		#																			output_file)
+	
+	if (figure_type == "mpki_breakdown"):
+		
+		input_data_files, tags = get_data_files(data_files, _tags, False)
 
-
-		#plot_conf['show_legend'] = True
-		#plot_conf['extra_xlabels'] = True
-		#plot_conf['ylabel'] = "Avg Miss Latency"
-		#output_file = FIGURES_DIR + "/fig09_soa_avg_miss_lat_comparison.pdf"
-		#print(FIGURES_DIR + "/fig09_soa_avg_miss_lat_comparison.pdf")
-		#plots.plot_average_multiple_caches_single_fig(	input_st_data_files, input_smt_data_files, 
-		#																								input_tags, cache_types, op_type, 
-		#																								"AVERAGE_MISS_LATENCY", plot_conf, output_file)
-		cache_types=["cpu0_L2C"]
+		#cache_types=["cpu0_L1I", "cpu0_L1D", "cpu0_L2C", "LLC"]
+		cache_types=[ "cpu0_ITLB", "cpu0_DTLB", "cpu0_STLB", "cpu0_L1D", "cpu0_L1I", "cpu0_L2C", "TXVC", "LLC" ]
 		op_type = "TOTAL"
 
 		df = stats.load_df(input_data_files, tags, cache_types, op_type)
 
-		print(len(df))
-		df = df[df['MPKI'] >= 2]
-		print(len(df))
-		df = df[df['MPKI'] >= 5]
-		print(len(df))
-		df = df[df['MPKI'] >= 10]
-		print(len(df))
-		plotting.plot_conf['plot_type'] = 'scatter'
-		output_file = figure_dir + "/" + figure_name + "_l2c_mpki_" + benchsuite + "." + file_type
-		plotting.plot_stat(df, tags, 'MPKI', output_file)
-		#for cache_type in cache_types:
+		stat_names = [ "iMPKI", "dMPKI", "itMPKI", "dtMPKI" ] 
+		# compute means
+		means = {}
+		for stat in stat_names:
+				means[stat] = []
+		caches = []
+		confs = []
+		means_hr = []
+		for cache in cache_types:
+			for tag in tags:
+				for stat in stat_names:
+					mean = gmean(df.loc[(df['tag'] == tag) & (df['CACHE'] == cache)][stat])
+					means[stat].append(mean)
+				caches.append(cache)
+				confs.append(tag)
 
-		#	means_df_single_cache = means_df.loc[(means_df['cache'] == cache_type)]
+		means_df = pd.DataFrame({'benchmarks':'geomean', 'cache':caches, 'tag': confs})
+		for stat in stat_names:
+			means_df[stat] = means[stat]
+		print(means_df)
 
-		#	plotting.plot_conf['plot_width'] = 8
-		#	plotting.plot_conf['plot_height'] = 1.8
-		#	plotting.plot_conf['fontsize'] = 18
 
-		#	output_file = figure_dir + "/" + figure_name + "_" + cache_type + "_mpki_" + benchsuite + "." + file_type
-		#	print(output_file)
-		#	plotting.plot_average_single_cache(	input_data_files, means_df_single_cache, tags, 
-		#																			cache_types, op_type, stat_names, 
-		#																			output_file)
-	
+		plotting.plot_conf['plot_type'] = 'barplot'
+		plotting.plot_conf['plot_width'] = 16
+		plotting.plot_conf['plot_height'] = 1.8
+		plotting.plot_conf['fontsize'] = 14
+		plotting.plot_conf['ylabel'] = "MPKI"
+		plotting.plot_conf['show_legend'] = True
+		plotting.plot_conf['extra_xlabels'] = True
 
-	if (figure_type == "plot_hit_ratio"):
+		for cache_type in cache_types:
+
+			means_df_single_cache = means_df.loc[(means_df['cache'] == cache_type)]
+
+			plotting.plot_conf['plot_width'] = 8
+			plotting.plot_conf['plot_height'] = 1.8
+			plotting.plot_conf['fontsize'] = 18
+
+			output_file = figure_dir + "/" + figure_name + "_" + cache_type + "_mpki_breakdown_" + benchsuite + "." + file_type
+			print(output_file)
+			plotting.plot_average_single_cache(	input_data_files, means_df_single_cache, tags, 
+																					cache_types, op_type, stat_names, output_file)	
+
+
+	if (figure_type == "hit_ratio"):
 	
 		input_data_files, tags = get_data_files(data_files, _tags, True)
 
@@ -263,24 +309,55 @@ def gen_plot(benchsuite, _tags, data_files, figure_name, figure_type, file_type,
 																					cache_types, op_type, "HIT_RATIO", 
 																					output_file)
 
+	if (figure_type == "miss_rate"):
+	
+		input_data_files, tags = get_data_files(data_files, _tags, True)
 
-		#plotting.plot_conf['ylabel'] = "Hit Ratio(%)"
-		#stat_names = [ "HIT_RATIO" ] 
-		#for cache_type in cache_types:
+		cache_types=["TXVC" ]
+		op_type = "TOTAL"
 
-		#	means_df_single_cache = means_df.loc[(means_df['cache'] == cache_type)]
+		df = stats.load_df(input_data_files, tags, cache_types, op_type)
 
-		#	plotting.plot_conf['plot_width'] = 8
-		#	plotting.plot_conf['plot_height'] = 1.8
-		#	plotting.plot_conf['fontsize'] = 18
+		df = stats.compute_stat(df, "MISS_RATE")
 
-		#	output_file = figure_dir + "/" + figure_name + "_" + cache_type + "_" + benchsuite + "." + file_type
-		#	print(output_file)
-		#	plotting.plot_average_single_cache(	input_data_files, means_df_single_cache, tags, 
-		#																			cache_types, op_type, stat_names, 
-		#																			output_file)
+		stat_names = [ "MISS_RATE" ] 
+		# compute means
+		means = {}
+		for stat in stat_names:
+				means[stat] = []
+		caches = []
+		confs = []
+		means_hr = []
+		for cache in cache_types:
+			for tag in tags:
+				for stat in stat_names:
+					mean = gmean(df.loc[(df['tag'] == tag) & (df['CACHE'] == cache)][stat])
+					means[stat].append(mean)
+				caches.append(cache)
+				confs.append(tag)
 
-	if (figure_type == "plot_cache_filter_accuracy"):
+		means_df = pd.DataFrame({'benchmarks':'geomean', 'cache':caches, 'tag': confs, 'mean':means['MISS_RATE']})
+		for stat in stat_names:
+			means_df[stat] = means[stat]
+		print(means_df)
+
+
+		plotting.plot_conf['plot_type'] = 'barplot'
+		plotting.plot_conf['plot_width'] = 16
+		plotting.plot_conf['plot_height'] = 1.8
+		plotting.plot_conf['fontsize'] = 14
+		plotting.plot_conf['ylabel'] = "Miss Rate(%)"
+		plotting.plot_conf['show_legend'] = True
+		plotting.plot_conf['extra_xlabels'] = True
+
+		output_file = figure_dir + "/" + figure_name + "_miss_rate_" + benchsuite + "." + file_type
+		print(output_file)
+		plotting.plot_average_multiple_caches(input_data_files, means_df, tags, 
+																					cache_types, op_type, "MISS_RATE", 
+																					output_file)
+		
+
+	if (figure_type == "cache_filter_accuracy"):
 		#print(data_files)
 		#print(_tags)
 		input_data_files, tags = get_data_files(data_files, _tags, True)
@@ -327,7 +404,7 @@ def gen_plot(benchsuite, _tags, data_files, figure_name, figure_type, file_type,
 																			op_type, stat_names, output_file)
 
 
-	if (figure_type == "plot_txvc_bypass"):
+	if (figure_type == "txvc_bypass"):
 		
 		input_data_files, tags = get_data_files(data_files, _tags, True)
 
@@ -372,7 +449,7 @@ def gen_plot(benchsuite, _tags, data_files, figure_name, figure_type, file_type,
 		plotting.plot_average_single_cache(input_data_files, means_df, tags, cache_types, 
 																			op_type, stat_names, output_file)
 
-	if (figure_type == "plot_occupancy"):
+	if (figure_type == "occupancy"):
 	
 		input_data_files = []
 
@@ -406,53 +483,7 @@ def gen_plot(benchsuite, _tags, data_files, figure_name, figure_type, file_type,
 		print(FIGURES_DIR + "/fig_vc_occupancy_" + benchsuite + ".pdf")
 		#plotting.plot_stat(means_df, tags, 'mean', output_file)
 		plotting.plot_stat(data_df, tags, 'MAX_OCCUPANCY', output_file)
-
-
-	if (figure_type == "plot_l2c_eval"): 
-
-		input_baseline_files =	[ "./stats/" + benchsuite  + "_fdip_baseline_llc-s.1537-w.16.csv" ]
-	
-		input_data_files = []
-		#data_files = data_files.replace('\t', '')
-		#data_files = data_files.split('\n')
-
-		for data_file in data_files:
-
-			if (data_file == ""): continue
-			print(data_file)	
-			input_data_files.append("./stats/" + benchsuite + "_" + data_file + ".csv")	
-
-		tags = [ 	"!L2C",
-							"iTP"
-					]
-
-		cache_type = "cpu0_STLB"
-		op_type = "TOTAL"
-
-		baseline_df = stats.load_df(input_baseline_files, tags, cache_type, op_type)
-		data_df = stats.load_df(input_data_files, tags, cache_type, op_type)
-
-
-		data_df = stats.compute_variation(baseline_df, data_df, tags, 'IPC', 'IPC_IMPROVEMENT')
-		#means_df = stats.compute_mean(data_df, tags, 'IPC_IMPROVEMENT', 'mean')
-
-
-		plotting.plot_conf['plot_type'] = 'box'
-		plotting.plot_conf['xlabel'] = xlabels[benchsuite]
-		plotting.plot_conf['ylabel'] = "IPC Improvement (%)"
-		plotting.plot_conf['plot_width'] = 9
-		plotting.plot_conf['plot_height'] = 3
-		plotting.plot_conf['rotation'] = 20
-		plotting.plot_conf['show_legend'] = True
-		plotting.plot_conf['legend_cols'] = 5
-		plotting.plot_conf['legend_yoffset'] = 0.5
-		plotting.plot_conf['legend_xoffset'] = 1.2
-		#plotting.plot_cols[']
-	
-		output_file = FIGURES_DIR + "/fig_l2c_eval_" + benchsuite + "." + file_type
-		print(FIGURES_DIR + "/fig_pte_l2c_eval_" + benchsuite + "." + file_type)
-		plotting.plot_stat(data_df, tags, 'IPC_IMPROVEMENT', output_file)
-
+		
 
 	if (figure_type == "plot_reuse_dist"):
 		

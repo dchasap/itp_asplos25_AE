@@ -93,8 +93,8 @@ def compute_variation(baseline_df, df, tags, col_name, new_col_name, revert=Fals
 	if (revert):
 		df[new_col_name] = ((baseline_df[col_name] - df[col_name]) * 100 / df[col_name])
 	else:
-		print(len(df))
-		print(len(baseline_df))
+		#print(len(df))
+		#print(len(baseline_df))
 		df[new_col_name] = ((df[col_name] - baseline_df[col_name]) * 100 / baseline_df[col_name])
 
 	return df
@@ -115,6 +115,8 @@ def compute_stat(df, stat_name):
 		df["MISS_CYCLES"] = (1 - (1/speedup)) * 100
 	elif stat_name == "HIT_RATIO":
 		df['HIT_RATIO'] = ((df['itHIT'] + df['dtHIT']) / (df['itACCESS'] + df['dtACCESS'])) * 100
+	elif stat_name == "MISS_RATE":
+		df['MISS_RATE'] = (df['MISS'] / df['ACCESS']) * 100
 	elif stat_name == "TXVC_BYPASS_RATIO":
 		df['TXVC_BYPASS_RATIO'] = (df['TXVC_BYPASSES'] / df['TXVC_PREDICTIONS']) * 100
 

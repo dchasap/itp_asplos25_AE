@@ -144,6 +144,7 @@ class CACHE : public champsim::operable, public MemoryRequestConsumer, public Me
 #if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT || defined TRANSLATION_EXCLUSIVE_CACHE
 		bool is_instr = false;
 		bool is_pte = false;
+    uint8_t pte_level = 0;
 #endif
 
 #if defined MULTIPLE_PAGE_SIZE
@@ -175,6 +176,9 @@ class CACHE : public champsim::operable, public MemoryRequestConsumer, public Me
 		bool is_pte = false;
 		bool is_replay = false;
 		std::size_t translation_level = 0;
+#if defined TRANSLATION_EXCLUSIVE_CACHE
+    uint64_t access_freq = 0;
+#endif
 	};
 #endif
 
@@ -354,10 +358,8 @@ public:
       uint64_t total_hits = 0, total_ithits = 0, total_dthits = 0;
       uint64_t total_misses = 0, total_itmisses = 0, total_dtmisses = 0;
 
-      std::ofstream histogram_file;
-		  std::string histogram_filename;
-      std::vector<uint64_t> mem_access_list;
       bool save_mem_accesses;
+      MemoryTracer memTracer;
 
 #if defined ENABLE_EXTRA_CACHE_STATS
       ReuseDistanceMonitor* reuseDistMon;
@@ -365,16 +367,45 @@ public:
 
       CacheFilter* cacheFilter;
 
+      IndexHash* setIndexer;
+
+      /*
       uint32_t get_set(uint64_t address) 
       {
         return (address >> offset_bits) & champsim::bitmask(champsim::lg2(num_set));
       }
+      */
     
     public:
       VICTIM_CACHE(uint64_t _num_set, uint64_t _num_way, uint64_t _offset_bits, std::string _name)
         : num_set(_num_set), num_way(_num_way), offset_bits(_offset_bits), blocks(_num_set * _num_way), _name_(_name) 
       {
+
         std::cout << "TXVC initialized with " << num_set << " sets and " << num_way << " ways." << std::endl;
+
+				if (getenv("TXVC_SET_INDEXER") != nullptr) {
+					char* set_indexer_name = getenv("TXVC_SET_INDEXER");
+					if (strcmp(set_indexer_name, "default") == 0) {
+            std::cout << "\tUsing Default hash as set indexer for TXVC" << std::endl;
+					  setIndexer = new DefaultHash(num_set, num_way, offset_bits);
+					} else if (strcmp(set_indexer_name, "modulo") == 0) {
+            std::cout << "\tUsing Modulo hash as set indexer for TXVC" << std::endl;
+					  setIndexer = new ModuloHash(num_set, num_way, offset_bits);
+          } else if (strcmp(set_indexer_name, "xor") == 0) {
+            std::cout << "\tUsing XOR hash as set indexer for TXVC" << std::endl;
+					  setIndexer = new XORHash(num_set, num_way);
+          } else if (strcmp(set_indexer_name, "knuth") == 0) {
+            std::cout << "\tUsing Multiplicative-Knuth hash as set indexer for TXVC" << std::endl;
+					  setIndexer = new MultiplicativeHash(num_set, num_way);
+          } else {          
+            std::cerr << "Unknown hash indexer for TXVC: " << set_indexer_name << std::endl;
+            exit(1);
+          }
+				} else {
+          std::cerr << "TXVC_SET_INDEXER not set!" << std::endl;
+          exit(1);
+        }
+
 				if (getenv("TXVC_REP_POLICY") != nullptr) {
 					char* rep_pol_name = getenv("TXVC_REP_POLICY");
 					if (strcmp(rep_pol_name, "lru") == 0) {
@@ -383,7 +414,40 @@ public:
 					} else if (strcmp(rep_pol_name, "lfu") == 0) {
             std::cout << "\tUsing LFU replacement policy for TXVC" << std::endl;
             replacementPol = new LFU(num_set, num_way);
-          } else {
+          } else if (strcmp(rep_pol_name, "lfu_leaf") == 0) {
+            std::cout << "\tUsing LFU_Leaf replacement policy for TXVC" << std::endl;
+            replacementPol = new LFU_Leaf(num_set, num_way);
+          } else if (strcmp(rep_pol_name, "lfupp") == 0) {
+            std::cout << "\tUsing LFU++ replacement policy for TXVC" << std::endl;
+            replacementPol = new LFUPP(num_set, num_way);
+          } else if (strcmp(rep_pol_name, "lfu_decay") == 0) {
+            std::cout << "\tUsing LFU with Decay replacement policy for TXVC" << std::endl;
+            replacementPol = new LFUwDecay(num_set, num_way);
+          } else if (strcmp(rep_pol_name, "lfu_pchot") == 0) {
+            std::cout << "\tUsing LFU+PC-hotness replacement policy for TXVC" << std::endl;
+            replacementPol = new LFU_PCHot(num_set, num_way);
+          } else if (strcmp(rep_pol_name, "lrfu") == 0) {
+            std::cout << "\tUsing LRFU replacement policy for TXVC" << std::endl;
+            replacementPol = new LRFU(num_set, num_way);
+          } else if (strcmp(rep_pol_name, "lrfu_wss") == 0) {
+            std::cout << "\tUsing LRFU_WSS replacement policy for TXVC" << std::endl;
+            replacementPol = new LRFU_WSS(num_set, num_way);
+          } else if (strcmp(rep_pol_name, "lfu_halving") == 0) {
+            std::cout << "\tUsing LFU_Halving replacement policy for TXVC" << std::endl;
+            replacementPol = new LFU_Halving(num_set, num_way);
+          } else if (strcmp(rep_pol_name, "srrip") == 0) {
+            std::cout << "\tUsing SRRIP replacement policy for TXVC" << std::endl;
+            replacementPol = new SRRIP(num_set, num_way, 3);
+          } else if (strcmp(rep_pol_name, "srrip_leaf") == 0) {
+            std::cout << "\tUsing SRRIP replacement policy for TXVC" << std::endl;
+            replacementPol = new SRRIP_Leaf(num_set, num_way, 3);
+          } else if (strcmp(rep_pol_name, "pacipv") == 0) {
+            std::cout << "\tUsing PACIPV replacement policy for TXVC" << std::endl;
+            replacementPol = new PACIPV(num_set, num_way, 3);
+          } else if (strcmp(rep_pol_name, "pacipv_lfu") == 0) {
+            std::cout << "\tUsing PACIPV_LFU replacement policy for TXVC" << std::endl;
+            replacementPol = new PACIPV_LFU(num_set, num_way, 3);
+          } else {          
             std::cerr << "Unknown replacement policy for TXVC: " << rep_pol_name << std::endl;
             exit(1);
           }
@@ -456,20 +520,17 @@ public:
         }
 
 
-        save_mem_accesses = false;
-        if (save_mem_accesses) {
-          char* _histogram_filename = nullptr;
-          if (getenv("TXVC_MEMORY_TRACE_PATH")) {
-				    _histogram_filename = getenv("TXVC_MEMORY_TRACE_PATH");
-            histogram_filename.assign(_histogram_filename);
-            histogram_file = std::ofstream(_histogram_filename, std::ios::out);
-			    } else {
-				    std::cout << "TXVC_MEMORY_TRACE_PATH not set!" << std::endl;
-				    exit(1);
-		  	  }
-
-          std::cout << "TXVC: Saving memory accesses to " << histogram_filename << std::endl;
+        char* _mem_trace_filename = nullptr;
+        if (getenv("TXVC_MEMORY_TRACE_PATH")) {
+          _mem_trace_filename = getenv("TXVC_MEMORY_TRACE_PATH");
+          std::cout << "TXVC: Saving memory accesses to " << _mem_trace_filename << std::endl;
+          memTracer.open_tracefile(_mem_trace_filename);
+          save_mem_accesses = true;
+        } else {
+          std::cout << "TXVC_MEMORY_TRACE_PATH not set!" << std::endl;
+          save_mem_accesses = false;
         }
+
 
 #if defined ENABLE_EXTRA_CACHE_STATS        
         std::string reuse_dist_filename_prefix;
@@ -505,13 +566,17 @@ public:
         if (enable_cache_filtering) {
           //std::cout << "access_freq:" << access_freq << std::endl;
           bool bypass = cacheFilter->predict(request.address, seems_dead, access_freq);
+          // also check if its a demand access 
+          //bool is_demand = request.type != PREFETCH;
+          bool is_demand = true; // TEMP: DISABLE BYPASS FOR PREFETCHES FOR NOW
+          bypass = bypass || !is_demand;
           if (bypass) {
-            //std::cout << "Block " << request.address " byapassed." << std::endl;
+            //std::cout << "Block " << request.address << " bypassed." << std::endl;
             return;
           }
         }
 
-        auto [way, found] = lookup(request.address, curr_cycle);
+        auto [way, found] = lookup(request.address, request.is_instr, curr_cycle, request.ip);
         if (!found) {
           fill(request, curr_cycle);
         }
@@ -519,19 +584,39 @@ public:
 
       void fill(PACKET& request, uint64_t curr_cycle) 
       {
-        uint64_t set_idx = get_set(request.address);
+        uint64_t set_idx = setIndexer->get_set(request.address);
         auto set_begin = std::next(blocks.begin(), set_idx * num_way);
         auto set_end = std::next(set_begin, num_way);
         auto way = std::find_if(set_begin, set_end, [](const BLOCK& block) { return !block.valid; });
 
+        uint32_t way_idx;
         if (way != set_end) {
+          // filling an empty slot
+          way_idx = static_cast<uint32_t>(std::distance(set_begin, way));
+          //std::cout << "Filling empty block in set " << set_idx << " with address " << way->address << std::endl;
           way->valid = true;
+          ReplacementPolicy::REP_POL_ARGS xargs;
+          // no previous frequency
+          xargs.access_freq = 0;
+          xargs.pte_level = request.translation_level;
+          xargs.pc = request.ip;
+          xargs.pte_address = request.address;
+          xargs.is_prefetch = request.prefetch_from_this;
+          replacementPol->update_replacement_state(set_idx, way_idx, curr_cycle, false, xargs);
         } else {
-          uint32_t way_idx = replacementPol->find_victim(set_idx);
+          way_idx = replacementPol->find_victim(set_idx);
           way = std::next(blocks.begin(), (set_idx * num_way) + way_idx);
-          replacementPol->update_replacement_state(set_idx, way_idx, curr_cycle, false);  
+          ReplacementPolicy::REP_POL_ARGS xargs;
+          xargs.access_freq = way->access_freq;
+          xargs.pte_level = way->pte_level;
+          xargs.pc = request.ip;
+          xargs.pte_address = request.address;
+          xargs.is_prefetch = request.prefetch_from_this;
+          replacementPol->update_replacement_state(set_idx, way_idx, curr_cycle, false, xargs);  
         }
         
+        //std::cout << "Filling block in set " << set_idx << " with address " << request.address << std::endl;
+
         if (enable_cache_filtering)
           cacheFilter->update(way->address, way->is_doa, false, curr_cycle); 
 
@@ -544,6 +629,7 @@ public:
 #if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT || defined TRANSLATION_EXCLUSIVE_CACHE
 				way->is_instr = request.is_instr;
 				way->is_pte = request.is_pte;
+        way->pte_level = request.translation_level;
         way->access_freq = request.access_freq;
 #endif
 
@@ -560,9 +646,9 @@ public:
       }
 
 
-      std::pair<BLOCK, bool> lookup(uint64_t address, uint64_t curr_cycle) 
+      std::pair<BLOCK, bool> lookup(uint64_t address, bool is_instr, uint64_t curr_cycle, uint64_t pc) 
       {
-        uint32_t set_idx = get_set(address);
+        uint32_t set_idx = setIndexer->get_set(address);
         auto set_begin = std::next(blocks.begin(), set_idx * num_way);
         auto set_end = std::next(set_begin, num_way);
         auto way = std::find_if(set_begin, set_end, eq_addr<BLOCK>(address, offset_bits));
@@ -580,29 +666,36 @@ public:
 
 #endif
         if (save_mem_accesses)
-          mem_access_list.push_back(address);
+          memTracer.add_access(address);
         
         if (enable_cache_filtering)
           cacheFilter->update(address, !hit, true, curr_cycle); // if hit, not doa
 
+        // Categorize access using the incoming request's is_instr flag, not the cached block's
         total_accesses++;
-        if (way->is_instr)
+        if (is_instr)
           total_itaccesses++;
         else
           total_dtaccesses++;
 
         if (hit) {
           total_hits++;
-          if (way->is_instr)
+          if (is_instr)
             total_ithits++;
           else
             total_dthits++;
           way->is_doa = false;
-          replacementPol->update_replacement_state(set_idx, way_idx, curr_cycle,  hit);
+          ReplacementPolicy::REP_POL_ARGS xargs;
+          xargs.access_freq = way->access_freq;
+          xargs.pte_level = way->pte_level;
+          xargs.pc = pc;
+          xargs.pte_address = address;
+          xargs.is_prefetch = way->prefetch;
+          replacementPol->update_replacement_state(set_idx, way_idx, curr_cycle, hit, xargs);
           return {blocks.at((set_idx * num_way) + way_idx), hit};
         } else {
           total_misses++;
-          if (way->is_instr)
+          if (is_instr)
             total_itmisses++;
           else 
             total_dtmisses++;
@@ -625,12 +718,7 @@ public:
       void print_stats(void) 
       {
         if (save_mem_accesses) {
-          std::cout << "Saving memory access histogram data to " << histogram_filename << std::endl;
-          histogram_file << "address" << std::endl;
-          for (auto it = mem_access_list.begin(); it != mem_access_list.end(); ++it) {
-            histogram_file << *it << std::endl;
-          }
-          histogram_file.close();
+          memTracer.save_tracefile();
         }
 
         std::cout << "TXVC";
@@ -810,6 +898,7 @@ public:
 
         if (getenv("TXVC_INSTR_ONLY")) {
           char* instr_only_flag = getenv("TXVC_INSTR_ONLY");
+          std::cout << "found instruction only flag" << std::endl;
           if (strcmp(instr_only_flag, "true") == 0) {
             enable_instr_only = true;
           }
@@ -817,6 +906,7 @@ public:
 
         if (getenv("TXVC_DATA_ONLY")) {
           char* data_only_flag = getenv("TXVC_DATA_ONLY");
+          std::cout << "found data only flag" << std::endl;
           if (strcmp(data_only_flag, "true") == 0) {
             enable_data_only = true;
           }
@@ -888,7 +978,9 @@ public:
     } else {
       std::cout << "TX_SPLIT_CACHE_LEVEL not set." << std::endl;
     }
-
+#elif defined TX_SPLIT_CACHE_WAYS
+    //NUM_WAY -= 1; // Reserve one way for PTEs
+    assert(NUM_WAY > 1); // Need at least 2 ways to split
 #endif
 
 #if defined TX_SPLIT_CACHE

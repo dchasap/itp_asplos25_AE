@@ -39,7 +39,18 @@ default_enviromental_variables = {
 	'TXVC_LATENCY': "0",
 	'TXVC_NUM_SET': "8",
 	'TXVC_NUM_WAY': "8",
+	'TXVC_SET_INDEXER': "default",
 	'TXVC_REP_POLICY': "lru",
+	'TXVC_REP_PTE_THRESHOLD': "0",
+	'TXVC_REP_EVICT_LEAF_NODES': "true",
+	'TXVC_REP_DECAY': '1',
+	'TXVC_REP_HALVE_PERIOD': '1000000',
+	'TXVC_REP_ALLOWED_FREQ_DELTA': "10",
+	'TXVC_REP_THRESHOLD': "0.5",
+	'TXVC_REP_WINDOW_SIZE': "1000",
+	'TXVC_REP_PC_RESET_INTERVAL': "1000000",
+	'TXVC_PACIPV_DEMAND_VECTOR_FILE': "srrip_vectors.ipc",
+	'TXVC_PACIPV_DEMAND_VECTOR_IDX': "0",
 	'TXVC_INSTR_ONLY': "false",
 	'TXVC_DATA_ONLY': "false",
 	'TXVC_CACHE_FILTERING': "false",
@@ -64,7 +75,18 @@ confnames_to_envars = {
 	'ooo_cpu.enable_txvc': 'ENABLE_TXVC',
 	'txvc.sets': 'TXVC_NUM_SET',
 	'txvc.ways': 'TXVC_NUM_WAY',
+	'txvc.set_indexer': 'TXVC_SET_INDEXER',
 	'txvc.replacement': 'TXVC_REP_POLICY',
+	'txvc.replacement_pte_threshold': 'TXVC_REP_PTE_THRESHOLD',
+	'txvc.replacement_evict_leaf_nodes': 'TXVC_REP_EVICT_LEAF_NODES',
+	'txvc.replacement_allowed_freq_delta': 'TXVC_REP_ALLOWED_FREQ_DELTA',
+	'txvc.replacement_decay': 'TXVC_REP_DECAY',
+	'txvc.halve_period': 'TXVC_REP_HALVE_PERIOD',
+	'txvc.replacement_threshold': 'TXVC_REP_THRESHOLD',
+	'txvc.replacement_window_size': 'TXVC_REP_WINDOW_SIZE',
+	'txvc.replacement_pc_reset_interval': 'TXVC_REP_PC_RESET_INTERVAL',
+	'txvc.pacipv_demand_vector_file': 'TXVC_PACIPV_DEMAND_VECTOR_FILE',
+	'txvc.pacipv_demand_vector_idx': 'TXVC_PACIPV_DEMAND_VECTOR_IDX',
 	'txvc.instr_only': 'TXVC_INSTR_ONLY',
 	'txvc.data_only': 'TXVC_DATA_ONLY',
 	'txvc.cache_filtering': 'TXVC_CACHE_FILTERING',
@@ -92,7 +114,11 @@ cpu_json_parameters = []
 cpu_env_parameters = [ 'enable_txvc' ]
 
 cache_json_parameters = [ 'sets', 'ways', 'prefetcher', 'replacement', 'force_hit' ]
-cache_env_parameters = [ 	'sets', 'ways', 'replacement', 
+cache_env_parameters = [ 	'sets', 'ways', 'set_indexer',
+							'replacement', 'replacement_pte_threshold', 'replacement_evict_leaf_nodes', 
+							'replacement_allowed_freq_delta', 'replacement_decay', 'halve_period',
+							'replacement_threshold', 'replacement_window_size', 'replacement_pc_reset_interval',
+							'pacipv_demand_vector_file', 'pacipv_demand_vector_idx',
 							'cache_filtering', 'cache_filter', 'level', 'filter_mem_trace_path',
 							'dbpred_cntr_size', 'dbpred_threshold', 'dbpred_use_bias',
 							'filter_cleanup_interval', 'filter_top_n_factor', 'filter_frequency_threshold', 
@@ -280,34 +306,35 @@ def plot_experimental_data(config):
 	exp_name = config['EXPERIMENT']['name']
 	figures_dir = config['BASE']['FIGURES_DIR'] + "/" + exp_name
 	plot_name = config['PLOTTING']['plot_name']
-	plot_type = config['PLOTTING']['plot_type']
 	file_type = config['PLOTTING']['file_type']
-	workload_name = config['EXPERIMENT']['workload']
-               
+	plots = config['PLOTTING']['plot_type'].replace(" ", "").split(",")
+
+	workload_name = config['EXPERIMENT']['workload']             
 	simulations = config['EXPERIMENT']['simulations'].replace(" ", "").split(",")
-	#print(config['EXPERIMENT']['simulations'])
 	
-	csv_data_files = []
-	for sim in simulations:
-		stats_dir = config['BASE']['STATS_DIR'] + "/" + exp_name + "/" + sim
-		
-		if config.has_option(sim, 'include_stats_dir'):
-			csv_data_file = config[sim]['include_stats_dir'] + "/" + workload_name + "_" + sim + ".csv"
+	for plot_type in plots:
+		csv_data_files = []
+		for sim in simulations:
+			stats_dir = config['BASE']['STATS_DIR'] + "/" + exp_name + "/" + sim
+			
+			if config.has_option(sim, 'include_stats_dir'):
+				csv_data_file = config[sim]['include_stats_dir'] + "/" + workload_name + "_" + sim + ".csv"
+			else:
+				csv_data_file = stats_dir + "/" + workload_name + "_" + sim + ".csv"
+			
+			#print(csv_data_file)
+			csv_data_files.append(csv_data_file)
+
+		if config.has_option('PLOTTING', 'alternative_tags'):
+			conf_tags = config['PLOTTING']['alternative_tags'].replace(" ", "").split(",")
 		else:
-			csv_data_file = stats_dir + "/" + workload_name + "_" + sim + ".csv"
-		
-		#print(csv_data_file)
-		csv_data_files.append(csv_data_file)
+			conf_tags = simulations
+		#print(simulations)
 
-	if config.has_option('PLOTTING', 'alternative_tags'):
-		simulations = config['PLOTTING']['alternative_tags'].replace(" ", "").split(",")
-
-	#print(simulations)
-
-	os.system("mkdir -p " + figures_dir)
-	printer.print_default("Plotting " + plot_name + " for " + workload_name)
-	champsim2plot.gen_plot(workload_name, simulations, csv_data_files, plot_name, plot_type, file_type, figures_dir)
-	printer.print_success("Plotting completed successfully")
+		os.system("mkdir -p " + figures_dir)
+		printer.print_default("Plotting " + plot_name + " for " + workload_name)
+		champsim2plot.gen_plot(workload_name, conf_tags, csv_data_files, plot_name, plot_type, file_type, figures_dir, config['PLOTTING'])
+		printer.print_success("Plotting completed successfully")
 
 
 
@@ -319,10 +346,13 @@ def show_experimental_data(config):
 	figures_dir = config['BASE']['FIGURES_DIR'] + "/" + exp_name
 	figure_name = config['PLOTTING']['plot_name']
 	file_type = config['PLOTTING']['file_type']
-	figure_file = figures_dir + "/" + figure_name + "_" + workload + "." + file_type
-	
-	#os.system("evince " + figure_file)
-	subprocess.Popen(["evince", figure_file])
+	plots = config['PLOTTING']['plot_type'].replace(" ", "").split(",")
+
+	for plot_type in plots:
+		
+		figure_file = figures_dir + "/" + figure_name + "_" + plot_type + "_" + workload + "." + file_type
+		#os.system("evince " + figure_file)
+		subprocess.Popen(["evince", figure_file])
 
 
 def build_presentation(config):
