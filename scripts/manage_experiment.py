@@ -51,6 +51,7 @@ default_enviromental_variables = {
 	'TXVC_REP_PC_RESET_INTERVAL': "1000000",
 	'TXVC_PACIPV_DEMAND_VECTOR_FILE': "srrip_vectors.ipc",
 	'TXVC_PACIPV_DEMAND_VECTOR_IDX': "0",
+	'TXVC_LFU_CNTR_BITS': "3",
 	'TXVC_INSTR_ONLY': "false",
 	'TXVC_DATA_ONLY': "false",
 	'TXVC_CACHE_FILTERING': "false",
@@ -87,6 +88,7 @@ confnames_to_envars = {
 	'txvc.replacement_pc_reset_interval': 'TXVC_REP_PC_RESET_INTERVAL',
 	'txvc.pacipv_demand_vector_file': 'TXVC_PACIPV_DEMAND_VECTOR_FILE',
 	'txvc.pacipv_demand_vector_idx': 'TXVC_PACIPV_DEMAND_VECTOR_IDX',
+	'txvc.lfu_cntr_bits': 'TXVC_LFU_CNTR_BITS',
 	'txvc.instr_only': 'TXVC_INSTR_ONLY',
 	'txvc.data_only': 'TXVC_DATA_ONLY',
 	'txvc.cache_filtering': 'TXVC_CACHE_FILTERING',
@@ -118,7 +120,7 @@ cache_env_parameters = [ 	'sets', 'ways', 'set_indexer',
 							'replacement', 'replacement_pte_threshold', 'replacement_evict_leaf_nodes', 
 							'replacement_allowed_freq_delta', 'replacement_decay', 'halve_period',
 							'replacement_threshold', 'replacement_window_size', 'replacement_pc_reset_interval',
-							'pacipv_demand_vector_file', 'pacipv_demand_vector_idx',
+							'pacipv_demand_vector_file', 'pacipv_demand_vector_idx', 'lfu_cntr_bits',
 							'cache_filtering', 'cache_filter', 'level', 'filter_mem_trace_path',
 							'dbpred_cntr_size', 'dbpred_threshold', 'dbpred_use_bias',
 							'filter_cleanup_interval', 'filter_top_n_factor', 'filter_frequency_threshold', 
@@ -329,7 +331,7 @@ def plot_experimental_data(config):
 			conf_tags = config['PLOTTING']['alternative_tags'].replace(" ", "").split(",")
 		else:
 			conf_tags = simulations
-		#print(simulations)
+		print(simulations)
 
 		os.system("mkdir -p " + figures_dir)
 		printer.print_default("Plotting " + plot_name + " for " + workload_name)

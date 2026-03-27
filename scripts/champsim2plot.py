@@ -82,7 +82,7 @@ def gen_plot(benchsuite, _tags, data_files, figure_name, figure_type, file_type,
 		input_baseline_files = []
 		tags = []
 		i = 0
-		#print(_tags)
+		print(_tags)
 		for file in data_files:
 			if "BASELINE" in file:
 				input_baseline_files.append(file)

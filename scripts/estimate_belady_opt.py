@@ -724,6 +724,7 @@ def learn_pacipv_vectors(num_sets, num_ways, trace_loaders, max_rrpv=3):
         belady_rates.append(simulate_opt(num_sets, num_ways, trace_entries_to_ptes(trace)))
         del trace
 
+    print(best_ipv)
     return {
         'ipv_vec': tuple(best_ipv),
         'max_rrpv': max_rrpv,

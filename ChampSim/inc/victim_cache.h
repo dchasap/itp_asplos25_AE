@@ -135,11 +135,11 @@ class LFU : public ReplacementPolicy
       std::cout << "\tNumber of sets: " << num_set << std::endl;
       std::cout << "\tNumber of ways: " << num_way << std::endl;
       // Read counter bits from environment variable
-      const char* bits_env = getenv("TXVC_REP_LFU_BITS");
+      const char* bits_env = getenv("TXVC_LFU_CNTR_BITS");
       if (bits_env != nullptr) {
         lfu_counter_bits = std::stoi(bits_env);
         if (lfu_counter_bits == 0 || lfu_counter_bits > 64) {
-          std::cerr << "TXVC_REP_LFU_BITS invalid or out of range (1-64), using default 8 bits." << std::endl;
+          std::cerr << "TXVC_LFU_CNTR_BITS invalid or out of range (1-64), using default 8 bits." << std::endl;
           lfu_counter_bits = 8;
         }
       } else {
