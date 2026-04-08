@@ -503,6 +503,9 @@ public:
             } else if (strcmp(dbpred_name, "beladyOPT-set") == 0) {
               std::cout << "\tTXVC: Using BeladyOPT per set filter" << std::endl;
               cacheFilter = new BeladyOPTSetFilter(num_set, num_way, offset_bits);
+            } else if (strcmp(dbpred_name, "reuse-distance") == 0) {
+              std::cout << "\tTXVC: Using reuse-distance filter" << std::endl;
+              cacheFilter = new ReuseDistanceFilter(num_set, num_way, true);
             } else {
               std::cerr << "TXVC: Unknown cache filter " << dbpred_name << "!" << std::endl;
               exit(1);

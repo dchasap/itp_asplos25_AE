@@ -14,9 +14,13 @@ def export_env_variables(benchmark, sim_name, dump_dir, enviromental_variables):
 
   for var in enviromental_variables:
     if (var == "TXVC_MEMORY_TRACE_PATH"):
-      export_cmd += "export " + var + "=" + dump_dir + "/" + benchmark + "_" + sim_name + "_txvc_mem_trace.csv\n"
+      export_cmd += "export " + var + "=" + dump_dir + "/" + benchmark + "_txvc_mem_trace.csv\n"
     elif (var == "CACHE_FILTER_MEMORY_TRACE_PATH"):
-      export_cmd += "export " + var + "=" + enviromental_variables[var] + "/" + benchmark + "_txvc_mem_trace.csv\n"
+      export_cmd += "export " + var + "=" + enviromental_variables[var] + "/" + benchmark + "_TXVC-64KB_txvc_mem_trace.csv\n"
+    elif (var == "CACHE_FILTER_REUSE_PROFILE_LOG_PATH"):
+      export_cmd += "export " + var + "=" + dump_dir + "/"  +  benchmark + "_txvc_cache_filter_reuse_profile_log.csv\n"
+    elif (var == "CACHE_FILTER_REUSE_BYPASS_LOG_PATH"):
+      export_cmd += "export " + var + "=" + dump_dir + "/"  +  benchmark + "_txvc_cache_filter_reuse_bypass_log.csv\n"
     elif (var == "REUSE_DIST_FILENAME_PREFIX"):
       export_cmd += "export REUSE_DIST_FILENAME_PREFIX=" + dump_dir + "/" + benchmark + "_" + sim_name + "_reuse_dist\n"
     elif (var == "ACCESS_FREQ_STATS_FILENAME_PREFIX"):

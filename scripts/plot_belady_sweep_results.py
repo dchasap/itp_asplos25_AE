@@ -29,6 +29,18 @@ def parse_policy_list(policy_str):
     return out
 
 
+def uses_prob_rank(selected_policies):
+    return 'prob_rank' in selected_policies
+
+
+def uses_pacipv(selected_policies):
+    return 'pacipv' in selected_policies or 'pacipv_lfu' in selected_policies
+
+
+def uses_training(selected_policies):
+    return uses_prob_rank(selected_policies) or uses_pacipv(selected_policies)
+
+
 def policy_rate_key(policy):
     return {
         'belady': 'avg_belady_rate',
@@ -66,31 +78,54 @@ def frac_tag(value):
     return f"{value:.3f}".replace('.', 'p')
 
 
-OUTPUT_RE = re.compile(
-    r"^cache_miss_rates_"
-    r"train\.(?P<train_workload>.+?)_"
+CORE_OUTPUT_RE = re.compile(
+    r"^(?:train\.(?P<train_workload>.+?)_)?"
     r"eval\.(?P<eval_workload>.+?)_"
     r"s(?P<num_sets>\d+)_"
-    r"w(?P<num_ways>\d+)_"
-    r"scope\.(?P<rank_model_scope>.+?)_"
-    r"topk\.(?P<prob_top_k>\d+)_"
-    r"sampling\.(?P<rank_sampling>.+?)_"
-    r"frac\.(?P<train_fraction>[0-9]+p[0-9]+)_"
-    r"seed\.(?P<seed>\d+)\.csv$"
+    r"w(?P<num_ways>\d+)$"
 )
+
+SUFFIX_PATTERNS = [
+    ('seed', re.compile(r'_seed\.(?P<value>\d+)$'), int),
+    ('train_fraction', re.compile(r'_frac\.(?P<value>[0-9]+p[0-9]+)$'), lambda value: float(value.replace('p', '.'))),
+    ('rank_sampling', re.compile(r'_sampling\.(?P<value>.+?)$'), str),
+    ('prob_top_k', re.compile(r'_topk\.(?P<value>\d+)$'), int),
+    ('rank_model_scope', re.compile(r'_scope\.(?P<value>.+?)$'), str),
+]
 
 
 def parse_output_cfg_from_name(filename):
-    m = OUTPUT_RE.match(filename)
+    if not filename.startswith('cache_miss_rates_') or not filename.endswith('.csv'):
+        return None
+
+    stem = filename[:-4]
+    remainder = stem[len('cache_miss_rates_'):]
+    cfg = {
+        'train_workload': None,
+        'eval_workload': None,
+        'num_sets': None,
+        'num_ways': None,
+        'rank_model_scope': None,
+        'prob_top_k': None,
+        'rank_sampling': None,
+        'train_fraction': None,
+        'seed': None,
+    }
+
+    for key, pattern, cast in SUFFIX_PATTERNS:
+        match = pattern.search(remainder)
+        if not match:
+            continue
+        cfg[key] = cast(match.group('value'))
+        remainder = remainder[:match.start()]
+
+    m = CORE_OUTPUT_RE.match(remainder)
     if not m:
         return None
 
-    cfg = m.groupdict()
+    cfg.update(m.groupdict())
     cfg['num_sets'] = int(cfg['num_sets'])
     cfg['num_ways'] = int(cfg['num_ways'])
-    cfg['prob_top_k'] = int(cfg['prob_top_k'])
-    cfg['seed'] = int(cfg['seed'])
-    cfg['train_fraction'] = float(cfg['train_fraction'].replace('p', '.'))
     return cfg
 
 
@@ -128,7 +163,7 @@ def short_cfg_label(cfg):
         ('train_fraction', 'f'),
         ('seed', 'seed'),
     ]
-    return '|'.join(f"{short}={cfg[k]}" for (k, short) in keys if k in cfg)
+    return '|'.join(f"{short}={cfg[k]}" for (k, short) in keys if k in cfg and cfg[k] is not None)
 
 
 def write_summary_csv(path, rows):
@@ -343,9 +378,9 @@ def main():
                         help='Accepted for CLI compatibility; not used for CSV lookup naming.')
 
     parser.add_argument('--results-dir', default='.', help='Directory containing output CSV files')
-    parser.add_argument('--summary-csv', default='belady_plot_lookup_summary.csv',
+    parser.add_argument('--summary-csv', default='data/belady_sweep/belady_plot_lookup_summary.csv',
                         help='Summary CSV for discovered/missing results')
-    parser.add_argument('--plots-dir', default='figures/belady_sweep', help='Output directory for plots')
+    parser.add_argument('--plots-dir', default='figures/belady_sweep', help='Output directory for plots (figures only)')
     parser.add_argument('--plot-prefix', default='belady_lookup', help='Filename prefix for generated plots')
     parser.add_argument('--plot-file-format', choices=['png', 'pdf'], default='png',
                         help='File format for generated plots')
@@ -381,6 +416,12 @@ def main():
         'seed': seeds,
     }
 
+    active_filter_keys = ['eval_workload', 'num_sets', 'num_ways']
+    if uses_training(selected_policies):
+        active_filter_keys.extend(['train_workload', 'train_fraction'])
+    if uses_prob_rank(selected_policies):
+        active_filter_keys.extend(['rank_model_scope', 'prob_top_k', 'rank_sampling', 'seed'])
+
     names_for_title = {
         'train_workload': 'Train Workload',
         'eval_workload': 'Eval Workload',
@@ -393,8 +434,8 @@ def main():
         'seed': 'Seed',
     }
     provided_optional_keys = [
-        k for k in ['train_workload', 'eval_workload', 'rank_model_scope', 'prob_top_k', 'rank_sampling', 'train_fraction', 'seed']
-        if provided_filters[k] is not None
+        k for k in active_filter_keys
+        if k not in ('num_sets', 'num_ways') and provided_filters.get(k) is not None
     ]
 
     rows = []
@@ -410,6 +451,8 @@ def main():
 
         keep = True
         for k, allowed in provided_filters.items():
+            if k not in active_filter_keys:
+                continue
             if allowed is None:
                 continue
             if cfg[k] not in allowed:
@@ -457,6 +500,8 @@ def main():
 
     dynamic_suffix_parts = []
     for k in ['train_workload', 'eval_workload', 'num_sets', 'num_ways', 'rank_model_scope', 'prob_top_k', 'rank_sampling', 'train_fraction', 'seed']:
+        if k not in active_filter_keys:
+            continue
         allowed = provided_filters[k]
         if allowed is None:
             continue
@@ -471,7 +516,7 @@ def main():
     if not provided_optional_keys:
         plot_paths = render_policy_only_plot(rows, args.plots_dir, dynamic_prefix, selected_policies, args.plot_file_format)
     else:
-        feature_keys = [k for k in provided_filters if provided_filters[k] is not None]
+        feature_keys = [k for k in active_filter_keys if provided_filters.get(k) is not None]
         plot_paths = render_plots(rows, args.plots_dir, dynamic_prefix, baseline_cfg, selected_policies, feature_keys, args.plot_file_format)
 
     # If no feature varies (or all feature plots are skipped), always emit

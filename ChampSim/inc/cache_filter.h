@@ -8,6 +8,11 @@
 #include <algorithm>
 #include <vector>
 #include <set>
+#include <map>
+#include <fstream>
+#include <string>
+#include <limits>
+#include <cstdint>
 
 #include "champsim.h"
 #include "memory_trace.h"
@@ -836,6 +841,283 @@ class OracleMFUFilter : public CacheFilter {
         std::cout << "FreqFilter: total predictions: " << total_predictions << std::endl;
         std::cout << "FreqFilter: total bypasses: " << total_bypasses << std::endl;
       }
+    }
+};
+
+class ReuseDistanceFilter : public CacheFilter {
+
+  private:
+    struct ReuseProfile {
+      uint64_t sample_count = 0;
+      uint64_t long_count = 0;
+      uint64_t inf_count = 0;
+      uint64_t median = 0;
+      double long_ratio = 0.0;
+    };
+
+    uint64_t reuse_threshold = 0;
+    uint64_t min_samples = 1;
+    double long_ratio_threshold = 1.0;
+
+    std::map<uint64_t, ReuseProfile> profile_by_pte;
+
+    uint64_t total_predictions = 0;
+    uint64_t total_bypasses = 0;
+    uint64_t trained_unique_ptes = 0;
+    uint64_t trained_total_samples = 0;
+
+    static uint64_t parse_u64_env_or_default(const char* key, uint64_t default_value)
+    {
+      const char* raw = std::getenv(key);
+      if (raw == nullptr)
+        return default_value;
+      try {
+        return std::stoull(std::string(raw), nullptr, 0);
+      } catch (...) {
+        std::cerr << "CACHE_FILTER: invalid value for " << key << "='" << raw
+                  << "', using default " << default_value << std::endl;
+        return default_value;
+      }
+    }
+
+    static double parse_double_env_or_default(const char* key, double default_value)
+    {
+      const char* raw = std::getenv(key);
+      if (raw == nullptr)
+        return default_value;
+      try {
+        return std::stod(std::string(raw));
+      } catch (...) {
+        std::cerr << "CACHE_FILTER: invalid value for " << key << "='" << raw
+                  << "', using default " << default_value << std::endl;
+        return default_value;
+      }
+    }
+
+    static uint64_t parse_address(const std::string& line)
+    {
+      return std::stoull(line, nullptr, 0);
+    }
+
+    static std::vector<uint64_t> parse_trace_file(const std::string& trace_path)
+    {
+      std::ifstream in(trace_path);
+      if (!in.is_open()) {
+        std::cerr << "CACHE_FILTER: could not open trace file " << trace_path << std::endl;
+        std::exit(1);
+      }
+
+      std::vector<uint64_t> trace;
+      std::string line;
+      while (std::getline(in, line)) {
+        if (line.empty())
+          continue;
+        trace.push_back(parse_address(line));
+      }
+
+      if (trace.empty()) {
+        std::cerr << "CACHE_FILTER: trace file is empty: " << trace_path << std::endl;
+        std::exit(1);
+      }
+      return trace;
+    }
+
+    static std::map<uint64_t, std::vector<uint64_t>> build_position_map(const std::vector<uint64_t>& trace)
+    {
+      std::map<uint64_t, std::vector<uint64_t>> positions;
+      for (uint64_t i = 0; i < trace.size(); i++)
+        positions[trace[i]].push_back(i);
+      return positions;
+    }
+
+    static uint64_t median_of(std::vector<uint64_t>& values)
+    {
+      if (values.empty())
+        return 0;
+
+      const size_t n = values.size();
+      const size_t mid = n / 2;
+      std::nth_element(values.begin(), values.begin() + mid, values.end());
+      if (n % 2 == 1)
+        return values[mid];
+
+      uint64_t hi = values[mid];
+      std::nth_element(values.begin(), values.begin() + mid - 1, values.end());
+      uint64_t lo = values[mid - 1];
+      return (lo / 2) + (hi / 2) + ((lo & 1) & (hi & 1));
+    }
+
+    void build_profiles(const std::vector<uint64_t>& trace)
+    {
+      auto positions = build_position_map(trace);
+
+      for (const auto& kv : positions) {
+        const uint64_t pte = kv.first;
+        const std::vector<uint64_t>& pos = kv.second;
+        if (pos.empty())
+          continue;
+
+        std::vector<uint64_t> finite_reuses;
+        finite_reuses.reserve(pos.size() > 0 ? pos.size() - 1 : 0);
+
+        uint64_t long_count = 0;
+        uint64_t inf_count = 0;
+
+        for (size_t i = 0; i < pos.size(); i++) {
+          if (i + 1 < pos.size()) {
+            uint64_t rd = pos[i + 1] - pos[i];
+            finite_reuses.push_back(rd);
+            if (rd >= reuse_threshold)
+              long_count++;
+          } else {
+            // Last appearance has no next-use: treat as infinite reuse distance.
+            inf_count++;
+            long_count++;
+          }
+        }
+
+        ReuseProfile prof;
+        prof.sample_count = pos.size();
+        prof.long_count = long_count;
+        prof.inf_count = inf_count;
+        prof.median = median_of(finite_reuses);
+        prof.long_ratio = prof.sample_count > 0 ? static_cast<double>(prof.long_count) / static_cast<double>(prof.sample_count) : 0.0;
+
+        profile_by_pte[pte] = prof;
+        trained_total_samples += prof.sample_count;
+      }
+
+      trained_unique_ptes = profile_by_pte.size();
+    }
+
+    bool should_bypass(const ReuseProfile& prof) const
+    {
+      // One-shot: seen exactly once → reuse distance is infinite by definition → always DOA.
+      if (prof.sample_count == 1)
+        return true;
+      if (prof.sample_count < min_samples)
+        return false;
+      if (prof.long_ratio >= long_ratio_threshold)
+        return true;
+      if (prof.median >= reuse_threshold)
+        return true;
+      return false;
+    }
+
+    void dump_profiles_csv(const std::string& output_path) const
+    {
+      std::ofstream out(output_path);
+      if (!out.is_open()) {
+        std::cerr << "CACHE_FILTER: could not open reuse profile log file " << output_path << std::endl;
+        std::exit(1);
+      }
+
+      out << "pte,sample_count,long_count,inf_count,median_reuse_distance,long_ratio,bypass\n";
+      for (const auto& kv : profile_by_pte) {
+        const uint64_t pte = kv.first;
+        const ReuseProfile& prof = kv.second;
+        out << pte << ","
+            << prof.sample_count << ","
+            << prof.long_count << ","
+            << prof.inf_count << ","
+            << prof.median << ","
+            << prof.long_ratio << ","
+            << (should_bypass(prof) ? 1 : 0)
+            << "\n";
+      }
+    }
+
+    void dump_bypassed_ptes(const std::string& output_path) const
+    {
+      std::ofstream out(output_path);
+      if (!out.is_open()) {
+        std::cerr << "CACHE_FILTER: could not open bypassed-pte log file " << output_path << std::endl;
+        std::exit(1);
+      }
+
+      out << "pte\n";
+      for (const auto& kv : profile_by_pte) {
+        const uint64_t pte = kv.first;
+        const ReuseProfile& prof = kv.second;
+        if (should_bypass(prof))
+          out << pte << "\n";
+      }
+    }
+
+  public:
+    ReuseDistanceFilter(uint64_t sets, uint64_t ways, bool _skip_lookups)
+    {
+      num_sets = sets;
+      num_ways = ways;
+      skip_lookups = _skip_lookups;
+
+      // Defaults to cache size in lines for a coarse "won't fit" threshold.
+      reuse_threshold = parse_u64_env_or_default("CACHE_FILTER_REUSE_DISTANCE_THRESHOLD", sets * ways);
+      min_samples = parse_u64_env_or_default("CACHE_FILTER_REUSE_MIN_SAMPLES", 2);
+      long_ratio_threshold = parse_double_env_or_default("CACHE_FILTER_REUSE_LONG_RATIO", 0.7);
+
+      const char* trace_env = std::getenv("CACHE_FILTER_MEMORY_TRACE_PATH");
+
+      if (trace_env == nullptr) {
+        std::cerr << "CACHE_FILTER_MEMORY_TRACE_PATH not set!" << std::endl;
+        std::exit(1);
+      }
+
+      std::string trace_path(trace_env);
+      std::cout << "CACHE_FILTER: Building reuse distance profiles from trace..." << std::endl;
+      std::vector<uint64_t> trace = parse_trace_file(trace_path);
+      build_profiles(trace);
+
+      const char* profile_log_env = std::getenv("CACHE_FILTER_REUSE_PROFILE_LOG_PATH");
+      if (profile_log_env != nullptr) {
+        dump_profiles_csv(std::string(profile_log_env));
+        std::cout << "\tProfile log: " << profile_log_env << std::endl;
+      } else {
+        std::cout << "\tCACHE_FILTER_REUSE_PROFILE_LOG_PATH not set (profile log disabled)" << std::endl;
+      }
+
+      const char* bypass_log_env = std::getenv("CACHE_FILTER_REUSE_BYPASS_LOG_PATH");
+      if (bypass_log_env != nullptr) {
+        dump_bypassed_ptes(std::string(bypass_log_env));
+        std::cout << "\tBypass-only log: " << bypass_log_env << std::endl;
+      } else {
+        std::cout << "\tCACHE_FILTER_REUSE_BYPASS_LOG_PATH not set (bypass-only log disabled)" << std::endl;
+      }
+
+      std::cout << "CACHE_FILTER: ReuseDistanceFilter" << std::endl;
+      std::cout << "\tTrace: " << trace_path << std::endl;
+      std::cout << "\tReuse threshold: " << reuse_threshold << std::endl;
+      std::cout << "\tMin samples: " << min_samples << std::endl;
+      std::cout << "\tLong-ratio threshold: " << long_ratio_threshold << std::endl;
+      std::cout << "\tTrained PTEs: " << trained_unique_ptes
+                << " (samples=" << trained_total_samples << ")" << std::endl;
+    }
+
+    virtual bool predict(uint64_t address, bool, uint64_t)
+    {
+      total_predictions++;
+      auto it = profile_by_pte.find(address);
+      if (it == profile_by_pte.end())
+        return false;
+
+      bool bypass = should_bypass(it->second);
+      if (bypass)
+        total_bypasses++;
+      return bypass;
+    }
+
+    virtual void update(uint64_t, bool, bool, uint64_t)
+    {
+      // Static trace-informed filter: no online state updates.
+    }
+
+    virtual void print_stats()
+    {
+      std::cout << "ReuseDistanceFilter: predictions=" << total_predictions
+                << " bypasses=" << total_bypasses;
+      if (total_predictions > 0)
+        std::cout << " (" << (100.0 * static_cast<double>(total_bypasses) / static_cast<double>(total_predictions)) << "%)";
+      std::cout << std::endl;
     }
 };
 

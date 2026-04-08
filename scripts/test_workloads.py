@@ -1,7 +1,7 @@
 from workload import Workload
 
 TEST_QUALCOMM = [
-  "srv105_ap.champsimtrace.xz",
+  "srv100_ap.champsimtrace.xz",
 ]
 
 class TEST(Workload):
@@ -9,7 +9,7 @@ class TEST(Workload):
   def __init__(self):
 
     self.benchmarks = TEST_QUALCOMM
-    self.name = "srv105"
+    self.name = "srv100_ap"
     self.benchmarks_dir = "qualcomm_srv"
 
     super().__init__()

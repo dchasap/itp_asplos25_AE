@@ -109,9 +109,10 @@ def gen_plot(benchsuite, _tags, data_files, figure_name, figure_type, file_type,
 
 		data_df = stats.compute_variation(baseline_df, data_df, tags, 'IPC', 'IPC_IMPROVEMENT')
 
-		#df = data_df
-		#data_df = df.sort_values('IPC_IMPROVEMENT', ascending=False).head(100)
-		#print(data_df)
+		medians_df = data_df.groupby('tag', as_index=False)['IPC_IMPROVEMENT'].median()
+
+		top10 = medians_df.sort_values('IPC_IMPROVEMENT', ascending=False).head(10)
+		print(top10)
 
 		#for bench in data_df['benchmarks'].to_list():
 		#	print("\"" + bench + ".champsimtrace.xz\",")

@@ -14,23 +14,23 @@ import workloads
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--train-workload', dest='train_workload', required=True,
+parser.add_argument('--train-workload', dest='train_workload', default=None,
                     help="Workload used to train the Belady rank model.")
 parser.add_argument('--eval-workload', dest='eval_workload', required=True,
                     help="Workload to evaluate the replacement policies on.")
 parser.add_argument('--num-sets', dest='num_sets', required=True, default=64, help="Number of sets in the cache.")
 parser.add_argument('--num-ways', dest='num_ways', required=True, default=16, help="Number of ways in the cache.")
-parser.add_argument('--prob-top-k', dest='prob_top_k', type=int, default=3,
+parser.add_argument('--prob-top-k', dest='prob_top_k', type=int, default=None,
                     help="Use only top-k most frequent Belady ranks for probabilistic policy (0 means all).")
 parser.add_argument('--rank-model-scope', dest='rank_model_scope', choices=['per-set', 'global'],
-                    default='per-set', help="Train rank-frequency model per set or globally.")
-parser.add_argument('--seed', dest='seed', type=int, default=1,
+                default=None, help="Train rank-frequency model per set or globally.")
+parser.add_argument('--seed', dest='seed', type=int, default=None,
                     help="Base random seed for probabilistic replacement simulation.")
 parser.add_argument('--rank-sampling', dest='rank_sampling',
-                    choices=['weighted', 'uniform-topk'], default='weighted',
+                choices=['weighted', 'uniform-topk'], default=None,
                     help="Rank sampling mode: 'weighted' uses Belady frequency counts; "
                          "'uniform-topk' samples equally from the top-k candidates.")
-parser.add_argument('--train-fraction', dest='train_fraction', type=float, default=1.0,
+parser.add_argument('--train-fraction', dest='train_fraction', type=float, default=None,
                     help="Fraction of each training trace to use (0.0-1.0). E.g. 0.1 uses first 10%%.")
 parser.add_argument('--rank-model-file', dest='rank_model_file', default=None,
                     help="Path to a rank model CSV. If the file exists it is loaded (skipping "
@@ -58,7 +58,7 @@ parser.add_argument('--pacipv-max-rrpv', dest='pacipv_max_rrpv', type=int, defau
                     help="Maximum RRPV value used for PACIPV vector search.")
 parser.add_argument('--pacipv-learn-prefetch', dest='pacipv_learn_prefetch', action='store_true',
                     help="Also learn a separate prefetch PACIPV vector (requires --trace-has-prefetch).")
-parser.add_argument('--pacipv-output-file', dest='pacipv_output_file', default='pacipv_vectors.txt',
+parser.add_argument('--pacipv-output-file', dest='pacipv_output_file', default=None,
                     help="Output text file with learned PACIPV vectors and ready-to-use env exports.")
 parser.add_argument('--pacipv-train-max-accesses', dest='pacipv_train_max_accesses', type=int, default=0,
                     help="Optional cap of accesses per training benchmark for PACIPV vector learning (0 = no cap).")
@@ -770,11 +770,62 @@ def parse_policy_list(policy_str):
     return selected
 
 
+def uses_prob_rank(selected_policies):
+    return 'prob_rank' in selected_policies
+
+
+def uses_pacipv(selected_policies):
+    return 'pacipv' in selected_policies or 'pacipv_lfu' in selected_policies
+
+
+def uses_training(selected_policies):
+    return uses_prob_rank(selected_policies) or uses_pacipv(selected_policies)
+
+
+def resolve_runtime_options(args, selected_policies):
+    if uses_training(selected_policies) and not args.train_workload:
+        raise ValueError("--train-workload is required when prob_rank, pacipv, or pacipv_lfu is enabled.")
+
+    return {
+        'train_fraction': args.train_fraction if uses_training(selected_policies) and args.train_fraction is not None else (1.0 if uses_training(selected_policies) else None),
+        'rank_model_scope': args.rank_model_scope if uses_prob_rank(selected_policies) and args.rank_model_scope is not None else ('per-set' if uses_prob_rank(selected_policies) else None),
+        'prob_top_k': args.prob_top_k if uses_prob_rank(selected_policies) and args.prob_top_k is not None else (3 if uses_prob_rank(selected_policies) else None),
+        'rank_sampling': args.rank_sampling if uses_prob_rank(selected_policies) and args.rank_sampling is not None else ('weighted' if uses_prob_rank(selected_policies) else None),
+        'seed': args.seed if uses_prob_rank(selected_policies) and args.seed is not None else (1 if uses_prob_rank(selected_policies) else None),
+        'pacipv_output_file': (args.pacipv_output_file or 'pacipv_vectors.txt') if uses_pacipv(selected_policies) else None,
+    }
+
+
+def build_output_csv_name(args, selected_policies, runtime_options):
+    # All output CSVs go to data/belady_sweep/
+    parts = ['data', 'belady_sweep', 'cache_miss_rates']
+
+    if uses_training(selected_policies) and args.train_workload is not None:
+        parts.append(f"train.{args.train_workload}")
+
+    parts.append(f"eval.{args.eval_workload}")
+    parts.append(f"s{args.num_sets}")
+    parts.append(f"w{args.num_ways}")
+
+    if uses_prob_rank(selected_policies) and args.rank_model_scope is not None:
+        parts.append(f"scope.{runtime_options['rank_model_scope']}")
+    if uses_prob_rank(selected_policies) and args.prob_top_k is not None:
+        parts.append(f"topk.{runtime_options['prob_top_k']}")
+    if uses_prob_rank(selected_policies) and args.rank_sampling is not None:
+        parts.append(f"sampling.{runtime_options['rank_sampling']}")
+    if uses_training(selected_policies) and args.train_fraction is not None:
+        frac_tag = f"{runtime_options['train_fraction']:.3f}".replace('.', 'p')
+        parts.append(f"frac.{frac_tag}")
+    if uses_prob_rank(selected_policies) and args.seed is not None:
+        parts.append(f"seed.{runtime_options['seed']}")
+
+    return '_'.join(parts) + '.csv'
+
+
 if __name__ == "__main__":
     args = parser.parse_args()
     num_sets = int(args.num_sets)
     num_ways = int(args.num_ways)
-    train_fraction = max(0.0, min(1.0, args.train_fraction))
 
     selected_policies = parse_policy_list(args.policies)
     run_belady = 'belady' in selected_policies
@@ -784,12 +835,22 @@ if __name__ == "__main__":
     run_pacipv = 'pacipv' in selected_policies
     run_pacipv_lfu = 'pacipv_lfu' in selected_policies
 
-    train_workload = workloads.Workloads(args.train_workload)
-    train_benchmarks = train_workload.get_benchmark_names()
+    runtime_options = resolve_runtime_options(args, selected_policies)
+    train_fraction = runtime_options['train_fraction']
+    rank_model_scope = runtime_options['rank_model_scope']
+    prob_top_k = runtime_options['prob_top_k']
+    rank_sampling = runtime_options['rank_sampling']
+    seed = runtime_options['seed']
+    pacipv_output_file = runtime_options['pacipv_output_file']
+
+    train_benchmarks = []
+    if uses_training(selected_policies):
+        train_workload = workloads.Workloads(args.train_workload)
+        train_benchmarks = train_workload.get_benchmark_names()
     eval_workload = workloads.Workloads(args.eval_workload)
     eval_benchmarks = eval_workload.get_benchmark_names()
 
-    uniform_sampling = (args.rank_sampling == 'uniform-topk')
+    uniform_sampling = (rank_sampling == 'uniform-topk') if run_prob_rank else False
     # Demand-IPV-only learning mode.
     if args.pacipv_learn_prefetch:
         print("Ignoring --pacipv-learn-prefetch: sweep is configured to learn demand IPV only.")
@@ -807,14 +868,17 @@ if __name__ == "__main__":
     train_per_set_counts = [defaultdict(int) for _ in range(num_sets)]
     train_global_counts = defaultdict(int)
     rank_model_path = args.rank_model_file
+    # Always store rank model in data/belady_sweep/ if not absolute
+    if rank_model_path and not os.path.isabs(rank_model_path) and not rank_model_path.startswith('data/belady_sweep/'):
+        rank_model_path = os.path.join('data', 'belady_sweep', os.path.basename(rank_model_path))
     if run_prob_rank:
         if rank_model_path and os.path.exists(rank_model_path):
             train_per_set_counts, train_global_counts = load_rank_model(rank_model_path, num_sets)
         else:
             print(
                 f"Training probabilistic rank model on '{args.train_workload}' "
-                f"(fraction={train_fraction:.2f}, scope={args.rank_model_scope}, "
-                f"top_k={args.prob_top_k}, sampling={args.rank_sampling})"
+                f"(fraction={train_fraction:.2f}, scope={rank_model_scope}, "
+                f"top_k={prob_top_k}, sampling={rank_sampling})"
             )
 
             for benchmark in train_benchmarks:
@@ -831,7 +895,7 @@ if __name__ == "__main__":
                     trace = trace[:max(1, int(len(trace) * train_fraction))]
 
                 per_set_counts, global_counts = collect_belady_rank_counts(num_sets, num_ways, trace)
-                if args.rank_model_scope == 'per-set':
+                if rank_model_scope == 'per-set':
                     for set_id in range(num_sets):
                         for rank, cnt in per_set_counts[set_id].items():
                             train_per_set_counts[set_id][rank] += cnt
@@ -882,7 +946,7 @@ if __name__ == "__main__":
             trace_loaders,
             max_rrpv=args.pacipv_max_rrpv,
         )
-        save_pacipv_vectors(args.pacipv_output_file, pacipv_result)
+        save_pacipv_vectors(pacipv_output_file, pacipv_result)
         print(
             f"Learned PACIPV vector {pacipv_result['ipv_vec']} "
             f"from {pacipv_result['num_candidates']} candidates"
@@ -920,7 +984,7 @@ if __name__ == "__main__":
     # might include PC, page-level bits, frequency, etc.
     feature_fn = lambda pte: pte
 
-    per_set_model = train_per_set_counts if args.rank_model_scope == 'per-set' else None
+    per_set_model = train_per_set_counts if rank_model_scope == 'per-set' else None
 
     for bench_idx, benchmark in enumerate(eval_benchmarks):
         print(f"Processing benchmark: {benchmark}")
@@ -967,8 +1031,8 @@ if __name__ == "__main__":
                 trace,
                 per_set_model,
                 train_global_counts,
-                top_k=args.prob_top_k,
-                seed=args.seed + bench_idx,
+                top_k=prob_top_k,
+                seed=seed + bench_idx,
                 verbose=True,
                 uniform=uniform_sampling,
             )
@@ -1036,12 +1100,7 @@ if __name__ == "__main__":
         gaps = [p - b for p, b in zip(results['prob_rank_rate'], results['belady_rate'])]
         print(f"Avg gap (prob-rank - belady): {safe_mean(gaps):.4f}")
 
-    frac_tag = f"{train_fraction:.3f}".replace('.', 'p')
-    output_csv = (
-        f"cache_miss_rates_train.{args.train_workload}_eval.{args.eval_workload}_"
-        f"s{args.num_sets}_w{args.num_ways}_scope.{args.rank_model_scope}_"
-        f"topk.{args.prob_top_k}_sampling.{args.rank_sampling}_frac.{frac_tag}_seed.{args.seed}.csv"
-    )
+    output_csv = build_output_csv_name(args, selected_policies, runtime_options)
     with open(output_csv, 'w', newline='') as f:
         writer = csv.writer(f)
         metric_columns = [metric_by_policy[p] for p in selected_policies]
