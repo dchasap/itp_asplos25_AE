@@ -993,7 +993,7 @@ class ReuseDistanceFilter : public CacheFilter {
     bool should_bypass(const ReuseProfile& prof) const
     {
       // One-shot: seen exactly once → reuse distance is infinite by definition → always DOA.
-      if (prof.sample_count == 1)
+      if (prof.sample_count <= 4)
         return true;
       if (prof.sample_count < min_samples)
         return false;
