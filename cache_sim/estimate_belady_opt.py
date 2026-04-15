@@ -1,0 +1,603 @@
+#!/usr/bin/env python3
+
+import argparse
+import csv
+from collections import defaultdict
+import os
+import sys
+
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.abspath(os.path.join(CURRENT_DIR, '..'))
+SCRIPTS_DIR = os.path.join(PROJECT_ROOT, 'scripts')
+
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+if SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, SCRIPTS_DIR)
+
+import workloads
+
+from cache_sim.belady import (
+    build_belady_table,
+    load_belady_table,
+    save_belady_table,
+    simulate_belady_table,
+    simulate_opt,
+)
+from cache_sim.constants import CTX_DATA, CTX_INST
+from cache_sim.belady_driven_sampling import (
+    learn_belady_driven_sampling,
+    simulate_belady_driven_sampling,
+)
+from cache_sim.lfu import simulate_lfu_stack
+from cache_sim.pacipv import (
+    learn_pacipv_vectors,
+    save_pacipv_vectors,
+    simulate_pacipv_distribution,
+    simulate_pacipv,
+    simulate_pacipv_lfu,
+)
+from cache_sim.prob_rank import (
+    collect_belady_rank_counts,
+    load_rank_model,
+    save_rank_model,
+    simulate_probabilistic_rank_policy,
+)
+from cache_sim.trace import load_trace_entries, render_trace_path, trace_entries_to_ptes
+from cache_sim.utils import safe_mean
+
+
+
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--train-workload', dest='train_workload', default=None,
+                    help="Workload used to train the Belady rank model.")
+parser.add_argument('--eval-workload', dest='eval_workload', required=True,
+                    help="Workload to evaluate the replacement policies on.")
+parser.add_argument('--num-sets', dest='num_sets', required=True, default=64, help="Number of sets in the cache.")
+parser.add_argument('--num-ways', dest='num_ways', required=True, default=16, help="Number of ways in the cache.")
+parser.add_argument('--prob-top-k', dest='prob_top_k', type=int, default=None,
+                    help="Use only top-k most frequent Belady ranks for probabilistic policy (0 means all).")
+parser.add_argument('--rank-model-scope', dest='rank_model_scope', choices=['per-set', 'global'],
+                default=None, help="Train rank-frequency model per set or globally.")
+parser.add_argument('--seed', dest='seed', type=int, default=None,
+                    help="Base random seed for probabilistic replacement simulation.")
+parser.add_argument('--rank-sampling', dest='rank_sampling',
+                choices=['weighted', 'uniform-topk'], default=None,
+                    help="Rank sampling mode: 'weighted' uses Belady frequency counts; "
+                         "'uniform-topk' samples equally from the top-k candidates.")
+parser.add_argument('--train-fraction', dest='train_fraction', type=float, default=None,
+                    help="Fraction of each training trace to use (0.0-1.0). E.g. 0.1 uses first 10%%.")
+parser.add_argument('--rank-model-file', dest='rank_model_file', default=None,
+                    help="Path to a rank model CSV. If the file exists it is loaded (skipping "
+                         "training); otherwise training runs and the model is saved here.")
+parser.add_argument('--belady-table-dir', dest='belady_table_dir', default=None,
+                    help="Directory for per-benchmark Belady tables (CSV). Each table is "
+                         "auto-loaded if present, otherwise built and saved.")
+parser.add_argument('--train-trace-path-template', dest='train_trace_path_template',
+                default='./data/txvc_mem_access/TXVC-{num_sets}KB/{benchmark}_txvc_mem_trace.csv',
+                help="Template path for training traces. Supports {benchmark} and {num_sets} placeholders.")
+parser.add_argument('--eval-trace-path-template', dest='eval_trace_path_template',
+                default='./data/txvc_mem_access/TXVC-{num_sets}KB/{benchmark}_txvc_mem_trace.csv',
+                help="Template path for evaluation traces. Supports {benchmark} and {num_sets} placeholders.")
+parser.add_argument('--learn-pacipv-vectors', dest='learn_pacipv_vectors', action='store_true',
+                    help="Learn PACIPV vectors from Belady-guided offline runs on training benchmarks.")
+parser.add_argument('--pacipv-max-rrpv', dest='pacipv_max_rrpv', type=int, default=3,
+                    help="Maximum RRPV value used for PACIPV vector search.")
+parser.add_argument('--pacipv-learn-prefetch', dest='pacipv_learn_prefetch', action='store_true',
+                    help="Also learn a separate prefetch PACIPV vector (currently ignored).")
+parser.add_argument('--pacipv-vectors-file', '--pacipv-output-file', dest='pacipv_output_file', default=None,
+                    help="Output text file with learned PACIPV vectors and ready-to-use env exports.")
+parser.add_argument('--pacipv-train-max-accesses', dest='pacipv_train_max_accesses', type=int, default=0,
+                    help="Optional cap of accesses per training benchmark for PACIPV vector learning (0 = no cap).")
+parser.add_argument('--bds-alpha', dest='bds_alpha', type=float, default=1.0,
+                    help="Hit update strength alpha for belady_driven_sampling (0..1).")
+parser.add_argument('--output-dir', dest='output_dir', default='.',
+                    help="Directory where the per-run result CSV will be written.")
+parser.add_argument('--policies', dest='policies', default='belady,lfu,learned,prob_rank,pacipv,pacipv_lfu',
+                    help="Comma-separated policies to run. Supported: belady,lfu,learned,prob_rank,pacipv,pacipv_lfu,belady_driven_sampling")
+
+
+def parse_policy_list(policy_str):
+    supported = ['belady', 'lfu', 'learned', 'prob_rank', 'pacipv', 'pacipv_lfu', 'belady_driven_sampling']
+    selected = [p.strip() for p in policy_str.split(',') if p.strip()]
+    invalid = [p for p in selected if p not in supported]
+    if invalid:
+        raise ValueError(
+            f"Unsupported policies: {invalid}. Supported policies: {supported}"
+        )
+    if not selected:
+        raise ValueError("No policies selected. Use --policies with at least one valid policy.")
+    return selected
+
+
+def uses_prob_rank(selected_policies):
+    return 'prob_rank' in selected_policies
+
+
+def uses_pacipv(selected_policies):
+    return 'pacipv' in selected_policies or 'pacipv_lfu' in selected_policies
+
+
+def uses_training(selected_policies):
+    return (
+        uses_prob_rank(selected_policies)
+        or uses_pacipv(selected_policies)
+        or ('belady_driven_sampling' in selected_policies)
+    )
+
+
+def resolve_runtime_options(args, selected_policies):
+    if uses_training(selected_policies) and not args.train_workload:
+        raise ValueError(
+            "--train-workload is required when prob_rank, pacipv, pacipv_lfu, or "
+            "belady_driven_sampling is enabled."
+        )
+
+    return {
+        'train_fraction': args.train_fraction if uses_training(selected_policies) and args.train_fraction is not None else (1.0 if uses_training(selected_policies) else None),
+        'rank_model_scope': args.rank_model_scope if uses_prob_rank(selected_policies) and args.rank_model_scope is not None else ('per-set' if uses_prob_rank(selected_policies) else None),
+        'prob_top_k': args.prob_top_k if uses_prob_rank(selected_policies) and args.prob_top_k is not None else (3 if uses_prob_rank(selected_policies) else None),
+        'rank_sampling': args.rank_sampling if uses_prob_rank(selected_policies) and args.rank_sampling is not None else ('weighted' if uses_prob_rank(selected_policies) else None),
+        'seed': args.seed if uses_prob_rank(selected_policies) and args.seed is not None else (1 if uses_prob_rank(selected_policies) else None),
+        'pacipv_output_file': (args.pacipv_output_file or 'pacipv_vectors.txt') if uses_pacipv(selected_policies) else None,
+    }
+
+
+def build_output_csv_name(args, selected_policies, runtime_options):
+    parts = ['cache_miss_rates']
+
+    if uses_training(selected_policies) and args.train_workload is not None:
+        parts.append(f"train.{args.train_workload}")
+
+    parts.append(f"eval.{args.eval_workload}")
+    parts.append(f"s{args.num_sets}")
+    parts.append(f"w{args.num_ways}")
+
+    if uses_prob_rank(selected_policies) and args.rank_model_scope is not None:
+        parts.append(f"scope.{runtime_options['rank_model_scope']}")
+    if uses_prob_rank(selected_policies) and args.prob_top_k is not None:
+        parts.append(f"topk.{runtime_options['prob_top_k']}")
+    if uses_prob_rank(selected_policies) and args.rank_sampling is not None:
+        parts.append(f"sampling.{runtime_options['rank_sampling']}")
+    if 'belady_driven_sampling' in selected_policies:
+        alpha_tag = f"{args.bds_alpha:.3f}".replace('.', 'p')
+        parts.append(f"alpha.{alpha_tag}")
+    if uses_training(selected_policies) and args.train_fraction is not None:
+        frac_tag = f"{runtime_options['train_fraction']:.3f}".replace('.', 'p')
+        parts.append(f"frac.{frac_tag}")
+    if uses_prob_rank(selected_policies) and args.seed is not None:
+        parts.append(f"seed.{runtime_options['seed']}")
+
+    filename = '_'.join(parts) + '.csv'
+    return os.path.join(args.output_dir, filename)
+
+
+def validate_trace_paths(path_template, benchmarks, num_sets, trace_role):
+    missing = []
+    resolved_paths = {}
+
+    print(f"[validate] {trace_role} traces: {len(benchmarks)} benchmark(s), num_sets={num_sets}")
+    print(f"[validate] template: {path_template}")
+
+    for benchmark in benchmarks:
+        path = render_trace_path(path_template, benchmark, num_sets)
+        resolved_paths[benchmark] = path
+        if not os.path.exists(path):
+            missing.append((benchmark, path))
+            print(f"  [MISSING] {benchmark}: {path}")
+
+    if missing:
+        more_suffix = '' if len(missing) <= 5 else f"\n  ... and {len(missing) - 5} more"
+        raise FileNotFoundError(
+            f"Missing {trace_role} trace files for {len(missing)}/{len(benchmarks)} benchmark(s) "
+            f"with num_sets={num_sets}.\n"
+            f"Template: {path_template}\n"
+            f"Provide the correct --{trace_role}-trace-path-template or generate the traces first."
+        )
+
+    # All found — show a couple of example resolved paths so the user can sanity-check the template
+    examples = list(resolved_paths.items())[:3]
+    example_str = ', '.join(f"{b}: {p}" for b, p in examples)
+    print(f"[validate] All {len(benchmarks)} {trace_role} traces found. Examples: {example_str}")
+    return resolved_paths
+
+
+def main():
+    args = parser.parse_args()
+    if not 0.0 <= args.bds_alpha <= 1.0:
+        raise ValueError("--bds-alpha must be in [0, 1].")
+
+    num_sets = int(args.num_sets)
+    num_ways = int(args.num_ways)
+
+    selected_policies = parse_policy_list(args.policies)
+    run_belady = 'belady' in selected_policies
+    run_lfu = 'lfu' in selected_policies
+    run_learned = 'learned' in selected_policies
+    run_prob_rank = 'prob_rank' in selected_policies
+    run_pacipv = 'pacipv' in selected_policies
+    run_pacipv_lfu = 'pacipv_lfu' in selected_policies
+    run_belady_driven_sampling = 'belady_driven_sampling' in selected_policies
+
+    runtime_options = resolve_runtime_options(args, selected_policies)
+    train_fraction = runtime_options['train_fraction']
+    rank_model_scope = runtime_options['rank_model_scope']
+    prob_top_k = runtime_options['prob_top_k']
+    rank_sampling = runtime_options['rank_sampling']
+    seed = runtime_options['seed']
+    pacipv_output_file = runtime_options['pacipv_output_file']
+
+    train_benchmarks = []
+    if uses_training(selected_policies):
+        train_workload = workloads.Workloads(args.train_workload)
+        train_benchmarks = train_workload.get_benchmark_names()
+    eval_workload = workloads.Workloads(args.eval_workload)
+    eval_benchmarks = eval_workload.get_benchmark_names()
+
+    train_trace_paths = {}
+    if uses_training(selected_policies):
+        train_trace_paths = validate_trace_paths(
+            args.train_trace_path_template,
+            train_benchmarks,
+            args.num_sets,
+            'train',
+        )
+    eval_trace_paths = validate_trace_paths(
+        args.eval_trace_path_template,
+        eval_benchmarks,
+        args.num_sets,
+        'eval',
+    )
+
+    uniform_sampling = (rank_sampling == 'uniform-topk') if run_prob_rank else False
+    # Demand-IPV-only learning mode.
+    if args.pacipv_learn_prefetch:
+        print("Ignoring --pacipv-learn-prefetch: sweep is configured to learn demand IPV only.")
+
+    if (run_pacipv or run_pacipv_lfu) and not args.learn_pacipv_vectors:
+        print("PACIPV policy selected; enabling --learn-pacipv-vectors automatically.")
+        args.learn_pacipv_vectors = True
+    if not (run_pacipv or run_pacipv_lfu) and args.learn_pacipv_vectors:
+        print("Ignoring --learn-pacipv-vectors because neither pacipv nor pacipv_lfu was selected.")
+        args.learn_pacipv_vectors = False
+
+    # ------------------------------------------------------------------
+    # Rank model: load from file or train from scratch
+    # ------------------------------------------------------------------
+    train_per_set_counts = [defaultdict(int) for _ in range(num_sets)]
+    train_global_counts = defaultdict(int)
+    rank_model_path = args.rank_model_file
+    # Always store rank model in data/belady_sweep/ if not absolute
+    if rank_model_path and not os.path.isabs(rank_model_path) and not rank_model_path.startswith('data/belady_sweep/'):
+        rank_model_path = os.path.join('data', 'belady_sweep', os.path.basename(rank_model_path))
+    if run_prob_rank:
+        if rank_model_path and os.path.exists(rank_model_path):
+            train_per_set_counts, train_global_counts = load_rank_model(rank_model_path, num_sets)
+        else:
+            print(
+                f"Training probabilistic rank model on '{args.train_workload}' "
+                f"(fraction={train_fraction:.2f}, scope={rank_model_scope}, "
+                f"top_k={prob_top_k}, sampling={rank_sampling})"
+            )
+
+            for benchmark in train_benchmarks:
+                trace_path = train_trace_paths[benchmark]
+                trace_entries = load_trace_entries(
+                    trace_path,
+                )
+                trace = trace_entries_to_ptes(trace_entries)
+                if train_fraction < 1.0:
+                    trace = trace[:max(1, int(len(trace) * train_fraction))]
+
+                per_set_counts, global_counts = collect_belady_rank_counts(num_sets, num_ways, trace)
+                if rank_model_scope == 'per-set':
+                    for set_id in range(num_sets):
+                        for rank, cnt in per_set_counts[set_id].items():
+                            train_per_set_counts[set_id][rank] += cnt
+                for rank, cnt in global_counts.items():
+                    train_global_counts[rank] += cnt
+
+            if rank_model_path:
+                save_rank_model(rank_model_path, train_per_set_counts, train_global_counts)
+
+    pacipv_result = None
+    bds_result = None
+
+    # ------------------------------------------------------------------
+    # Learn PACIPV vectors from training traces (optional)
+    # ------------------------------------------------------------------
+    if args.learn_pacipv_vectors:
+        def _make_loader(benchmark):
+            def _loader():
+                te = load_trace_entries(
+                    train_trace_paths[benchmark],
+                )
+                if train_fraction < 1.0:
+                    te = te[:max(1, int(len(te) * train_fraction))]
+                if args.pacipv_train_max_accesses > 0:
+                    te = te[:args.pacipv_train_max_accesses]
+                return te
+            return _loader
+
+        # Validate each benchmark has a non-empty trace (check once, discard data).
+        trace_loaders = []
+        empty_benchmarks = []
+        for benchmark in train_benchmarks:
+            loader = _make_loader(benchmark)
+            te = loader()
+            path = train_trace_paths[benchmark]
+            size = os.path.getsize(path) if os.path.exists(path) else -1
+            if te:
+                trace_loaders.append(loader)
+            else:
+                empty_benchmarks.append((benchmark, path, size))
+            del te
+
+        if empty_benchmarks:
+            print(f"[pacipv] {len(empty_benchmarks)}/{len(train_benchmarks)} training traces are empty/unreadable:")
+            for b, p, sz in empty_benchmarks[:10]:
+                print(f"  {b}: {p}  (file size: {sz} bytes)")
+            if len(empty_benchmarks) > 10:
+                print(f"  ... and {len(empty_benchmarks) - 10} more")
+
+        if not trace_loaders:
+            print(f"No usable training traces found for PACIPV learning "
+                  f"({len(train_benchmarks)} benchmarks tried).")
+            sys.exit(1)
+        else:
+            print(f"[pacipv] {len(trace_loaders)}/{len(train_benchmarks)} training traces are usable.")
+
+        pacipv_result = learn_pacipv_vectors(
+            num_sets,
+            num_ways,
+            trace_loaders,
+            max_rrpv=args.pacipv_max_rrpv,
+        )
+        save_pacipv_vectors(pacipv_output_file, pacipv_result)
+        context_ipv = pacipv_result.get('ipv_by_context', {CTX_DATA: pacipv_result['ipv_vec'], CTX_INST: pacipv_result['ipv_vec']})
+        print(
+            f"Learned PACIPV vectors: data={context_ipv[CTX_DATA]}, inst={context_ipv[CTX_INST]}"
+        )
+
+    if run_belady_driven_sampling:
+        def _make_bds_loader(benchmark):
+            def _loader():
+                te = load_trace_entries(
+                    train_trace_paths[benchmark],
+                )
+                if train_fraction < 1.0:
+                    te = te[:max(1, int(len(te) * train_fraction))]
+                return te
+            return _loader
+
+        bds_trace_loaders = []
+        for benchmark in train_benchmarks:
+            loader = _make_bds_loader(benchmark)
+            te = loader()
+            if te:
+                bds_trace_loaders.append(loader)
+            del te
+
+        if not bds_trace_loaders:
+            print(
+                f"No usable training traces found for belady_driven_sampling "
+                f"({len(train_benchmarks)} benchmarks tried)."
+            )
+            sys.exit(1)
+
+        bds_result = learn_belady_driven_sampling(
+            num_sets,
+            num_ways,
+            bds_trace_loaders,
+            max_rrpv=args.pacipv_max_rrpv,
+        )
+        print("Learned belady_driven_sampling context distributions from training traces.")
+
+    # print global rank histogram only when prob_rank is enabled
+    if run_prob_rank:
+        total_evictions = sum(train_global_counts.values())
+        if total_evictions > 0:
+            print(f"\nGlobal Belady rank histogram (total evictions: {total_evictions}):")
+            print(f"  {'rank':>6}  {'count':>10}  {'%':>7}")
+            for rank in sorted(train_global_counts):
+                cnt = train_global_counts[rank]
+                print(f"  {rank:>6}  {cnt:>10}  {100*cnt/total_evictions:>6.2f}%")
+            empty_per_set = sum(1 for s in train_per_set_counts if not s)
+            print(f"  (per-set model: {num_sets - empty_per_set}/{num_sets} sets have data)\n")
+
+    print(f"Evaluating on '{args.eval_workload}' ({len(eval_benchmarks)} benchmarks)\n")
+
+    # prepare storage for results as a dict of lists (columns)
+    results = {'benchmark': []}
+    metric_by_policy = {
+        'belady': 'belady_rate',
+        'lfu': 'lfu_rate',
+        'learned': 'learned_rate',
+        'prob_rank': 'prob_rank_rate',
+        'pacipv': 'pacipv_rate',
+        'pacipv_lfu': 'pacipv_lfu_rate',
+        'belady_driven_sampling': 'belady_driven_sampling_rate',
+    }
+    for policy in selected_policies:
+        results[metric_by_policy[policy]] = []
+
+    # choose a simple feature extractor; users can modify as needed
+    # here we just take the PTE value itself, but in a real experiment this
+    # might include PC, page-level bits, frequency, etc.
+    feature_fn = lambda pte: pte
+
+    per_set_model = train_per_set_counts if rank_model_scope == 'per-set' else None
+
+    for bench_idx, benchmark in enumerate(eval_benchmarks):
+        print(f"Processing benchmark: {benchmark}")
+
+        trace_path = eval_trace_paths[benchmark]
+        trace_entries = load_trace_entries(
+            trace_path,
+        )
+        trace = trace_entries_to_ptes(trace_entries)
+
+        belady_rate = simulate_opt(num_sets, num_ways, trace) if run_belady else float('nan')
+        lfu_rate = simulate_lfu_stack(num_sets, num_ways, trace) if run_lfu else float('nan')
+
+        # ------------------------------------------------------------------
+        # Per-benchmark Belady table: load from file or build and save
+        # ------------------------------------------------------------------
+        learned_rate = float('nan')
+        if run_learned:
+            if args.belady_table_dir:
+                table_path = os.path.join(
+                    args.belady_table_dir,
+                    f"{benchmark}_TXVC-{args.num_sets}KB_belady_table.csv"
+                )
+                if os.path.exists(table_path):
+                    table = load_belady_table(table_path)
+                else:
+                    table = build_belady_table(num_sets, num_ways, trace, feature_fn=feature_fn)
+                    os.makedirs(args.belady_table_dir, exist_ok=True)
+                    save_belady_table(table_path, table)
+            else:
+                table = build_belady_table(num_sets, num_ways, trace, feature_fn=feature_fn)
+
+            learned_rate = simulate_belady_table(num_sets, num_ways, trace, table, feature_fn=feature_fn)
+
+        prob_rank_rate = float('nan')
+        if run_prob_rank:
+            prob_rank_rate = simulate_probabilistic_rank_policy(
+                num_sets,
+                num_ways,
+                trace,
+                per_set_model,
+                train_global_counts,
+                top_k=prob_top_k,
+                seed=seed + bench_idx,
+                verbose=True,
+                uniform=uniform_sampling,
+            )
+
+        pacipv_rate = float('nan')
+        pacipv_dist_rate = float('nan')
+        pacipv_vec_rate = float('nan')
+        pacipv_lfu_rate = float('nan')
+        bds_rate = float('nan')
+        if pacipv_result is not None and (run_pacipv or run_pacipv_lfu):
+            learned_ipv = pacipv_result.get('ipv_by_context', pacipv_result['ipv_vec'])
+            pacipv_probs = pacipv_result.get('rrpv_probs_by_context')
+            if run_pacipv:
+                if pacipv_probs:
+                    # Run PACIPV using insertion sampling from learned distributions.
+                    pacipv_dist_rate = simulate_pacipv_distribution(
+                        num_sets,
+                        num_ways,
+                        trace_entries,
+                        pacipv_probs,
+                        max_rrpv=pacipv_result['max_rrpv'],
+                        seed=bench_idx + 1,
+                    )
+                else:
+                    pacipv_dist_rate = float('nan')
+                pacipv_vec_rate = simulate_pacipv(
+                    num_sets,
+                    num_ways,
+                    trace_entries,
+                    learned_ipv,
+                    max_rrpv=pacipv_result['max_rrpv'],
+                )
+                # PACIPV now uses the vector selected by exhaustive search.
+                # Keep dist metric for analysis, but pacipv_rate tracks vector PACIPV.
+                pacipv_rate = pacipv_vec_rate
+            pacipv_lfu_rate = simulate_pacipv_lfu(
+                num_sets,
+                num_ways,
+                trace_entries,
+                learned_ipv,
+                max_rrpv=pacipv_result['max_rrpv'],
+            ) if run_pacipv_lfu else float('nan')
+
+        if run_belady_driven_sampling and bds_result is not None:
+            bds_rate = simulate_belady_driven_sampling(
+                num_sets,
+                num_ways,
+                trace_entries,
+                bds_result['rrpv_probs_by_context'],
+                max_rrpv=bds_result['max_rrpv'],
+                seed=bench_idx + 1,
+                alpha=args.bds_alpha,
+            )
+
+        metric_parts = [f"total accesses: {len(trace)}"]
+        if run_belady:
+            metric_parts.append(f"belady misses: {belady_rate:.3f}")
+        if run_lfu:
+            metric_parts.append(f"lfu misses: {lfu_rate:.3f}")
+        if run_learned:
+            metric_parts.append(f"learned misses: {learned_rate:.3f}")
+        if run_prob_rank:
+            metric_parts.append(f"prob-rank misses: {prob_rank_rate:.3f}")
+        if run_pacipv:
+            metric_parts.append(f"pacipv(dist) misses: {pacipv_dist_rate:.3f}")
+            metric_parts.append(f"pacipv(vec) misses: {pacipv_vec_rate:.3f}")
+        if run_pacipv_lfu:
+            metric_parts.append(f"pacipv-lfu misses: {pacipv_lfu_rate:.3f}")
+        if run_belady_driven_sampling:
+            metric_parts.append(f"belady-driven-sampling misses: {bds_rate:.3f}")
+        print(', '.join(metric_parts))
+
+        results['benchmark'].append(benchmark)
+        if run_belady:
+            results['belady_rate'].append(belady_rate)
+        if run_lfu:
+            results['lfu_rate'].append(lfu_rate)
+        if run_learned:
+            results['learned_rate'].append(learned_rate)
+        if run_prob_rank:
+            results['prob_rank_rate'].append(prob_rank_rate)
+        if run_pacipv:
+            results['pacipv_rate'].append(pacipv_rate)
+            results.setdefault('pacipv_dist_rate', []).append(pacipv_dist_rate)
+            results.setdefault('pacipv_vec_rate', []).append(pacipv_vec_rate)
+        if run_pacipv_lfu:
+            results['pacipv_lfu_rate'].append(pacipv_lfu_rate)
+        if run_belady_driven_sampling:
+            results['belady_driven_sampling_rate'].append(bds_rate)
+
+    if run_belady:
+        print(f"Average belady rate: {safe_mean(results['belady_rate']):.4f}")
+    if run_lfu:
+        print(f"Average lfu rate:    {safe_mean(results['lfu_rate']):.4f}")
+    if run_learned:
+        print(f"Average learned rate: {safe_mean(results['learned_rate']):.4f}")
+    if run_prob_rank:
+        print(f"Average prob-rank rate: {safe_mean(results['prob_rank_rate']):.4f}")
+    if run_pacipv:
+        print(f"Average pacipv(dist) rate: {safe_mean(results['pacipv_dist_rate']):.4f}")
+        print(f"Average pacipv(vec) rate: {safe_mean(results['pacipv_vec_rate']):.4f}")
+    if run_pacipv_lfu:
+        print(f"Average pacipv-lfu rate: {safe_mean(results['pacipv_lfu_rate']):.4f}")
+    if run_belady_driven_sampling:
+        print(f"Average belady-driven-sampling rate: {safe_mean(results['belady_driven_sampling_rate']):.4f}")
+    if run_prob_rank and run_belady:
+        gaps = [p - b for p, b in zip(results['prob_rank_rate'], results['belady_rate'])]
+        print(f"Avg gap (prob-rank - belady): {safe_mean(gaps):.4f}")
+
+    output_csv = build_output_csv_name(args, selected_policies, runtime_options)
+    output_dir = os.path.dirname(output_csv)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+    with open(output_csv, 'w', newline='') as f:
+        writer = csv.writer(f)
+        metric_columns = [metric_by_policy[p] for p in selected_policies]
+        if run_pacipv:
+            metric_columns.extend(['pacipv_dist_rate', 'pacipv_vec_rate'])
+        writer.writerow(['benchmark'] + metric_columns)
+        for i in range(len(results['benchmark'])):
+            row = [results['benchmark'][i]]
+            for col in metric_columns:
+                row.append(results[col][i])
+            writer.writerow(row)
+    print(f"Results saved to {output_csv}")
+
+
+if __name__ == "__main__":
+    main()
