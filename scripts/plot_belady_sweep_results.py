@@ -13,7 +13,7 @@ def parse_csv_list(value, cast=str):
 
 
 def parse_policy_list(policy_str):
-    supported = ['belady', 'lfu', 'learned', 'prob_rank', 'pacipv', 'pacipv_lfu']
+    supported = ['belady', 'lfu', 'learned', 'prob_rank', 'pacipv', 'pacipv_lfu', 'belady_driven_sampling']
     raw = [p.strip() for p in policy_str.split(',') if p.strip()]
     if not raw:
         return supported
@@ -37,8 +37,16 @@ def uses_pacipv(selected_policies):
     return 'pacipv' in selected_policies or 'pacipv_lfu' in selected_policies
 
 
+def uses_belady_driven_sampling(selected_policies):
+    return 'belady_driven_sampling' in selected_policies
+
+
 def uses_training(selected_policies):
-    return uses_prob_rank(selected_policies) or uses_pacipv(selected_policies)
+    return (
+        uses_prob_rank(selected_policies)
+        or uses_pacipv(selected_policies)
+        or uses_belady_driven_sampling(selected_policies)
+    )
 
 
 def policy_rate_key(policy):
@@ -49,6 +57,7 @@ def policy_rate_key(policy):
         'prob_rank': 'avg_prob_rank_rate',
         'pacipv': 'avg_pacipv_rate',
         'pacipv_lfu': 'avg_pacipv_lfu_rate',
+        'belady_driven_sampling': 'avg_belady_driven_sampling_rate',
     }[policy]
 
 
@@ -60,6 +69,7 @@ def policy_input_key(policy):
         'prob_rank': 'prob_rank_rate',
         'pacipv': 'pacipv_rate',
         'pacipv_lfu': 'pacipv_lfu_rate',
+        'belady_driven_sampling': 'belady_driven_sampling_rate',
     }[policy]
 
 
@@ -71,6 +81,7 @@ def policy_label(policy):
         'prob_rank': 'Prob Rank',
         'pacipv': 'PACIPV',
         'pacipv_lfu': 'PACIPV LFU',
+        'belady_driven_sampling': 'Belady-Driven Sampling',
     }[policy]
 
 
@@ -87,6 +98,7 @@ CORE_OUTPUT_RE = re.compile(
 
 SUFFIX_PATTERNS = [
     ('seed', re.compile(r'_seed\.(?P<value>\d+)$'), int),
+    ('bds_alpha', re.compile(r'_alpha\.(?P<value>[0-9]+(?:p[0-9]+)?|[0-9]+\.[0-9]+)$'), lambda value: float(value.replace('p', '.'))),
     ('train_fraction', re.compile(r'_frac\.(?P<value>[0-9]+p[0-9]+)$'), lambda value: float(value.replace('p', '.'))),
     ('rank_sampling', re.compile(r'_sampling\.(?P<value>.+?)$'), str),
     ('prob_top_k', re.compile(r'_topk\.(?P<value>\d+)$'), int),
@@ -110,6 +122,7 @@ def parse_output_cfg_from_name(filename):
         'rank_sampling': None,
         'train_fraction': None,
         'seed': None,
+        'bds_alpha': None,
     }
 
     for key, pattern, cast in SUFFIX_PATTERNS:
@@ -162,6 +175,7 @@ def short_cfg_label(cfg):
         ('rank_sampling', 'samp'),
         ('train_fraction', 'f'),
         ('seed', 'seed'),
+        ('bds_alpha', 'alpha'),
     ]
     return '|'.join(f"{short}={cfg[k]}" for (k, short) in keys if k in cfg and cfg[k] is not None)
 
@@ -178,13 +192,17 @@ def write_summary_csv(path, rows):
         'rank_sampling',
         'train_fraction',
         'seed',
+        'bds_alpha',
         'output_csv',
         'avg_belady_rate',
         'avg_lfu_rate',
         'avg_learned_rate',
         'avg_prob_rank_rate',
         'avg_pacipv_rate',
+        'avg_pacipv_dist_rate',
+        'avg_pacipv_vec_rate',
         'avg_pacipv_lfu_rate',
+        'avg_belady_driven_sampling_rate',
         'avg_gap_prob_minus_belady',
     ]
     with open(path, 'w', newline='') as f:
@@ -192,6 +210,79 @@ def write_summary_csv(path, rows):
         writer.writeheader()
         for row in rows:
             writer.writerow(row)
+
+
+def parse_optional_float(value):
+    if value in (None, ''):
+        return None
+    return float(value)
+
+
+def parse_metric_value(value):
+    if value in (None, ''):
+        return float('nan')
+    return float(value)
+
+
+def load_rows_from_sweep_summary(summary_csv, provided_filters, active_filter_keys, selected_policies):
+    rows = []
+    found = 0
+    missing = 0
+
+    with open(summary_csv, newline='') as f:
+        reader = csv.DictReader(f)
+        for raw_row in reader:
+            cfg = {
+                'train_workload': raw_row.get('train_workload') or None,
+                'eval_workload': raw_row.get('eval_workload') or None,
+                'num_sets': int(raw_row['num_sets']) if raw_row.get('num_sets') else None,
+                'num_ways': int(raw_row['num_ways']) if raw_row.get('num_ways') else None,
+                'rank_model_scope': raw_row.get('rank_model_scope') or None,
+                'prob_top_k': int(raw_row['prob_top_k']) if raw_row.get('prob_top_k') else None,
+                'rank_sampling': raw_row.get('rank_sampling') or None,
+                'train_fraction': parse_optional_float(raw_row.get('train_fraction')),
+                'seed': int(raw_row['seed']) if raw_row.get('seed') else None,
+                'bds_alpha': parse_optional_float(raw_row.get('bds_alpha')),
+            }
+
+            keep = True
+            for key, allowed in provided_filters.items():
+                if key not in active_filter_keys:
+                    continue
+                if allowed is None:
+                    continue
+                if cfg.get(key) not in allowed:
+                    keep = False
+                    break
+            if not keep:
+                continue
+
+            status = raw_row.get('status', '')
+            row = dict(cfg)
+            row['output_csv'] = raw_row.get('output_csv', '')
+            row['status'] = 'found' if status == 'ok' else status
+            row['avg_belady_rate'] = parse_metric_value(raw_row.get('avg_belady_rate'))
+            row['avg_lfu_rate'] = parse_metric_value(raw_row.get('avg_lfu_rate'))
+            row['avg_learned_rate'] = parse_metric_value(raw_row.get('avg_learned_rate'))
+            row['avg_prob_rank_rate'] = parse_metric_value(raw_row.get('avg_prob_rank_rate'))
+            row['avg_pacipv_rate'] = parse_metric_value(raw_row.get('avg_pacipv_rate'))
+            row['avg_pacipv_dist_rate'] = parse_metric_value(raw_row.get('avg_pacipv_dist_rate'))
+            row['avg_pacipv_vec_rate'] = parse_metric_value(raw_row.get('avg_pacipv_vec_rate'))
+            row['avg_pacipv_lfu_rate'] = parse_metric_value(raw_row.get('avg_pacipv_lfu_rate'))
+            row['avg_belady_driven_sampling_rate'] = parse_metric_value(raw_row.get('avg_belady_driven_sampling_rate'))
+
+            if 'belady' in selected_policies and 'prob_rank' in selected_policies:
+                row['avg_gap_prob_minus_belady'] = row['avg_prob_rank_rate'] - row['avg_belady_rate']
+            else:
+                row['avg_gap_prob_minus_belady'] = float('nan')
+
+            rows.append(row)
+            if row['status'] == 'found':
+                found += 1
+            else:
+                missing += 1
+
+    return rows, found, missing
 
 
 def render_policy_only_plot(rows, plots_dir, prefix, selected_policies, file_format='png'):
@@ -255,6 +346,7 @@ def render_plots(rows, plots_dir, prefix, baseline_cfg, selected_policies, featu
     # For a selected feature, all other features are fixed to baseline_cfg.
     all_features = [
         ('train_fraction', 'Training Fraction'),
+        ('bds_alpha', 'BDS Alpha'),
         ('train_workload', 'Train Workload'),
         ('eval_workload', 'Eval Workload'),
         ('num_sets', 'Number of Sets'),
@@ -372,12 +464,15 @@ def main():
                         help='Comma-separated values from {weighted,uniform-topk}')
     parser.add_argument('--train-fractions', default=None, help='Optional comma-separated floats in [0,1]')
     parser.add_argument('--seeds', default=None, help='Optional comma-separated ints')
+    parser.add_argument('--bds-alphas', default=None, help='Optional comma-separated floats for belady_driven_sampling alpha')
     parser.add_argument('--train-trace-path-template', default=None,
                         help='Accepted for CLI compatibility; not used for CSV lookup naming.')
     parser.add_argument('--eval-trace-path-template', default=None,
                         help='Accepted for CLI compatibility; not used for CSV lookup naming.')
 
     parser.add_argument('--results-dir', default='.', help='Directory containing output CSV files')
+    parser.add_argument('--sweep-summary-csv', default=None,
+                        help='Optional run_belady_sweep.py summary CSV to read instead of scanning result filenames')
     parser.add_argument('--summary-csv', default='data/belady_sweep/belady_plot_lookup_summary.csv',
                         help='Summary CSV for discovered/missing results')
     parser.add_argument('--plots-dir', default='figures/belady_sweep', help='Output directory for plots (figures only)')
@@ -387,7 +482,7 @@ def main():
     parser.add_argument('--missing-policy', choices=['skip', 'error'], default='skip',
                         help='How to handle missing expected result files')
     parser.add_argument('--policies',
-                        default='belady,lfu,learned,prob_rank,pacipv,pacipv_lfu',
+                        default='belady,lfu,learned,prob_rank,pacipv,pacipv_lfu,belady_driven_sampling',
                         help='Comma-separated policies to include in summary/plots '
                              '(same names as run_belady_sweep.py)')
 
@@ -403,6 +498,7 @@ def main():
     samplings = parse_csv_list(args.rank_samplings) if args.rank_samplings else None
     fractions = parse_csv_list(args.train_fractions, float) if args.train_fractions else None
     seeds = parse_csv_list(args.seeds, int) if args.seeds else None
+    bds_alphas = parse_csv_list(args.bds_alphas, float) if args.bds_alphas else None
 
     provided_filters = {
         'train_workload': train_workloads,
@@ -414,6 +510,7 @@ def main():
         'rank_sampling': samplings,
         'train_fraction': fractions,
         'seed': seeds,
+        'bds_alpha': bds_alphas,
     }
 
     active_filter_keys = ['eval_workload', 'num_sets', 'num_ways']
@@ -421,6 +518,8 @@ def main():
         active_filter_keys.extend(['train_workload', 'train_fraction'])
     if uses_prob_rank(selected_policies):
         active_filter_keys.extend(['rank_model_scope', 'prob_top_k', 'rank_sampling', 'seed'])
+    if uses_belady_driven_sampling(selected_policies):
+        active_filter_keys.append('bds_alpha')
 
     names_for_title = {
         'train_workload': 'Train Workload',
@@ -432,6 +531,7 @@ def main():
         'rank_sampling': 'Rank Sampling',
         'train_fraction': 'Training Fraction',
         'seed': 'Seed',
+        'bds_alpha': 'BDS Alpha',
     }
     provided_optional_keys = [
         k for k in active_filter_keys
@@ -442,44 +542,55 @@ def main():
     missing = 0
     found = 0
 
-    for name in os.listdir(args.results_dir):
-        if not name.startswith('cache_miss_rates_') or not name.endswith('.csv'):
-            continue
-        cfg = parse_output_cfg_from_name(name)
-        if cfg is None:
-            continue
-
-        keep = True
-        for k, allowed in provided_filters.items():
-            if k not in active_filter_keys:
+    if args.sweep_summary_csv:
+        rows, found, missing = load_rows_from_sweep_summary(
+            args.sweep_summary_csv,
+            provided_filters,
+            active_filter_keys,
+            selected_policies,
+        )
+    else:
+        for name in os.listdir(args.results_dir):
+            if not name.startswith('cache_miss_rates_') or not name.endswith('.csv'):
                 continue
-            if allowed is None:
+            cfg = parse_output_cfg_from_name(name)
+            if cfg is None:
                 continue
-            if cfg[k] not in allowed:
-                keep = False
-                break
-        if not keep:
-            continue
 
-        output_path = os.path.join(args.results_dir, name)
-        row = dict(cfg)
-        row['output_csv'] = output_path
-        row['status'] = 'found'
+            keep = True
+            for k, allowed in provided_filters.items():
+                if k not in active_filter_keys:
+                    continue
+                if allowed is None:
+                    continue
+                if cfg[k] not in allowed:
+                    keep = False
+                    break
+            if not keep:
+                continue
 
-        for policy in ['belady', 'lfu', 'learned', 'prob_rank', 'pacipv', 'pacipv_lfu']:
-            rate_key = policy_rate_key(policy)
-            if policy in selected_policies:
-                row[rate_key] = mean_column(output_path, policy_input_key(policy))
+            output_path = os.path.join(args.results_dir, name)
+            row = dict(cfg)
+            row['output_csv'] = output_path
+            row['status'] = 'found'
+
+            for policy in ['belady', 'lfu', 'learned', 'prob_rank', 'pacipv', 'pacipv_lfu', 'belady_driven_sampling']:
+                rate_key = policy_rate_key(policy)
+                if policy in selected_policies:
+                    row[rate_key] = mean_column(output_path, policy_input_key(policy))
+                else:
+                    row[rate_key] = float('nan')
+
+            row['avg_pacipv_dist_rate'] = mean_column(output_path, 'pacipv_dist_rate')
+            row['avg_pacipv_vec_rate'] = mean_column(output_path, 'pacipv_vec_rate')
+
+            if 'belady' in selected_policies and 'prob_rank' in selected_policies:
+                row['avg_gap_prob_minus_belady'] = row['avg_prob_rank_rate'] - row['avg_belady_rate']
             else:
-                row[rate_key] = float('nan')
+                row['avg_gap_prob_minus_belady'] = float('nan')
 
-        if 'belady' in selected_policies and 'prob_rank' in selected_policies:
-            row['avg_gap_prob_minus_belady'] = row['avg_prob_rank_rate'] - row['avg_belady_rate']
-        else:
-            row['avg_gap_prob_minus_belady'] = float('nan')
-
-        rows.append(row)
-        found += 1
+            rows.append(row)
+            found += 1
 
     if not rows:
         print('No matching result CSV files found in results-dir with the provided filters.')
@@ -499,7 +610,7 @@ def main():
         sys.exit(1)
 
     dynamic_suffix_parts = []
-    for k in ['train_workload', 'eval_workload', 'num_sets', 'num_ways', 'rank_model_scope', 'prob_top_k', 'rank_sampling', 'train_fraction', 'seed']:
+    for k in ['train_workload', 'eval_workload', 'num_sets', 'num_ways', 'rank_model_scope', 'prob_top_k', 'rank_sampling', 'train_fraction', 'seed', 'bds_alpha']:
         if k not in active_filter_keys:
             continue
         allowed = provided_filters[k]

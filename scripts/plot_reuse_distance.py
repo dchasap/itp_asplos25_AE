@@ -122,106 +122,95 @@ def compute_reuse_distance(trace):
 
 # MAIN 
 parser = argparse.ArgumentParser()
-#parser.add_argument('--data_dir', dest='data_dir', required=True, help='The directory where the simulation data is stored.')
-#parser.add_argument('--figures_dir', dest='figures_dir', required=True, help='The directory where the generated figures will be stored.')
-#parser.add_argument('--bench_suite', dest='bench_suite', required=True, help='The benchmark suite.')
-#parser.add_argument('--cache', dest='cache', required=True, help='The cache to measure its reuse distance.')
-#parser.add_argument('--cache_size', dest='cache_size', required=True, help='The size of the cache.')
-#parser.add_argument('--experiment', dest='experiment', required=True, help='The experiment name.')
+parser.add_argument('--workload', default='selected_qualcomm_srv_ap',
+                    help='Workload name to expand into benchmarks.')
+parser.add_argument('--exp-name', default='TXVC-64KB',
+                    help='Experiment name used in directory and filename construction.')
+parser.add_argument('--data-dir', default='./data/txvc_mem_access',
+                    help='Base directory containing trace subdirectories.')
+parser.add_argument('--figures-dir', default='./figures',
+                    help='Output directory for generated figures.')
 
 if __name__ == "__main__":
+    args = parser.parse_args()
 
-  args = parser.parse_args()
+    #------------------------------
+    # Basic Configuration
+    #------------------------------
+    bench_suite = args.workload
+    exp_name = args.exp_name
+    data_dir = args.data_dir
+    figures_dir = args.figures_dir
 
-  #------------------------------
-  # Basic Configuration
-  #------------------------------
-  bench_suite = 'selected_qualcomm_srv_ap'
-  cache_name = 'TXVC'
-  cache_size = 64
-  exp_name = cache_name + "-" + str(cache_size) + "KB"
-  data_dir = './data'
-  figures_dir = './figures'
+    # -----------------------------
+    # Process multiple traces
+    # -----------------------------
+    workload = workloads.Workloads(bench_suite)
+    benchmarks = workload.get_benchmark_names()
 
-  # -----------------------------
-  # Process multiple traces
-  # -----------------------------
+    trace_files = []
+    for benchmark in benchmarks:
+        trace_files.append(
+            data_dir + '/' + exp_name + '/' + benchmark + '_' + exp_name + '_txvc_mem_trace.csv'
+        )
 
-  workload = workloads.Workloads(bench_suite)
-  benchmarks = workload.get_benchmark_names()
-  #benchmarks = benchmarks[0:1]
+    # Instead of collecting every reuse distance in a giant list we
+    # tally them in a Counter to keep memory usage bounded.
+    from collections import Counter
 
-  trace_files = []
-  for benchmark in benchmarks:
-      #trace_files.append(args.data_dir + '/' + benchmark + '_' + args.experiment + '_reuse_dist_' + args.cache + '.csv')
-    trace_files.append(data_dir + '/' + benchmark + '_' + exp_name + '_txvc_mem_trace.csv')
+    reuse_counter = Counter()
 
-  # instead of collecting every reuse distance in a giant list we
-  # tally them in a Counter.  This keeps memory usage small even when
-  # processing very large traces.
-  from collections import Counter
+    for trace_file in trace_files:
+        print("Processing", trace_file)
+        compute_reuse_distances_to_counter(trace_file, reuse_counter)
 
-  reuse_counter = Counter()
+    total_samples = sum(reuse_counter.values())
+    print("Samples:", total_samples)
 
-  for f in trace_files:
-      print("Processing", f)
-      compute_reuse_distances_to_counter(f, reuse_counter)
+    # For plotting we can use the keys/values directly rather than
+    # expanding into a huge array.
+    reuse_values = np.fromiter(reuse_counter.keys(), dtype=np.int64)
+    reuse_counts = np.fromiter(reuse_counter.values(), dtype=np.int64)
 
-  total_samples = sum(reuse_counter.values())
-  print("Samples:", total_samples)
+    # -----------------------------
+    # Histogram
+    # -----------------------------
+    plt.figure(figsize=(10, 6))
+    plt.hist(
+        reuse_values,
+        bins=200,
+        weights=reuse_counts,
+        log=False,
+    )
+    plt.xlabel("Reuse Distance")
+    plt.ylabel("Frequency (log)")
+    plt.title("Reuse Distance Histogram")
 
-  # For plotting we can use the keys/values directly rather than
-  # expanding into a huge array.
-  reuse_values = np.fromiter(reuse_counter.keys(), dtype=np.int64)
-  reuse_counts = np.fromiter(reuse_counter.values(), dtype=np.int64)
+    # Add VC size lines
+    plt.axvline(x=1024, color='orange', linestyle='--', linewidth=2, label='VC 1024 entries')
+    plt.axvline(x=2048, color='red', linestyle='--', linewidth=2, label='VC 2048 entries')
 
+    output_file = figures_dir + '/' + bench_suite + '_' + exp_name + '_reuse_dist.pdf'
+    plt.savefig(output_file, bbox_inches='tight')
 
-  # -----------------------------
-  # Histogram
-  # -----------------------------
+    # -----------------------------
+    # CDF
+    # -----------------------------
+    order = np.argsort(reuse_values)
+    sorted_vals = reuse_values[order]
+    sorted_counts = reuse_counts[order]
+    cdf = np.cumsum(sorted_counts) / float(total_samples)
 
-  plt.figure(figsize=(10,6))
-  plt.hist(
-      reuse_values,
-      bins=200,
-      weights=reuse_counts,
-      log=False
-  )
-  plt.xlabel("Reuse Distance")
-  plt.ylabel("Frequency (log)")
-  plt.title("Reuse Distance Histogram")
+    plt.figure(figsize=(10, 6))
+    plt.plot(sorted_vals, cdf)
+    plt.xlabel("Reuse Distance")
+    plt.ylabel("CDF")
+    plt.title("Reuse Distance CDF")
+    plt.grid(True)
 
-  # Add VC size lines
-  plt.axvline(x=1024, color='orange', linestyle='--', linewidth=2, label=f'VC {1024} entries')
-  plt.axvline(x=2048, color='red', linestyle='--', linewidth=2, label=f'VC {2048} entries')
-  # plt.show()
+    # Highlight VC sizes
+    plt.axvline(x=1024, color='orange', linestyle='--', linewidth=2, label='VC 1024 entries')
+    plt.axvline(x=2048, color='red', linestyle='--', linewidth=2, label='VC 2048 entries')
 
-  output_file = figures_dir + '/' + bench_suite + '_' + exp_name + '_reuse_dist.pdf'
-  plt.savefig(output_file, bbox_inches='tight')
-
-
-  # -----------------------------
-  # CDF
-  # -----------------------------
-
-  order = np.argsort(reuse_values)
-  sorted_vals = reuse_values[order]
-  sorted_counts = reuse_counts[order]
-  cdf = np.cumsum(sorted_counts) / float(total_samples)
-
-  plt.figure(figsize=(10,6))
-  plt.plot(sorted_vals, cdf)
-  plt.xlabel("Reuse Distance")
-  plt.ylabel("CDF")
-  plt.title("Reuse Distance CDF")
-  plt.grid(True)
-
-  # Highlight VC sizes
-
-  plt.axvline(x=1024, color='orange', linestyle='--', linewidth=2, label=f'VC {1024} entries')
-  plt.axvline(x=2048, color='red', linestyle='--', linewidth=2, label=f'VC {2048} entries')
-
-  # plt.show()
-
-  output_file = figures_dir + '/' + bench_suite + '_' + exp_name + '_reuse_dist_cdf.pdf'
-  plt.savefig(output_file, bbox_inches='tight')
+    output_file = figures_dir + '/' + bench_suite + '_' + exp_name + '_reuse_dist_cdf.pdf'
+    plt.savefig(output_file, bbox_inches='tight')

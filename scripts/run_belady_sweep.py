@@ -14,7 +14,7 @@ def parse_csv_list(value, cast=str):
 
 
 def parse_policy_list(policy_str):
-    supported = ['belady', 'lfu', 'learned', 'prob_rank', 'pacipv', 'pacipv_lfu']
+    supported = ['belady', 'lfu', 'learned', 'prob_rank', 'pacipv', 'pacipv_lfu', 'belady_driven_sampling']
     raw = [p.strip() for p in policy_str.split(',') if p.strip()]
     if not raw:
         return supported
@@ -38,11 +38,19 @@ def uses_pacipv(selected_policies):
     return 'pacipv' in selected_policies or 'pacipv_lfu' in selected_policies
 
 
+def uses_belady_driven_sampling(selected_policies):
+    return 'belady_driven_sampling' in selected_policies
+
+
 def uses_training(selected_policies):
-    return uses_prob_rank(selected_policies) or uses_pacipv(selected_policies)
+    return uses_prob_rank(selected_policies) or uses_pacipv(selected_policies) or uses_belady_driven_sampling(selected_policies)
 
 
 def frac_tag(value):
+    return f"{value:.3f}".replace('.', 'p')
+
+
+def alpha_tag(value):
     return f"{value:.3f}".replace('.', 'p')
 
 
@@ -64,6 +72,10 @@ def materialize_cfg(cfg, selected_policies):
         if effective.get('seed') is None:
             effective['seed'] = 42
 
+    if uses_belady_driven_sampling(selected_policies):
+        if effective.get('bds_alpha') is None:
+            effective['bds_alpha'] = 1.0
+
     return effective
 
 
@@ -82,27 +94,38 @@ def render_cfg_template(template, cfg):
             train_fraction=cfg['train_fraction'],
             train_fraction_tag=frac_tag(cfg['train_fraction']),
             seed=cfg['seed'],
+            bds_alpha=cfg['bds_alpha'],
+            bds_alpha_tag=alpha_tag(cfg['bds_alpha']),
         )
     except KeyError as exc:
         raise ValueError(
             f"Invalid placeholder in template '{template}': {exc}. "
             "Supported placeholders: {train_workload}, {eval_workload}, {num_sets}, "
             "{num_ways}, {rank_model_scope}, {prob_top_k}, {rank_sampling}, "
-            "{train_fraction}, {train_fraction_tag}, {seed}."
+            "{train_fraction}, {train_fraction_tag}, {seed}, {bds_alpha}, {bds_alpha_tag}."
         ) from exc
 
 
-def parse_learned_demand_ipv(pacipv_output_file):
-    if not pacipv_output_file or not os.path.exists(pacipv_output_file):
-        return ''
+def parse_learned_pacipv_vectors(pacipv_vectors_file):
+    vectors = {
+        'learned_inst_ipv': '',
+        'learned_data_ipv': '',
+        'learned_demand_ipv': '',
+    }
+    if not pacipv_vectors_file or not os.path.exists(pacipv_vectors_file):
+        return vectors
 
-    with open(pacipv_output_file, 'r') as f:
+    with open(pacipv_vectors_file, 'r') as f:
         for line in f:
             line = line.strip()
-            if line.startswith('TXVC_PACIPV_DEMAND_VEC='):
-                return line.split('=', 1)[1].strip().strip('"')
+            if line.startswith('TXVC_PACIPV_INST_VEC='):
+                vectors['learned_inst_ipv'] = line.split('=', 1)[1].strip().strip('"')
+            elif line.startswith('TXVC_PACIPV_DATA_VEC='):
+                vectors['learned_data_ipv'] = line.split('=', 1)[1].strip().strip('"')
+            elif line.startswith('TXVC_PACIPV_DEMAND_VEC='):
+                vectors['learned_demand_ipv'] = line.split('=', 1)[1].strip().strip('"')
 
-    return ''
+    return vectors
 
 
 def mean_from_csv(csv_path, column):
@@ -118,15 +141,96 @@ def mean_from_csv(csv_path, column):
     return (total / count) if count else float('nan')
 
 
+def build_expected_output_csv(cfg, selected_policies, summary_csv_path):
+    output_dir = Path(summary_csv_path).parent
+    effective_cfg = materialize_cfg(cfg, selected_policies)
+    parts = ['cache_miss_rates']
+
+    if uses_training(selected_policies) and effective_cfg['train_workload'] is not None:
+        parts.append(f"train.{effective_cfg['train_workload']}")
+
+    parts.append(f"eval.{effective_cfg['eval_workload']}")
+    parts.append(f"s{effective_cfg['num_sets']}")
+    parts.append(f"w{effective_cfg['num_ways']}")
+
+    if uses_prob_rank(selected_policies):
+        parts.append(f"scope.{effective_cfg['rank_model_scope']}")
+        parts.append(f"topk.{effective_cfg['prob_top_k']}")
+        parts.append(f"sampling.{effective_cfg['rank_sampling']}")
+    if uses_belady_driven_sampling(selected_policies):
+        parts.append(f"alpha.{alpha_tag(effective_cfg['bds_alpha'])}")
+    if uses_training(selected_policies):
+        parts.append(f"frac.{frac_tag(effective_cfg['train_fraction'])}")
+    if uses_prob_rank(selected_policies):
+        parts.append(f"seed.{effective_cfg['seed']}")
+
+    return str(output_dir / ('_'.join(parts) + '.csv'))
+
+
+def build_summary_row(args, cfg, selected_policies):
+    effective_cfg = materialize_cfg(cfg, selected_policies)
+    pacipv_vectors_file = render_cfg_template(args.pacipv_vectors_file_template, effective_cfg) if uses_pacipv(selected_policies) else ''
+    output_csv = build_expected_output_csv(cfg, selected_policies, args.summary_csv)
+    row = dict(cfg)
+    row.update({
+        'returncode': '',
+        'rank_model_file': render_cfg_template(args.rank_model_file_template, effective_cfg) if uses_prob_rank(selected_policies) else '',
+        'pacipv_vectors_file': pacipv_vectors_file,
+        'learned_inst_ipv': '',
+        'learned_data_ipv': '',
+        'learned_demand_ipv': '',
+        'output_csv': output_csv,
+        'avg_belady_rate': '',
+        'avg_lfu_rate': '',
+        'avg_learned_rate': '',
+        'avg_prob_rank_rate': '',
+        'avg_pacipv_rate': '',
+        'avg_pacipv_dist_rate': '',
+        'avg_pacipv_vec_rate': '',
+        'avg_pacipv_lfu_rate': '',
+        'avg_belady_driven_sampling_rate': '',
+        'stderr_tail': '',
+        'job_script': '',
+    })
+    return row
+
+
+def populate_summary_row_from_files(row, selected_policies):
+    output_csv = row['output_csv']
+    if not output_csv or not os.path.exists(output_csv):
+        row['status'] = 'missing'
+        return row
+
+    if uses_pacipv(selected_policies) and row['pacipv_vectors_file']:
+        pacipv_vectors = parse_learned_pacipv_vectors(row['pacipv_vectors_file'])
+        row['learned_inst_ipv'] = pacipv_vectors['learned_inst_ipv']
+        row['learned_data_ipv'] = pacipv_vectors['learned_data_ipv']
+        row['learned_demand_ipv'] = pacipv_vectors['learned_demand_ipv']
+
+    row['status'] = 'ok'
+    row['avg_belady_rate'] = mean_from_csv(output_csv, 'belady_rate')
+    row['avg_lfu_rate'] = mean_from_csv(output_csv, 'lfu_rate')
+    row['avg_learned_rate'] = mean_from_csv(output_csv, 'learned_rate')
+    row['avg_prob_rank_rate'] = mean_from_csv(output_csv, 'prob_rank_rate')
+    row['avg_pacipv_rate'] = mean_from_csv(output_csv, 'pacipv_rate')
+    row['avg_pacipv_dist_rate'] = mean_from_csv(output_csv, 'pacipv_dist_rate')
+    row['avg_pacipv_vec_rate'] = mean_from_csv(output_csv, 'pacipv_vec_rate')
+    row['avg_pacipv_lfu_rate'] = mean_from_csv(output_csv, 'pacipv_lfu_rate')
+    row['avg_belady_driven_sampling_rate'] = mean_from_csv(output_csv, 'belady_driven_sampling_rate')
+    return row
+
+
 def build_cmd(args, cfg, selected_policies):
     script = Path(__file__).with_name('estimate_belady_opt.py')
     effective_cfg = materialize_cfg(cfg, selected_policies)
+    output_dir = str(Path(args.summary_csv).parent)
     cmd = [
         args.python_exe,
         str(script),
         '--eval-workload', effective_cfg['eval_workload'],
         '--num-sets', str(effective_cfg['num_sets']),
         '--num-ways', str(effective_cfg['num_ways']),
+        '--output-dir', output_dir,
         '--policies', args.policies,
     ]
     if uses_training(selected_policies):
@@ -145,11 +249,11 @@ def build_cmd(args, cfg, selected_policies):
     if rank_model_file:
         cmd.extend(['--rank-model-file', rank_model_file])
 
-    pacipv_output_file = render_cfg_template(args.pacipv_output_file_template, effective_cfg) if uses_pacipv(selected_policies) else None
-    if pacipv_output_file:
-        pacipv_output_parent = Path(pacipv_output_file).parent
-        pacipv_output_parent.mkdir(parents=True, exist_ok=True)
-        cmd.extend(['--pacipv-output-file', pacipv_output_file])
+    pacipv_vectors_file = render_cfg_template(args.pacipv_vectors_file_template, effective_cfg) if uses_pacipv(selected_policies) else None
+    if pacipv_vectors_file:
+        pacipv_vectors_parent = Path(pacipv_vectors_file).parent
+        pacipv_vectors_parent.mkdir(parents=True, exist_ok=True)
+        cmd.extend(['--pacipv-vectors-file', pacipv_vectors_file])
 
     # Sweep learns demand IPV over all training benchmarks (prefetch IPV is fixed/default).
     if uses_pacipv(selected_policies):
@@ -157,6 +261,9 @@ def build_cmd(args, cfg, selected_policies):
 
     if uses_pacipv(selected_policies) and args.pacipv_train_max_accesses > 0:
         cmd.extend(['--pacipv-train-max-accesses', str(args.pacipv_train_max_accesses)])
+
+    if uses_belady_driven_sampling(selected_policies):
+        cmd.extend(['--bds-alpha', str(effective_cfg['bds_alpha'])])
 
     return cmd
 
@@ -166,6 +273,21 @@ def extract_output_csv(stdout_text):
         if 'Results saved to ' in line:
             return line.split('Results saved to ', 1)[1].strip()
     return None
+
+
+def extract_failure_tail(proc, max_lines=10):
+    chunks = []
+    stderr_lines = proc.stderr.splitlines()
+    stdout_lines = proc.stdout.splitlines()
+
+    if stderr_lines:
+        chunks.append('\n'.join(stderr_lines[-max_lines:]))
+    if stdout_lines:
+        stdout_tail = '\n'.join(stdout_lines[-max_lines:])
+        if not stderr_lines or stdout_tail not in chunks:
+            chunks.append(stdout_tail)
+
+    return '\n\n'.join(chunk for chunk in chunks if chunk)
 
 
 def make_slurm_job(batch_idx, cfgs, sweep_args, job_dir, dump_dir, selected_policies):
@@ -220,6 +342,7 @@ def main():
                         help='Comma-separated values from {weighted,uniform-topk}')
     parser.add_argument('--train-fractions', default=None, help='Comma-separated floats in [0,1]')
     parser.add_argument('--seeds', default=None, help='Comma-separated ints')
+    parser.add_argument('--bds-alphas', default=None, help='Comma-separated floats for belady_driven_sampling alpha')
     parser.add_argument('--policies',
                         default='belady,lfu,learned,prob_rank,pacipv,pacipv_lfu',
                         help='Comma-separated policies forwarded to estimate_belady_opt.py')
@@ -231,18 +354,21 @@ def main():
                         help='Rendered per config and forwarded as --rank-model-file. Supports '
                              '{train_workload}, {eval_workload}, {num_sets}, {num_ways}, '
                              '{rank_model_scope}, {prob_top_k}, {rank_sampling}, '
-                             '{train_fraction}, {train_fraction_tag}, and {seed}.')
-    parser.add_argument('--pacipv-output-file-template',
+                             '{train_fraction}, {train_fraction_tag}, {seed}, {bds_alpha}, and {bds_alpha_tag}.')
+    parser.add_argument('--pacipv-vectors-file-template', '--pacipv-output-file-template',
+                        dest='pacipv_vectors_file_template',
                         default='data/belady_sweep/pacipv_vectors_{train_workload}_to_{eval_workload}_s{num_sets}_w{num_ways}_frac{train_fraction_tag}_seed{seed}.txt',
-                        help='Rendered per config and forwarded as --pacipv-output-file. Supports '
+                        help='Rendered per config and forwarded as --pacipv-vectors-file. Supports '
                             '{train_workload}, {eval_workload}, {num_sets}, {num_ways}, '
                             '{rank_model_scope}, {prob_top_k}, {rank_sampling}, '
-                            '{train_fraction}, {train_fraction_tag}, and {seed}.')
+                            '{train_fraction}, {train_fraction_tag}, {seed}, {bds_alpha}, and {bds_alpha_tag}.')
     parser.add_argument('--pacipv-train-max-accesses', type=int, default=0,
                         help='Forwarded to estimate_belady_opt.py to cap accesses per train benchmark '
                             'during IPV learning (0 = no cap).')
     parser.add_argument('--python-exe', default=sys.executable, help='Python interpreter')
     parser.add_argument('--summary-csv', default='data/belady_sweep/belady_sweep_summary.csv', help='Output summary CSV')
+    parser.add_argument('--collect-existing-results', action='store_true',
+                        help='Do not run or submit jobs; rebuild summary CSV from expected per-config output CSVs already on disk')
     parser.add_argument('--continue-on-error', action='store_true',
                         help='Continue running remaining configs if one fails')
     parser.add_argument('--dry-run', action='store_true', help='Print commands without running or submitting')
@@ -268,7 +394,7 @@ def main():
 
     selected_policies = parse_policy_list(args.policies)
     if uses_training(selected_policies) and not args.train_workloads:
-        parser.error('--train-workloads is required when prob_rank, pacipv, or pacipv_lfu is enabled')
+        parser.error('--train-workloads is required when prob_rank, pacipv, pacipv_lfu, or belady_driven_sampling is enabled')
 
     train_workloads = parse_csv_list(args.train_workloads) if args.train_workloads else [None]
     eval_workloads = parse_csv_list(args.eval_workloads)
@@ -279,9 +405,10 @@ def main():
     samplings = parse_csv_list(args.rank_samplings) if args.rank_samplings else [None]
     fractions = parse_csv_list(args.train_fractions, float) if args.train_fractions else [None]
     seeds = parse_csv_list(args.seeds, int) if args.seeds else [None]
+    bds_alphas = parse_csv_list(args.bds_alphas, float) if args.bds_alphas else [None]
 
     configs = []
-    for (train_workload, eval_workload, num_sets, num_ways, scope, topk, sampling, frac, seed) in itertools.product(
+    for (train_workload, eval_workload, num_sets, num_ways, scope, topk, sampling, frac, seed, bds_alpha) in itertools.product(
         train_workloads,
         eval_workloads,
         num_sets_list,
@@ -291,6 +418,7 @@ def main():
         samplings,
         fractions,
         seeds,
+        bds_alphas,
     ):
         configs.append({
             'train_workload': train_workload,
@@ -302,10 +430,41 @@ def main():
             'rank_sampling': sampling,
             'train_fraction': frac,
             'seed': seed,
+            'bds_alpha': bds_alpha,
         })
 
     print(f'Total configurations: {len(configs)}')
     rows = []
+
+    if args.collect_existing_results:
+        for cfg in configs:
+            row = build_summary_row(args, cfg, selected_policies)
+            row = populate_summary_row_from_files(row, selected_policies)
+            rows.append(row)
+
+        summary_path = Path(args.summary_csv)
+        fieldnames = [
+            'status', 'returncode', 'train_workload', 'eval_workload',
+            'num_sets', 'num_ways', 'rank_model_scope', 'prob_top_k',
+            'rank_sampling', 'train_fraction', 'seed', 'bds_alpha',
+            'rank_model_file',
+            'pacipv_vectors_file', 'learned_inst_ipv', 'learned_data_ipv', 'learned_demand_ipv',
+            'avg_belady_rate', 'avg_lfu_rate', 'avg_learned_rate', 'avg_prob_rank_rate',
+            'avg_pacipv_rate', 'avg_pacipv_dist_rate', 'avg_pacipv_vec_rate', 'avg_pacipv_lfu_rate',
+            'avg_belady_driven_sampling_rate',
+            'output_csv', 'job_script', 'stderr_tail',
+        ]
+        with open(summary_path, 'w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            for row in rows:
+                writer.writerow(row)
+
+        ok_count = sum(1 for r in rows if r['status'] == 'ok')
+        missing_count = sum(1 for r in rows if r['status'] == 'missing')
+        print(f'Collected existing results: ok={ok_count}, missing={missing_count}')
+        print(f'Summary written to {summary_path}')
+        return
 
     # ------------------------------------------------------------------ #
     #  SLURM submission path                                               #
@@ -326,24 +485,9 @@ def main():
 
             status = 'planned' if args.dry_run else 'submitted'
             for cfg in batch:
-                effective_cfg = materialize_cfg(cfg, selected_policies)
-                row = dict(cfg)
-                row.update({
-                    'status': status,
-                    'returncode': '',
-                    'rank_model_file': render_cfg_template(args.rank_model_file_template, effective_cfg) if uses_prob_rank(selected_policies) else '',
-                    'pacipv_output_file': render_cfg_template(args.pacipv_output_file_template, effective_cfg) if uses_pacipv(selected_policies) else '',
-                    'learned_demand_ipv': '',
-                    'output_csv': '',
-                    'avg_belady_rate': '',
-                    'avg_lfu_rate': '',
-                    'avg_learned_rate': '',
-                    'avg_prob_rank_rate': '',
-                    'avg_pacipv_rate': '',
-                    'avg_pacipv_lfu_rate': '',
-                    'stderr_tail': '',
-                    'job_script': str(job_path),
-                })
+                row = build_summary_row(args, cfg, selected_policies)
+                row['status'] = status
+                row['job_script'] = str(job_path)
                 rows.append(row)
 
             if args.dry_run:
@@ -362,11 +506,12 @@ def main():
         fieldnames = [
             'status', 'returncode', 'train_workload', 'eval_workload',
             'num_sets', 'num_ways', 'rank_model_scope', 'prob_top_k',
-            'rank_sampling', 'train_fraction', 'seed',
+            'rank_sampling', 'train_fraction', 'seed', 'bds_alpha',
             'rank_model_file',
-            'pacipv_output_file', 'learned_demand_ipv',
+            'pacipv_vectors_file', 'learned_inst_ipv', 'learned_data_ipv', 'learned_demand_ipv',
             'avg_belady_rate', 'avg_lfu_rate', 'avg_learned_rate', 'avg_prob_rank_rate',
-            'avg_pacipv_rate', 'avg_pacipv_lfu_rate',
+            'avg_pacipv_rate', 'avg_pacipv_dist_rate', 'avg_pacipv_vec_rate', 'avg_pacipv_lfu_rate',
+            'avg_belady_driven_sampling_rate',
             'output_csv', 'job_script', 'stderr_tail',
         ]
         with open(summary_path, 'w', newline='') as f:
@@ -392,45 +537,24 @@ def main():
         cmd = build_cmd(args, cfg, selected_policies)
         print(f"[{idx}/{len(configs)}] {' '.join(cmd)}")
         if args.dry_run:
-            row = dict(cfg)
-            row.update({
-                'status': 'planned',
-                'returncode': '',
-                'rank_model_file': render_cfg_template(args.rank_model_file_template, effective_cfg) if uses_prob_rank(selected_policies) else '',
-                'pacipv_output_file': render_cfg_template(args.pacipv_output_file_template, effective_cfg) if uses_pacipv(selected_policies) else '',
-                'learned_demand_ipv': '',
-                'output_csv': '',
-                'avg_belady_rate': '',
-                'avg_lfu_rate': '',
-                'avg_learned_rate': '',
-                'avg_prob_rank_rate': '',
-                'avg_pacipv_rate': '',
-                'avg_pacipv_lfu_rate': '',
-                'stderr_tail': '',
-                'job_script': '',
-            })
+            row = build_summary_row(args, cfg, selected_policies)
+            row['status'] = 'planned'
             rows.append(row)
             continue
 
         proc = subprocess.run(cmd, capture_output=True, text=True)
         if proc.returncode != 0:
-            row = dict(cfg)
-            row.update({
-                'status': 'failed',
-                'returncode': proc.returncode,
-                'rank_model_file': render_cfg_template(args.rank_model_file_template, effective_cfg) if uses_prob_rank(selected_policies) else '',
-                'pacipv_output_file': render_cfg_template(args.pacipv_output_file_template, effective_cfg) if uses_pacipv(selected_policies) else '',
-                'learned_demand_ipv': '',
-                'output_csv': '',
-                'avg_belady_rate': '',
-                'avg_lfu_rate': '',
-                'avg_learned_rate': '',
-                'avg_prob_rank_rate': '',
-                'avg_pacipv_rate': '',
-                'avg_pacipv_lfu_rate': '',
-                'stderr_tail': '\\n'.join(proc.stderr.splitlines()[-10:]),
-                'job_script': '',
-            })
+            # Print full subprocess output to terminal so failures are visible without opening the CSV
+            if proc.stdout.strip():
+                print("  -- subprocess stdout --")
+                print(proc.stdout)
+            if proc.stderr.strip():
+                print("  -- subprocess stderr --")
+                print(proc.stderr)
+            row = build_summary_row(args, cfg, selected_policies)
+            row['status'] = 'failed'
+            row['returncode'] = proc.returncode
+            row['stderr_tail'] = extract_failure_tail(proc)
             rows.append(row)
             print(f"  -> FAILED (exit {proc.returncode})")
             if not args.continue_on_error:
@@ -439,47 +563,24 @@ def main():
 
         out_csv = extract_output_csv(proc.stdout)
         if not out_csv or not os.path.exists(out_csv):
-            row = dict(cfg)
-            row.update({
-                'status': 'failed-no-csv',
-                'returncode': proc.returncode,
-                'rank_model_file': render_cfg_template(args.rank_model_file_template, effective_cfg) if uses_prob_rank(selected_policies) else '',
-                'pacipv_output_file': render_cfg_template(args.pacipv_output_file_template, effective_cfg) if uses_pacipv(selected_policies) else '',
-                'learned_demand_ipv': '',
-                'output_csv': out_csv or '',
-                'avg_belady_rate': '',
-                'avg_lfu_rate': '',
-                'avg_learned_rate': '',
-                'avg_prob_rank_rate': '',
-                'avg_pacipv_rate': '',
-                'avg_pacipv_lfu_rate': '',
-                'stderr_tail': '\\n'.join(proc.stderr.splitlines()[-10:]),
-                'job_script': '',
-            })
+            row = build_summary_row(args, cfg, selected_policies)
+            row['status'] = 'failed-no-csv'
+            row['returncode'] = proc.returncode
+            row['output_csv'] = out_csv or row['output_csv']
+            row['stderr_tail'] = extract_failure_tail(proc)
             rows.append(row)
             print('  -> FAILED (could not find output csv)')
             if not args.continue_on_error:
                 break
             continue
 
-        row = dict(cfg)
-        pacipv_output_file = render_cfg_template(args.pacipv_output_file_template, effective_cfg) if uses_pacipv(selected_policies) else ''
-        row.update({
-            'status': 'ok',
-            'returncode': proc.returncode,
-            'rank_model_file': render_cfg_template(args.rank_model_file_template, effective_cfg) if uses_prob_rank(selected_policies) else '',
-            'pacipv_output_file': pacipv_output_file,
-            'learned_demand_ipv': parse_learned_demand_ipv(pacipv_output_file) if uses_pacipv(selected_policies) else '',
-            'output_csv': out_csv,
-            'avg_belady_rate': mean_from_csv(out_csv, 'belady_rate'),
-            'avg_lfu_rate': mean_from_csv(out_csv, 'lfu_rate'),
-            'avg_learned_rate': mean_from_csv(out_csv, 'learned_rate'),
-            'avg_prob_rank_rate': mean_from_csv(out_csv, 'prob_rank_rate'),
-            'avg_pacipv_rate': mean_from_csv(out_csv, 'pacipv_rate'),
-            'avg_pacipv_lfu_rate': mean_from_csv(out_csv, 'pacipv_lfu_rate'),
-            'stderr_tail': '',
-            'job_script': '',
-        })
+        row = build_summary_row(args, cfg, selected_policies)
+        row['status'] = 'ok'
+        row['returncode'] = proc.returncode
+        row['output_csv'] = out_csv
+        row = populate_summary_row_from_files(row, selected_policies)
+        row['status'] = 'ok'
+        row['returncode'] = proc.returncode
         rows.append(row)
         print(f"  -> ok, avg prob-rank {row['avg_prob_rank_rate']:.4f}")
 
@@ -491,11 +592,12 @@ def main():
     fieldnames = [
         'status', 'returncode', 'train_workload', 'eval_workload',
         'num_sets', 'num_ways', 'rank_model_scope', 'prob_top_k',
-        'rank_sampling', 'train_fraction', 'seed',
+        'rank_sampling', 'train_fraction', 'seed', 'bds_alpha',
         'rank_model_file',
-        'pacipv_output_file', 'learned_demand_ipv',
+        'pacipv_vectors_file', 'learned_inst_ipv', 'learned_data_ipv', 'learned_demand_ipv',
         'avg_belady_rate', 'avg_lfu_rate', 'avg_learned_rate', 'avg_prob_rank_rate',
-        'avg_pacipv_rate', 'avg_pacipv_lfu_rate',
+        'avg_pacipv_rate', 'avg_pacipv_dist_rate', 'avg_pacipv_vec_rate', 'avg_pacipv_lfu_rate',
+        'avg_belady_driven_sampling_rate',
         'output_csv', 'job_script', 'stderr_tail',
     ]
 

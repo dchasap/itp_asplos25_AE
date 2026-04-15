@@ -64,7 +64,7 @@ class FilterTracer : public CacheFilter {
     virtual void update(uint64_t address, bool, bool is_lookup, uint64_t)
     { 
       if (is_lookup)
-        memTracer.add_access(address);
+        memTracer.add_access(address, false);
       
       return; 
     };
@@ -802,7 +802,7 @@ class OracleMFUFilter : public CacheFilter {
       if (skip_lookups && is_lookup) return;
 
       if (save_mem_trace) {
-        memTracer.add_access(address);
+        memTracer.add_access(address, false);
         return;
       }
 
@@ -1292,7 +1292,7 @@ class BeladyOPTSetFilter : public CacheFilter {
       if (skip_lookups && is_lookup) return;
 
       if (save_mem_trace) {
-        memTracer.add_access(address);
+        memTracer.add_access(address, false);
         return;
       }
 

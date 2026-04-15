@@ -8,9 +8,15 @@
 class MemoryTracer 
 {
   private:
+
+    struct mem_access {
+      uint64_t address;
+      bool is_instr;
+    };
+
     std::ofstream tracefile;
 		std::string tracefilename;
-    std::vector<uint64_t> access_vector;
+    std::vector<mem_access> access_vector;
 
   public:
     MemoryTracer() {};
@@ -23,22 +29,24 @@ class MemoryTracer
       return tracefile.good();
     }
 
-    void add_access(uint64_t address) 
+    void add_access(uint64_t address, bool is_instr) 
     {
-      access_vector.push_back(address);
+      mem_access access = {address, is_instr};
+      access_vector.push_back(access);
     }
 
     void save_tracefile() 
     {
       std::cout << "Saving tracefile " << tracefilename << std::endl;
       for (auto it = access_vector.begin(); it != access_vector.end(); it++) {
-        tracefile << *it << std::endl;
+        tracefile << it->address << ", " << it->is_instr << std::endl;
       }
       tracefile.close();
     }
 
 };
 
+//TODO: Update trace reader to new format... address, is_instr
 class MemoryTraceReader 
 {
   private:

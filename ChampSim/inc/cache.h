@@ -669,7 +669,7 @@ public:
 
 #endif
         if (save_mem_accesses)
-          memTracer.add_access(address);
+          memTracer.add_access(address, is_instr);
         
         if (enable_cache_filtering)
           cacheFilter->update(address, !hit, true, curr_cycle); // if hit, not doa
