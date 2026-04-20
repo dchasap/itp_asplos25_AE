@@ -248,6 +248,9 @@ def parse_experimental_data(config):
 
 	for sim in simulations:
 
+		# download data if needed
+		fetch_experiment_data(sim)
+
 		if config.has_option(sim, 'simulation_stats'):
 			printer.print_warning("Skipping " + sim + "...")
 			continue
@@ -378,6 +381,23 @@ def build_presentation(config):
 	os.system("make clean -C " + slides_dir)
 	os.system("make -C " + slides_dir)
 	#os.system("cd ..")
+
+
+def fetch_experiment_data(EXP_ID):
+
+	remote = f"bsc018186@transfer1.bsc.es:/gpfs/scratch/bsc18/bsc018186/VMem/data/{EXP_ID}"
+	local = f"./data/{EXP_ID}/"
+
+	cmd = [
+			"rsync", "-av",
+			"--include=*.csv",
+			"--exclude=*",
+			remote,
+			local
+	]
+
+	subprocess.run(cmd, check=True)
+
 
 # MAIN 
 parser = argparse.ArgumentParser()

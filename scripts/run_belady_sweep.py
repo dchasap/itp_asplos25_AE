@@ -14,7 +14,7 @@ def parse_csv_list(value, cast=str):
 
 
 def parse_policy_list(policy_str):
-    supported = ['belady', 'lfu', 'learned', 'prob_rank', 'pacipv', 'pacipv_lfu', 'belady_driven_sampling']
+    supported = ['belady', 'lfu', 'learned', 'prob_rank', 'pacipv', 'pacipv_shadow', 'belady_driven_sampling', 'srrip', 'opt_distilled_srrip']
     raw = [p.strip() for p in policy_str.split(',') if p.strip()]
     if not raw:
         return supported
@@ -35,15 +35,27 @@ def uses_prob_rank(selected_policies):
 
 
 def uses_pacipv(selected_policies):
-    return 'pacipv' in selected_policies or 'pacipv_lfu' in selected_policies
+    return 'pacipv' in selected_policies
+
+
+def uses_pacipv_shadow(selected_policies):
+    return 'pacipv_shadow' in selected_policies
 
 
 def uses_belady_driven_sampling(selected_policies):
     return 'belady_driven_sampling' in selected_policies
 
 
+def uses_srrip(selected_policies):
+    return 'srrip' in selected_policies
+
+
+def uses_opt_distilled_srrip(selected_policies):
+    return 'opt_distilled_srrip' in selected_policies
+
+
 def uses_training(selected_policies):
-    return uses_prob_rank(selected_policies) or uses_pacipv(selected_policies) or uses_belady_driven_sampling(selected_policies)
+    return uses_prob_rank(selected_policies) or uses_pacipv(selected_policies) or uses_pacipv_shadow(selected_policies) or uses_belady_driven_sampling(selected_policies) or uses_opt_distilled_srrip(selected_policies)
 
 
 def frac_tag(value):
@@ -76,6 +88,22 @@ def materialize_cfg(cfg, selected_policies):
         if effective.get('bds_alpha') is None:
             effective['bds_alpha'] = 1.0
 
+    if uses_srrip(selected_policies):
+        if effective.get('srrip_max_rrpv') is None:
+            effective['srrip_max_rrpv'] = max(0, int(effective['num_ways']) - 1)
+        if effective.get('srrip_hit_delta') is None:
+            effective['srrip_hit_delta'] = 1
+
+    if uses_opt_distilled_srrip(selected_policies):
+        if effective.get('opt_distilled_max_rrpv') is None:
+            effective['opt_distilled_max_rrpv'] = 3
+
+    if uses_pacipv_shadow(selected_policies):
+        if effective.get('pacipv_shadow_max_rrpv') is None:
+            effective['pacipv_shadow_max_rrpv'] = 3
+        if effective.get('pacipv_shadow_per_context') is None:
+            effective['pacipv_shadow_per_context'] = 0
+
     return effective
 
 
@@ -96,13 +124,20 @@ def render_cfg_template(template, cfg):
             seed=cfg['seed'],
             bds_alpha=cfg['bds_alpha'],
             bds_alpha_tag=alpha_tag(cfg['bds_alpha']),
+            srrip_max_rrpv=cfg.get('srrip_max_rrpv', 0),
+            srrip_hit_delta=cfg.get('srrip_hit_delta', 1),
+            opt_distilled_max_rrpv=cfg.get('opt_distilled_max_rrpv', 3),
+            pacipv_shadow_max_rrpv=cfg.get('pacipv_shadow_max_rrpv', 3),
+            pacipv_shadow_per_context=cfg.get('pacipv_shadow_per_context', 0),
         )
     except KeyError as exc:
         raise ValueError(
             f"Invalid placeholder in template '{template}': {exc}. "
             "Supported placeholders: {train_workload}, {eval_workload}, {num_sets}, "
             "{num_ways}, {rank_model_scope}, {prob_top_k}, {rank_sampling}, "
-            "{train_fraction}, {train_fraction_tag}, {seed}, {bds_alpha}, {bds_alpha_tag}."
+            "{train_fraction}, {train_fraction_tag}, {seed}, {bds_alpha}, {bds_alpha_tag}, "
+            "{srrip_max_rrpv}, {srrip_hit_delta}, {opt_distilled_max_rrpv}, "
+            "{pacipv_shadow_max_rrpv}, {pacipv_shadow_per_context}."
         ) from exc
 
 
@@ -159,6 +194,14 @@ def build_expected_output_csv(cfg, selected_policies, summary_csv_path):
         parts.append(f"sampling.{effective_cfg['rank_sampling']}")
     if uses_belady_driven_sampling(selected_policies):
         parts.append(f"alpha.{alpha_tag(effective_cfg['bds_alpha'])}")
+    if uses_srrip(selected_policies):
+        parts.append(f"srrip_max.{effective_cfg['srrip_max_rrpv']}")
+        parts.append(f"srrip_delta.{effective_cfg['srrip_hit_delta']}")
+    if uses_opt_distilled_srrip(selected_policies):
+        parts.append(f"opt_distilled_rrpv.{effective_cfg['opt_distilled_max_rrpv']}")
+    if uses_pacipv_shadow(selected_policies):
+        parts.append(f"pacipv_shadow_rrpv.{effective_cfg['pacipv_shadow_max_rrpv']}")
+        parts.append(f"pacipv_shadow_ctx.{effective_cfg['pacipv_shadow_per_context']}")
     if uses_training(selected_policies):
         parts.append(f"frac.{frac_tag(effective_cfg['train_fraction'])}")
     if uses_prob_rank(selected_policies):
@@ -186,9 +229,10 @@ def build_summary_row(args, cfg, selected_policies):
         'avg_prob_rank_rate': '',
         'avg_pacipv_rate': '',
         'avg_pacipv_dist_rate': '',
-        'avg_pacipv_vec_rate': '',
-        'avg_pacipv_lfu_rate': '',
         'avg_belady_driven_sampling_rate': '',
+        'avg_srrip_rate': '',
+        'avg_opt_distilled_srrip_rate': '',
+        'avg_pacipv_shadow_rate': '',
         'stderr_tail': '',
         'job_script': '',
     })
@@ -214,9 +258,10 @@ def populate_summary_row_from_files(row, selected_policies):
     row['avg_prob_rank_rate'] = mean_from_csv(output_csv, 'prob_rank_rate')
     row['avg_pacipv_rate'] = mean_from_csv(output_csv, 'pacipv_rate')
     row['avg_pacipv_dist_rate'] = mean_from_csv(output_csv, 'pacipv_dist_rate')
-    row['avg_pacipv_vec_rate'] = mean_from_csv(output_csv, 'pacipv_vec_rate')
-    row['avg_pacipv_lfu_rate'] = mean_from_csv(output_csv, 'pacipv_lfu_rate')
     row['avg_belady_driven_sampling_rate'] = mean_from_csv(output_csv, 'belady_driven_sampling_rate')
+    row['avg_srrip_rate'] = mean_from_csv(output_csv, 'srrip_rate')
+    row['avg_opt_distilled_srrip_rate'] = mean_from_csv(output_csv, 'opt_distilled_srrip_rate')
+    row['avg_pacipv_shadow_rate'] = mean_from_csv(output_csv, 'pacipv_shadow_rate')
     return row
 
 
@@ -264,6 +309,19 @@ def build_cmd(args, cfg, selected_policies):
 
     if uses_belady_driven_sampling(selected_policies):
         cmd.extend(['--bds-alpha', str(effective_cfg['bds_alpha'])])
+
+    if uses_srrip(selected_policies):
+        cmd.extend(['--srrip-max-rrpv', str(effective_cfg['srrip_max_rrpv'])])
+        cmd.extend(['--srrip-hit-delta', str(effective_cfg['srrip_hit_delta'])])
+
+    if uses_opt_distilled_srrip(selected_policies):
+        cmd.extend(['--opt-distilled-max-rrpv', str(effective_cfg['opt_distilled_max_rrpv'])])
+
+    if uses_pacipv_shadow(selected_policies):
+        cmd.append('--learn-pacipv-shadow')
+        cmd.extend(['--pacipv-shadow-max-rrpv', str(effective_cfg['pacipv_shadow_max_rrpv'])])
+        if int(effective_cfg['pacipv_shadow_per_context']) != 0:
+            cmd.append('--pacipv-shadow-per-context')
 
     return cmd
 
@@ -327,6 +385,31 @@ def make_slurm_job(batch_idx, cfgs, sweep_args, job_dir, dump_dir, selected_poli
     return job_path
 
 
+def summary_fieldnames():
+    return [
+        'status', 'returncode', 'train_workload', 'eval_workload',
+        'num_sets', 'num_ways', 'rank_model_scope', 'prob_top_k',
+        'rank_sampling', 'train_fraction', 'seed', 'bds_alpha',
+        'srrip_max_rrpv', 'srrip_hit_delta', 'opt_distilled_max_rrpv',
+        'pacipv_shadow_max_rrpv', 'pacipv_shadow_per_context',
+        'rank_model_file',
+        'pacipv_vectors_file', 'learned_inst_ipv', 'learned_data_ipv', 'learned_demand_ipv',
+        'avg_belady_rate', 'avg_lfu_rate', 'avg_learned_rate', 'avg_prob_rank_rate',
+        'avg_pacipv_rate', 'avg_pacipv_dist_rate',
+        'avg_belady_driven_sampling_rate', 'avg_srrip_rate', 'avg_opt_distilled_srrip_rate',
+        'avg_pacipv_shadow_rate',
+        'output_csv', 'job_script', 'stderr_tail',
+    ]
+
+
+def write_summary_csv(summary_path, rows):
+    with open(summary_path, 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=summary_fieldnames())
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+
+
 def main():
     parser = argparse.ArgumentParser(description='Grid sweep runner for estimate_belady_opt.py')
     parser.add_argument('--train-workloads', default=None,
@@ -343,8 +426,13 @@ def main():
     parser.add_argument('--train-fractions', default=None, help='Comma-separated floats in [0,1]')
     parser.add_argument('--seeds', default=None, help='Comma-separated ints')
     parser.add_argument('--bds-alphas', default=None, help='Comma-separated floats for belady_driven_sampling alpha')
+    parser.add_argument('--srrip-max-rrpvs', default=None, help='Comma-separated SRRIP max RRPV values')
+    parser.add_argument('--srrip-hit-deltas', default=None, help='Comma-separated SRRIP hit delta values')
+    parser.add_argument('--opt-distilled-max-rrpvs', default=None, help='Comma-separated opt_distilled_srrip max RRPV values')
+    parser.add_argument('--pacipv-shadow-max-rrpvs', default=None, help='Comma-separated pacipv_shadow max RRPV values')
+    parser.add_argument('--pacipv-shadow-per-context', action='store_true', help='Enable per-context INST/DATA vectors for pacipv_shadow')
     parser.add_argument('--policies',
-                        default='belady,lfu,learned,prob_rank,pacipv,pacipv_lfu',
+                        default='belady,lfu,learned,prob_rank,pacipv',
                         help='Comma-separated policies forwarded to estimate_belady_opt.py')
     parser.add_argument('--train-trace-path-template', default=None,
                         help='Forwarded to estimate_belady_opt.py. Supports {benchmark} and {num_sets}.')
@@ -394,7 +482,7 @@ def main():
 
     selected_policies = parse_policy_list(args.policies)
     if uses_training(selected_policies) and not args.train_workloads:
-        parser.error('--train-workloads is required when prob_rank, pacipv, pacipv_lfu, or belady_driven_sampling is enabled')
+        parser.error('--train-workloads is required when prob_rank, pacipv, pacipv_shadow, belady_driven_sampling, or opt_distilled_srrip is enabled')
 
     train_workloads = parse_csv_list(args.train_workloads) if args.train_workloads else [None]
     eval_workloads = parse_csv_list(args.eval_workloads)
@@ -406,9 +494,14 @@ def main():
     fractions = parse_csv_list(args.train_fractions, float) if args.train_fractions else [None]
     seeds = parse_csv_list(args.seeds, int) if args.seeds else [None]
     bds_alphas = parse_csv_list(args.bds_alphas, float) if args.bds_alphas else [None]
+    srrip_max_rrpvs = parse_csv_list(args.srrip_max_rrpvs, int) if args.srrip_max_rrpvs else [None]
+    srrip_hit_deltas = parse_csv_list(args.srrip_hit_deltas, int) if args.srrip_hit_deltas else [None]
+    opt_distilled_max_rrpvs = parse_csv_list(args.opt_distilled_max_rrpvs, int) if args.opt_distilled_max_rrpvs else [None]
+    pacipv_shadow_max_rrpvs = parse_csv_list(args.pacipv_shadow_max_rrpvs, int) if args.pacipv_shadow_max_rrpvs else [None]
+    pacipv_shadow_per_context_values = [1 if args.pacipv_shadow_per_context else 0]
 
     configs = []
-    for (train_workload, eval_workload, num_sets, num_ways, scope, topk, sampling, frac, seed, bds_alpha) in itertools.product(
+    for (train_workload, eval_workload, num_sets, num_ways, scope, topk, sampling, frac, seed, bds_alpha, srrip_max_rrpv, srrip_hit_delta, opt_distilled_max_rrpv, pacipv_shadow_max_rrpv, pacipv_shadow_per_context) in itertools.product(
         train_workloads,
         eval_workloads,
         num_sets_list,
@@ -419,6 +512,11 @@ def main():
         fractions,
         seeds,
         bds_alphas,
+        srrip_max_rrpvs,
+        srrip_hit_deltas,
+        opt_distilled_max_rrpvs,
+        pacipv_shadow_max_rrpvs,
+        pacipv_shadow_per_context_values,
     ):
         configs.append({
             'train_workload': train_workload,
@@ -431,6 +529,11 @@ def main():
             'train_fraction': frac,
             'seed': seed,
             'bds_alpha': bds_alpha,
+            'srrip_max_rrpv': srrip_max_rrpv,
+            'srrip_hit_delta': srrip_hit_delta,
+            'opt_distilled_max_rrpv': opt_distilled_max_rrpv,
+            'pacipv_shadow_max_rrpv': pacipv_shadow_max_rrpv,
+            'pacipv_shadow_per_context': pacipv_shadow_per_context,
         })
 
     print(f'Total configurations: {len(configs)}')
@@ -443,22 +546,7 @@ def main():
             rows.append(row)
 
         summary_path = Path(args.summary_csv)
-        fieldnames = [
-            'status', 'returncode', 'train_workload', 'eval_workload',
-            'num_sets', 'num_ways', 'rank_model_scope', 'prob_top_k',
-            'rank_sampling', 'train_fraction', 'seed', 'bds_alpha',
-            'rank_model_file',
-            'pacipv_vectors_file', 'learned_inst_ipv', 'learned_data_ipv', 'learned_demand_ipv',
-            'avg_belady_rate', 'avg_lfu_rate', 'avg_learned_rate', 'avg_prob_rank_rate',
-            'avg_pacipv_rate', 'avg_pacipv_dist_rate', 'avg_pacipv_vec_rate', 'avg_pacipv_lfu_rate',
-            'avg_belady_driven_sampling_rate',
-            'output_csv', 'job_script', 'stderr_tail',
-        ]
-        with open(summary_path, 'w', newline='') as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            writer.writeheader()
-            for row in rows:
-                writer.writerow(row)
+        write_summary_csv(summary_path, rows)
 
         ok_count = sum(1 for r in rows if r['status'] == 'ok')
         missing_count = sum(1 for r in rows if r['status'] == 'missing')
@@ -477,17 +565,15 @@ def main():
 
         batch_size = args.slurm_batch_size
         batches = [configs[i:i + batch_size] for i in range(0, len(configs), batch_size)]
-        print(f'Submitting {len(batches)} SLURM job(s) '
-              f'({batch_size} configs/job, {len(configs)} configs total)')
+        print(f'Submitting {len(batches)} SLURM job(s) ({len(configs)} configs total)')
 
         for batch_idx, batch in enumerate(batches):
             job_path = make_slurm_job(batch_idx, batch, args, job_dir, dump_dir, selected_policies)
 
-            status = 'planned' if args.dry_run else 'submitted'
             for cfg in batch:
                 row = build_summary_row(args, cfg, selected_policies)
-                row['status'] = status
                 row['job_script'] = str(job_path)
+                row['status'] = 'planned' if args.dry_run else 'submitted'
                 rows.append(row)
 
             if args.dry_run:
@@ -501,25 +587,8 @@ def main():
                     if not args.continue_on_error:
                         break
 
-        # Write summary and exit — results are collected later once jobs finish
         summary_path = Path(args.summary_csv)
-        fieldnames = [
-            'status', 'returncode', 'train_workload', 'eval_workload',
-            'num_sets', 'num_ways', 'rank_model_scope', 'prob_top_k',
-            'rank_sampling', 'train_fraction', 'seed', 'bds_alpha',
-            'rank_model_file',
-            'pacipv_vectors_file', 'learned_inst_ipv', 'learned_data_ipv', 'learned_demand_ipv',
-            'avg_belady_rate', 'avg_lfu_rate', 'avg_learned_rate', 'avg_prob_rank_rate',
-            'avg_pacipv_rate', 'avg_pacipv_dist_rate', 'avg_pacipv_vec_rate', 'avg_pacipv_lfu_rate',
-            'avg_belady_driven_sampling_rate',
-            'output_csv', 'job_script', 'stderr_tail',
-        ]
-        with open(summary_path, 'w', newline='') as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            writer.writeheader()
-            for row in rows:
-                writer.writerow(row)
-
+        write_summary_csv(summary_path, rows)
         submitted = sum(1 for r in rows if r['status'] == 'submitted')
         planned = sum(1 for r in rows if r['status'] == 'planned')
         if args.dry_run:
@@ -527,6 +596,7 @@ def main():
         else:
             print(f'\nSubmitted {submitted} configs across {len(batches)} SLURM job(s)')
         print(f'Summary written to {summary_path}')
+        print(f'When jobs finish, re-run with --collect-existing-results to populate metrics.')
         return
 
     # ------------------------------------------------------------------ #
@@ -589,23 +659,7 @@ def main():
         return
 
     summary_path = Path(args.summary_csv)
-    fieldnames = [
-        'status', 'returncode', 'train_workload', 'eval_workload',
-        'num_sets', 'num_ways', 'rank_model_scope', 'prob_top_k',
-        'rank_sampling', 'train_fraction', 'seed', 'bds_alpha',
-        'rank_model_file',
-        'pacipv_vectors_file', 'learned_inst_ipv', 'learned_data_ipv', 'learned_demand_ipv',
-        'avg_belady_rate', 'avg_lfu_rate', 'avg_learned_rate', 'avg_prob_rank_rate',
-        'avg_pacipv_rate', 'avg_pacipv_dist_rate', 'avg_pacipv_vec_rate', 'avg_pacipv_lfu_rate',
-        'avg_belady_driven_sampling_rate',
-        'output_csv', 'job_script', 'stderr_tail',
-    ]
-
-    with open(summary_path, 'w', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        for row in rows:
-            writer.writerow(row)
+    write_summary_csv(summary_path, rows)
 
     ok_count = sum(1 for r in rows if r['status'] == 'ok')
     planned_count = sum(1 for r in rows if r['status'] == 'planned')

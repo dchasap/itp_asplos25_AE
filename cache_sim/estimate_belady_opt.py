@@ -35,7 +35,20 @@ from cache_sim.pacipv import (
     save_pacipv_vectors,
     simulate_pacipv_distribution,
     simulate_pacipv,
-    simulate_pacipv_lfu,
+)
+from cache_sim.pacipv_shadow_distill import (
+    load_pacipv_shadow_vectors,
+    save_pacipv_shadow_vectors,
+    train_pacipv_shadow_distilled,
+)
+from cache_sim.opt_distilled_srrip import (
+    load_opt_distilled_srrip,
+    save_opt_distilled_srrip,
+    simulate_opt_distilled_srrip,
+    train_opt_distilled_srrip,
+)
+from cache_sim.srrip import (
+    simulate_vanilla_srrip,
 )
 from cache_sim.prob_rank import (
     collect_belady_rank_counts,
@@ -90,16 +103,39 @@ parser.add_argument('--pacipv-vectors-file', '--pacipv-output-file', dest='pacip
                     help="Output text file with learned PACIPV vectors and ready-to-use env exports.")
 parser.add_argument('--pacipv-train-max-accesses', dest='pacipv_train_max_accesses', type=int, default=0,
                     help="Optional cap of accesses per training benchmark for PACIPV vector learning (0 = no cap).")
+parser.add_argument('--learn-pacipv-shadow', dest='learn_pacipv_shadow', action='store_true',
+                    help="Learn PACIPV vector by Belady-guided shadow SRRIP state distillation.")
+parser.add_argument('--pacipv-shadow-max-rrpv', dest='pacipv_shadow_max_rrpv', type=int, default=3,
+                    help="Maximum RRPV used for PACIPV shadow distillation (default: 3).")
+parser.add_argument('--pacipv-shadow-per-context', dest='pacipv_shadow_per_context', action='store_true',
+                    help="Learn separate INST/DATA vectors for PACIPV shadow distillation.")
+parser.add_argument('--pacipv-shadow-vectors-file', dest='pacipv_shadow_vectors_file', default=None,
+                    help="Path to save/load PACIPV shadow-distilled vectors.")
+parser.add_argument('--learn-opt-distilled-srrip', dest='learn_opt_distilled_srrip', action='store_true',
+                    help="Learn OPT-distilled SRRIP IPV + hit-correction from training traces.")
+parser.add_argument('--opt-distilled-srrip-file', dest='opt_distilled_srrip_file', default=None,
+                    help="Path to save/load OPT-distilled SRRIP policy parameters.")
+parser.add_argument('--opt-distilled-max-rrpv', dest='opt_distilled_max_rrpv', type=int, default=3,
+                    help="Maximum RRPV for OPT-distilled SRRIP policy.")
+parser.add_argument('--opt-distilled-insert-policy', dest='opt_distilled_insert_policy',
+                    choices=['sample', 'argmax'], default='sample',
+                    help="Insertion policy for OPT-distilled SRRIP runtime: sample or argmax IPV.")
+parser.add_argument('--opt-distilled-seed', dest='opt_distilled_seed', type=int, default=1,
+                    help="Base seed for OPT-distilled SRRIP sampling at evaluation time.")
+parser.add_argument('--srrip-max-rrpv', dest='srrip_max_rrpv', type=int, default=None,
+                    help="Maximum RRPV for vanilla SRRIP (default: num_ways-1).")
+parser.add_argument('--srrip-hit-delta', dest='srrip_hit_delta', type=int, default=1,
+                    help="Hit promotion delta for vanilla SRRIP (default: 1).")
 parser.add_argument('--bds-alpha', dest='bds_alpha', type=float, default=1.0,
                     help="Hit update strength alpha for belady_driven_sampling (0..1).")
 parser.add_argument('--output-dir', dest='output_dir', default='.',
                     help="Directory where the per-run result CSV will be written.")
-parser.add_argument('--policies', dest='policies', default='belady,lfu,learned,prob_rank,pacipv,pacipv_lfu',
-                    help="Comma-separated policies to run. Supported: belady,lfu,learned,prob_rank,pacipv,pacipv_lfu,belady_driven_sampling")
+parser.add_argument('--policies', dest='policies', default='belady,lfu,learned,prob_rank,pacipv',
+                    help="Comma-separated policies to run. Supported: belady,lfu,learned,prob_rank,pacipv,pacipv_shadow,belady_driven_sampling,srrip,opt_distilled_srrip")
 
 
 def parse_policy_list(policy_str):
-    supported = ['belady', 'lfu', 'learned', 'prob_rank', 'pacipv', 'pacipv_lfu', 'belady_driven_sampling']
+    supported = ['belady', 'lfu', 'learned', 'prob_rank', 'pacipv', 'pacipv_shadow', 'belady_driven_sampling', 'srrip', 'opt_distilled_srrip']
     selected = [p.strip() for p in policy_str.split(',') if p.strip()]
     invalid = [p for p in selected if p not in supported]
     if invalid:
@@ -116,22 +152,24 @@ def uses_prob_rank(selected_policies):
 
 
 def uses_pacipv(selected_policies):
-    return 'pacipv' in selected_policies or 'pacipv_lfu' in selected_policies
+    return 'pacipv' in selected_policies
 
 
 def uses_training(selected_policies):
     return (
         uses_prob_rank(selected_policies)
         or uses_pacipv(selected_policies)
+        or ('pacipv_shadow' in selected_policies)
         or ('belady_driven_sampling' in selected_policies)
+        or ('opt_distilled_srrip' in selected_policies)
     )
 
 
 def resolve_runtime_options(args, selected_policies):
     if uses_training(selected_policies) and not args.train_workload:
         raise ValueError(
-            "--train-workload is required when prob_rank, pacipv, pacipv_lfu, or "
-            "belady_driven_sampling is enabled."
+            "--train-workload is required when prob_rank, pacipv, or "
+            "pacipv_shadow, belady_driven_sampling, or opt_distilled_srrip is enabled."
         )
 
     return {
@@ -141,6 +179,8 @@ def resolve_runtime_options(args, selected_policies):
         'rank_sampling': args.rank_sampling if uses_prob_rank(selected_policies) and args.rank_sampling is not None else ('weighted' if uses_prob_rank(selected_policies) else None),
         'seed': args.seed if uses_prob_rank(selected_policies) and args.seed is not None else (1 if uses_prob_rank(selected_policies) else None),
         'pacipv_output_file': (args.pacipv_output_file or 'pacipv_vectors.txt') if uses_pacipv(selected_policies) else None,
+        'pacipv_shadow_vectors_file': (args.pacipv_shadow_vectors_file or 'pacipv_shadow_vectors.txt') if ('pacipv_shadow' in selected_policies) else None,
+        'opt_distilled_srrip_file': (args.opt_distilled_srrip_file or 'opt_distilled_srrip.txt') if ('opt_distilled_srrip' in selected_policies) else None,
     }
 
 
@@ -163,6 +203,15 @@ def build_output_csv_name(args, selected_policies, runtime_options):
     if 'belady_driven_sampling' in selected_policies:
         alpha_tag = f"{args.bds_alpha:.3f}".replace('.', 'p')
         parts.append(f"alpha.{alpha_tag}")
+    if 'srrip' in selected_policies:
+        srrip_max_rrpv = args.srrip_max_rrpv if args.srrip_max_rrpv is not None else int(args.num_ways) - 1
+        parts.append(f"srrip_max.{srrip_max_rrpv}")
+        parts.append(f"srrip_delta.{args.srrip_hit_delta}")
+    if 'pacipv_shadow' in selected_policies:
+        parts.append(f"pacipv_shadow_rrpv.{args.pacipv_shadow_max_rrpv}")
+        parts.append(f"pacipv_shadow_ctx.{1 if args.pacipv_shadow_per_context else 0}")
+    if 'opt_distilled_srrip' in selected_policies:
+        parts.append(f"opt_distilled_rrpv.{args.opt_distilled_max_rrpv}")
     if uses_training(selected_policies) and args.train_fraction is not None:
         frac_tag = f"{runtime_options['train_fraction']:.3f}".replace('.', 'p')
         parts.append(f"frac.{frac_tag}")
@@ -203,6 +252,26 @@ def validate_trace_paths(path_template, benchmarks, num_sets, trace_role):
     return resolved_paths
 
 
+def _normalize_trace_for_srrip(trace, num_sets):
+    """Normalize heterogeneous trace items into (set_id, address) tuples for SRRIP."""
+    normalized = []
+    for item in trace:
+        if isinstance(item, (tuple, list)) and len(item) >= 2:
+            first = int(item[0])
+            second = int(item[1])
+            if 0 <= first < num_sets:
+                normalized.append((first, second))
+            else:
+                # If first field is an address-like value, derive set from it.
+                normalized.append((first % num_sets, first))
+            continue
+
+        address = int(item)
+        normalized.append((address % num_sets, address))
+
+    return normalized
+
+
 def main():
     args = parser.parse_args()
     if not 0.0 <= args.bds_alpha <= 1.0:
@@ -217,8 +286,10 @@ def main():
     run_learned = 'learned' in selected_policies
     run_prob_rank = 'prob_rank' in selected_policies
     run_pacipv = 'pacipv' in selected_policies
-    run_pacipv_lfu = 'pacipv_lfu' in selected_policies
+    run_pacipv_shadow = 'pacipv_shadow' in selected_policies
     run_belady_driven_sampling = 'belady_driven_sampling' in selected_policies
+    run_srrip = 'srrip' in selected_policies
+    run_opt_distilled_srrip = 'opt_distilled_srrip' in selected_policies
 
     runtime_options = resolve_runtime_options(args, selected_policies)
     train_fraction = runtime_options['train_fraction']
@@ -227,6 +298,8 @@ def main():
     rank_sampling = runtime_options['rank_sampling']
     seed = runtime_options['seed']
     pacipv_output_file = runtime_options['pacipv_output_file']
+    pacipv_shadow_vectors_file = runtime_options['pacipv_shadow_vectors_file']
+    opt_distilled_srrip_file = runtime_options['opt_distilled_srrip_file']
 
     train_benchmarks = []
     if uses_training(selected_policies):
@@ -255,12 +328,32 @@ def main():
     if args.pacipv_learn_prefetch:
         print("Ignoring --pacipv-learn-prefetch: sweep is configured to learn demand IPV only.")
 
-    if (run_pacipv or run_pacipv_lfu) and not args.learn_pacipv_vectors:
+    if run_pacipv and not args.learn_pacipv_vectors:
         print("PACIPV policy selected; enabling --learn-pacipv-vectors automatically.")
         args.learn_pacipv_vectors = True
-    if not (run_pacipv or run_pacipv_lfu) and args.learn_pacipv_vectors:
-        print("Ignoring --learn-pacipv-vectors because neither pacipv nor pacipv_lfu was selected.")
+    if not run_pacipv and args.learn_pacipv_vectors:
+        print("Ignoring --learn-pacipv-vectors because pacipv was not selected.")
         args.learn_pacipv_vectors = False
+
+    if run_pacipv_shadow and not args.learn_pacipv_shadow:
+        if pacipv_shadow_vectors_file and os.path.exists(pacipv_shadow_vectors_file):
+            print(f"Using existing PACIPV shadow vectors from {pacipv_shadow_vectors_file}.")
+        else:
+            print("pacipv_shadow policy selected; enabling --learn-pacipv-shadow automatically.")
+            args.learn_pacipv_shadow = True
+    if not run_pacipv_shadow and args.learn_pacipv_shadow:
+        print("Ignoring --learn-pacipv-shadow because pacipv_shadow was not selected.")
+        args.learn_pacipv_shadow = False
+
+    if run_opt_distilled_srrip and not args.learn_opt_distilled_srrip:
+        if opt_distilled_srrip_file and os.path.exists(opt_distilled_srrip_file):
+            print(f"Using existing OPT-distilled SRRIP policy from {opt_distilled_srrip_file}.")
+        else:
+            print("opt_distilled_srrip policy selected; enabling --learn-opt-distilled-srrip automatically.")
+            args.learn_opt_distilled_srrip = True
+    if not run_opt_distilled_srrip and args.learn_opt_distilled_srrip:
+        print("Ignoring --learn-opt-distilled-srrip because opt_distilled_srrip was not selected.")
+        args.learn_opt_distilled_srrip = False
 
     # ------------------------------------------------------------------
     # Rank model: load from file or train from scratch
@@ -302,7 +395,9 @@ def main():
                 save_rank_model(rank_model_path, train_per_set_counts, train_global_counts)
 
     pacipv_result = None
+    pacipv_shadow_result = None
     bds_result = None
+    opt_distilled_srrip_result = None
 
     # ------------------------------------------------------------------
     # Learn PACIPV vectors from training traces (optional)
@@ -394,6 +489,75 @@ def main():
         )
         print("Learned belady_driven_sampling context distributions from training traces.")
 
+    if run_pacipv_shadow:
+        if pacipv_shadow_vectors_file and os.path.exists(pacipv_shadow_vectors_file) and not args.learn_pacipv_shadow:
+            pacipv_shadow_result = load_pacipv_shadow_vectors(
+                pacipv_shadow_vectors_file,
+                max_rrpv=args.pacipv_shadow_max_rrpv,
+            )
+        else:
+            train_trace_entries = []
+            for benchmark in train_benchmarks:
+                te = load_trace_entries(train_trace_paths[benchmark])
+                if train_fraction < 1.0:
+                    te = te[:max(1, int(len(te) * train_fraction))]
+                train_trace_entries.extend(te)
+
+            if not train_trace_entries:
+                print(
+                    f"No usable training traces found for pacipv_shadow "
+                    f"({len(train_benchmarks)} benchmarks tried)."
+                )
+                sys.exit(1)
+
+            pacipv_shadow_result = train_pacipv_shadow_distilled(
+                num_sets,
+                num_ways,
+                train_trace_entries,
+                max_rrpv=args.pacipv_shadow_max_rrpv,
+                per_context=args.pacipv_shadow_per_context,
+            )
+            learned_ipv = pacipv_shadow_result.get('ipv_by_context', pacipv_shadow_result['ipv_vec'])
+            print(
+                "Learned PACIPV shadow-distilled vectors: "
+                f"data={learned_ipv[CTX_DATA]}, inst={learned_ipv[CTX_INST]}"
+            )
+            if pacipv_shadow_vectors_file:
+                save_pacipv_shadow_vectors(pacipv_shadow_vectors_file, pacipv_shadow_result)
+
+    if run_opt_distilled_srrip:
+        if opt_distilled_srrip_file and os.path.exists(opt_distilled_srrip_file) and not args.learn_opt_distilled_srrip:
+            opt_distilled_srrip_result = load_opt_distilled_srrip(opt_distilled_srrip_file)
+        else:
+            train_trace = []
+            for benchmark in train_benchmarks:
+                te = load_trace_entries(train_trace_paths[benchmark])
+                ptes = trace_entries_to_ptes(te)
+                if train_fraction < 1.0:
+                    ptes = ptes[:max(1, int(len(ptes) * train_fraction))]
+                train_trace.extend(ptes)
+
+            if not train_trace:
+                print(
+                    f"No usable training traces found for opt_distilled_srrip "
+                    f"({len(train_benchmarks)} benchmarks tried)."
+                )
+                sys.exit(1)
+
+            opt_distilled_srrip_result = train_opt_distilled_srrip(
+                num_sets,
+                num_ways,
+                train_trace,
+                max_rrpv=args.opt_distilled_max_rrpv,
+            )
+            print(
+                "Learned OPT-distilled SRRIP: "
+                f"IPV={opt_distilled_srrip_result['ipv_probs']}, "
+                f"DELTA={opt_distilled_srrip_result['hit_deltas']}"
+            )
+            if opt_distilled_srrip_file:
+                save_opt_distilled_srrip(opt_distilled_srrip_file, opt_distilled_srrip_result)
+
     # print global rank histogram only when prob_rank is enabled
     if run_prob_rank:
         total_evictions = sum(train_global_counts.values())
@@ -416,8 +580,10 @@ def main():
         'learned': 'learned_rate',
         'prob_rank': 'prob_rank_rate',
         'pacipv': 'pacipv_rate',
-        'pacipv_lfu': 'pacipv_lfu_rate',
+        'pacipv_shadow': 'pacipv_shadow_rate',
         'belady_driven_sampling': 'belady_driven_sampling_rate',
+        'srrip': 'srrip_rate',
+        'opt_distilled_srrip': 'opt_distilled_srrip_rate',
     }
     for policy in selected_policies:
         results[metric_by_policy[policy]] = []
@@ -478,42 +644,42 @@ def main():
 
         pacipv_rate = float('nan')
         pacipv_dist_rate = float('nan')
-        pacipv_vec_rate = float('nan')
-        pacipv_lfu_rate = float('nan')
+        pacipv_shadow_rate = float('nan')
         bds_rate = float('nan')
-        if pacipv_result is not None and (run_pacipv or run_pacipv_lfu):
+        srrip_rate = float('nan')
+        opt_distilled_srrip_rate = float('nan')
+        if pacipv_result is not None and run_pacipv:
             learned_ipv = pacipv_result.get('ipv_by_context', pacipv_result['ipv_vec'])
             pacipv_probs = pacipv_result.get('rrpv_probs_by_context')
-            if run_pacipv:
-                if pacipv_probs:
-                    # Run PACIPV using insertion sampling from learned distributions.
-                    pacipv_dist_rate = simulate_pacipv_distribution(
-                        num_sets,
-                        num_ways,
-                        trace_entries,
-                        pacipv_probs,
-                        max_rrpv=pacipv_result['max_rrpv'],
-                        seed=bench_idx + 1,
-                    )
-                else:
-                    pacipv_dist_rate = float('nan')
-                pacipv_vec_rate = simulate_pacipv(
+            if pacipv_probs:
+                # Run PACIPV using insertion sampling from learned distributions.
+                pacipv_dist_rate = simulate_pacipv_distribution(
                     num_sets,
                     num_ways,
                     trace_entries,
-                    learned_ipv,
+                    pacipv_probs,
                     max_rrpv=pacipv_result['max_rrpv'],
+                    seed=bench_idx + 1,
                 )
-                # PACIPV now uses the vector selected by exhaustive search.
-                # Keep dist metric for analysis, but pacipv_rate tracks vector PACIPV.
-                pacipv_rate = pacipv_vec_rate
-            pacipv_lfu_rate = simulate_pacipv_lfu(
+            else:
+                pacipv_dist_rate = float('nan')
+            pacipv_rate = simulate_pacipv(
                 num_sets,
                 num_ways,
                 trace_entries,
                 learned_ipv,
                 max_rrpv=pacipv_result['max_rrpv'],
-            ) if run_pacipv_lfu else float('nan')
+            )
+
+        if run_pacipv_shadow and pacipv_shadow_result is not None:
+            learned_ipv = pacipv_shadow_result.get('ipv_by_context', pacipv_shadow_result['ipv_vec'])
+            pacipv_shadow_rate = simulate_pacipv(
+                num_sets,
+                num_ways,
+                trace_entries,
+                learned_ipv,
+                max_rrpv=pacipv_shadow_result['max_rrpv'],
+            )
 
         if run_belady_driven_sampling and bds_result is not None:
             bds_rate = simulate_belady_driven_sampling(
@@ -524,6 +690,35 @@ def main():
                 max_rrpv=bds_result['max_rrpv'],
                 seed=bench_idx + 1,
                 alpha=args.bds_alpha,
+            )
+
+        if run_srrip:
+            srrip_max_rrpv = args.srrip_max_rrpv if args.srrip_max_rrpv is not None else num_ways - 1
+            if srrip_max_rrpv < 0:
+                raise ValueError("--srrip-max-rrpv must be >= 0.")
+            # Vanilla SRRIP insertion policy: insert near LRU at max_rrpv-1.
+            insert_rrpv = max(0, srrip_max_rrpv - 1)
+            srrip_trace = _normalize_trace_for_srrip(trace, num_sets)
+            srrip_result = simulate_vanilla_srrip(
+                srrip_trace,
+                num_sets,
+                num_ways,
+                insert_rrpv=insert_rrpv,
+                hit_delta=args.srrip_hit_delta,
+                max_rrpv=srrip_max_rrpv,
+            )
+            srrip_rate = srrip_result['miss_rate']
+
+        if run_opt_distilled_srrip and opt_distilled_srrip_result is not None:
+            opt_distilled_max_rrpv = opt_distilled_srrip_result.get('max_rrpv', args.opt_distilled_max_rrpv)
+            opt_distilled_srrip_rate = simulate_opt_distilled_srrip(
+                num_sets,
+                num_ways,
+                trace_entries,
+                opt_distilled_srrip_result,
+                max_rrpv=opt_distilled_max_rrpv,
+                insert_policy=args.opt_distilled_insert_policy,
+                seed=args.opt_distilled_seed + bench_idx,
             )
 
         metric_parts = [f"total accesses: {len(trace)}"]
@@ -537,11 +732,14 @@ def main():
             metric_parts.append(f"prob-rank misses: {prob_rank_rate:.3f}")
         if run_pacipv:
             metric_parts.append(f"pacipv(dist) misses: {pacipv_dist_rate:.3f}")
-            metric_parts.append(f"pacipv(vec) misses: {pacipv_vec_rate:.3f}")
-        if run_pacipv_lfu:
-            metric_parts.append(f"pacipv-lfu misses: {pacipv_lfu_rate:.3f}")
+        if run_pacipv_shadow:
+            metric_parts.append(f"pacipv-shadow misses: {pacipv_shadow_rate:.3f}")
         if run_belady_driven_sampling:
             metric_parts.append(f"belady-driven-sampling misses: {bds_rate:.3f}")
+        if run_srrip:
+            metric_parts.append(f"srrip misses: {srrip_rate:.3f}")
+        if run_opt_distilled_srrip:
+            metric_parts.append(f"opt-distilled-srrip misses: {opt_distilled_srrip_rate:.3f}")
         print(', '.join(metric_parts))
 
         results['benchmark'].append(benchmark)
@@ -556,11 +754,14 @@ def main():
         if run_pacipv:
             results['pacipv_rate'].append(pacipv_rate)
             results.setdefault('pacipv_dist_rate', []).append(pacipv_dist_rate)
-            results.setdefault('pacipv_vec_rate', []).append(pacipv_vec_rate)
-        if run_pacipv_lfu:
-            results['pacipv_lfu_rate'].append(pacipv_lfu_rate)
+        if run_pacipv_shadow:
+            results['pacipv_shadow_rate'].append(pacipv_shadow_rate)
         if run_belady_driven_sampling:
             results['belady_driven_sampling_rate'].append(bds_rate)
+        if run_srrip:
+            results['srrip_rate'].append(srrip_rate)
+        if run_opt_distilled_srrip:
+            results['opt_distilled_srrip_rate'].append(opt_distilled_srrip_rate)
 
     if run_belady:
         print(f"Average belady rate: {safe_mean(results['belady_rate']):.4f}")
@@ -572,11 +773,14 @@ def main():
         print(f"Average prob-rank rate: {safe_mean(results['prob_rank_rate']):.4f}")
     if run_pacipv:
         print(f"Average pacipv(dist) rate: {safe_mean(results['pacipv_dist_rate']):.4f}")
-        print(f"Average pacipv(vec) rate: {safe_mean(results['pacipv_vec_rate']):.4f}")
-    if run_pacipv_lfu:
-        print(f"Average pacipv-lfu rate: {safe_mean(results['pacipv_lfu_rate']):.4f}")
+    if run_pacipv_shadow:
+        print(f"Average pacipv-shadow rate: {safe_mean(results['pacipv_shadow_rate']):.4f}")
     if run_belady_driven_sampling:
         print(f"Average belady-driven-sampling rate: {safe_mean(results['belady_driven_sampling_rate']):.4f}")
+    if run_srrip:
+        print(f"Average srrip rate: {safe_mean(results['srrip_rate']):.4f}")
+    if run_opt_distilled_srrip:
+        print(f"Average opt-distilled-srrip rate: {safe_mean(results['opt_distilled_srrip_rate']):.4f}")
     if run_prob_rank and run_belady:
         gaps = [p - b for p, b in zip(results['prob_rank_rate'], results['belady_rate'])]
         print(f"Avg gap (prob-rank - belady): {safe_mean(gaps):.4f}")
@@ -589,7 +793,7 @@ def main():
         writer = csv.writer(f)
         metric_columns = [metric_by_policy[p] for p in selected_policies]
         if run_pacipv:
-            metric_columns.extend(['pacipv_dist_rate', 'pacipv_vec_rate'])
+            metric_columns.extend(['pacipv_dist_rate'])
         writer.writerow(['benchmark'] + metric_columns)
         for i in range(len(results['benchmark'])):
             row = [results['benchmark'][i]]

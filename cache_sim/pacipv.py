@@ -233,34 +233,6 @@ def simulate_pacipv(num_sets, num_ways, trace_entries, ipv_vec, max_rrpv=3):
     return misses / len(trace_entries)
 
 
-def simulate_pacipv_lfu(num_sets, num_ways, trace_entries, ipv_vec, max_rrpv=3):
-    sets = [dict() for _ in range(num_sets)]
-    misses = 0
-
-    for pte, is_instr in trace_entries:
-        set_id = hash(pte) % num_sets
-        cache = sets[set_id]
-        ctx_ipv = resolve_ipv_for_context(ipv_vec, is_instr, max_rrpv)
-
-        if pte in cache:
-            old_freq = max(0, min(max_rrpv, cache[pte]))
-            old_rrpv = max_rrpv - old_freq
-            new_rrpv = max(0, min(max_rrpv, ctx_ipv[old_rrpv]))
-            cache[pte] = max_rrpv - new_rrpv
-            continue
-
-        misses += 1
-
-        if len(cache) >= num_ways:
-            victim = min(cache, key=lambda k: (cache[k], str(k)))
-            del cache[victim]
-
-        ins_rrpv = max(0, min(max_rrpv, ctx_ipv[4]))
-        cache[pte] = max_rrpv - ins_rrpv
-
-    return misses / len(trace_entries)
-
-
 def reachable_ipv_states(ipv, max_rrpv):
     reachable = {ipv[4]}
     changed = True
@@ -345,7 +317,6 @@ def learn_pacipv_vectors(num_sets, num_ways, trace_loaders, max_rrpv=3):
 
     pacipv_dist_rates = []
     pacipv_rates = []
-    pacipv_lfu_rates = []
     for trace_idx, loader in enumerate(trace_loaders):
         trace = loader()
         pacipv_dist_rates.append(
@@ -359,7 +330,6 @@ def learn_pacipv_vectors(num_sets, num_ways, trace_loaders, max_rrpv=3):
             )
         )
         pacipv_rates.append(simulate_pacipv(num_sets, num_ways, trace, context_ipv, max_rrpv))
-        pacipv_lfu_rates.append(simulate_pacipv_lfu(num_sets, num_ways, trace, context_ipv, max_rrpv))
         del trace
 
     return {
@@ -373,7 +343,6 @@ def learn_pacipv_vectors(num_sets, num_ways, trace_loaders, max_rrpv=3):
         'avg_belady_rate': safe_mean(belady_rates),
         'avg_pacipv_dist_rate': safe_mean(pacipv_dist_rates),
         'avg_pacipv_rate': safe_mean(pacipv_rates),
-        'avg_pacipv_lfu_rate': safe_mean(pacipv_lfu_rates),
     }
 
 
@@ -396,7 +365,7 @@ def save_pacipv_vectors(path, result):
         if 'avg_pacipv_dist_rate' in result:
             f.write(f'# avg_pacipv_dist_rate={result["avg_pacipv_dist_rate"]:.6f}\n')
         f.write(f'# avg_pacipv_rate={result["avg_pacipv_rate"]:.6f}\n')
-        f.write(f'# avg_pacipv_lfu_rate={result["avg_pacipv_lfu_rate"]:.6f}\n\n')
+        f.write('\n')
 
         if probs:
             f.write('# RRPV distributions inferred from Belady reuse distance\n')
@@ -415,7 +384,5 @@ def save_pacipv_vectors(path, result):
         f.write('export TXVC_PACIPV_DATA_VEC="' + data_ipv_str + '"\n')
         f.write('export TXVC_PACIPV_DEMAND_VEC="' + data_ipv_str + '"\n')
         f.write('export TXVC_REP_POLICY=pacipv\n')
-        f.write('# or\n')
-        f.write('export TXVC_REP_POLICY=pacipv_lfu\n')
 
     print(f"PACIPV vectors saved to {path}")

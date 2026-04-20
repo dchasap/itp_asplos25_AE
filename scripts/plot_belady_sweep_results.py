@@ -13,7 +13,7 @@ def parse_csv_list(value, cast=str):
 
 
 def parse_policy_list(policy_str):
-    supported = ['belady', 'lfu', 'learned', 'prob_rank', 'pacipv', 'pacipv_lfu', 'belady_driven_sampling']
+    supported = ['belady', 'lfu', 'learned', 'prob_rank', 'pacipv', 'pacipv_shadow', 'belady_driven_sampling', 'srrip', 'opt_distilled_srrip']
     raw = [p.strip() for p in policy_str.split(',') if p.strip()]
     if not raw:
         return supported
@@ -34,17 +34,30 @@ def uses_prob_rank(selected_policies):
 
 
 def uses_pacipv(selected_policies):
-    return 'pacipv' in selected_policies or 'pacipv_lfu' in selected_policies
+    return 'pacipv' in selected_policies
+
+
+def uses_pacipv_shadow(selected_policies):
+    return 'pacipv_shadow' in selected_policies
 
 
 def uses_belady_driven_sampling(selected_policies):
     return 'belady_driven_sampling' in selected_policies
 
 
+def uses_srrip(selected_policies):
+    return 'srrip' in selected_policies
+
+
+def uses_opt_distilled_srrip(selected_policies):
+    return 'opt_distilled_srrip' in selected_policies
+
+
 def uses_training(selected_policies):
     return (
         uses_prob_rank(selected_policies)
         or uses_pacipv(selected_policies)
+        or uses_pacipv_shadow(selected_policies)
         or uses_belady_driven_sampling(selected_policies)
     )
 
@@ -56,8 +69,10 @@ def policy_rate_key(policy):
         'learned': 'avg_learned_rate',
         'prob_rank': 'avg_prob_rank_rate',
         'pacipv': 'avg_pacipv_rate',
-        'pacipv_lfu': 'avg_pacipv_lfu_rate',
+        'pacipv_shadow': 'avg_pacipv_shadow_rate',
         'belady_driven_sampling': 'avg_belady_driven_sampling_rate',
+        'srrip': 'avg_srrip_rate',
+        'opt_distilled_srrip': 'avg_opt_distilled_srrip_rate',
     }[policy]
 
 
@@ -68,8 +83,10 @@ def policy_input_key(policy):
         'learned': 'learned_rate',
         'prob_rank': 'prob_rank_rate',
         'pacipv': 'pacipv_rate',
-        'pacipv_lfu': 'pacipv_lfu_rate',
+        'pacipv_shadow': 'pacipv_shadow_rate',
         'belady_driven_sampling': 'belady_driven_sampling_rate',
+        'srrip': 'srrip_rate',
+        'opt_distilled_srrip': 'opt_distilled_srrip_rate',
     }[policy]
 
 
@@ -80,8 +97,10 @@ def policy_label(policy):
         'learned': 'Learned Table',
         'prob_rank': 'Prob Rank',
         'pacipv': 'PACIPV',
-        'pacipv_lfu': 'PACIPV LFU',
+        'pacipv_shadow': 'PACIPV Shadow Distill',
         'belady_driven_sampling': 'Belady-Driven Sampling',
+        'srrip': 'Vanilla SRRIP',
+        'opt_distilled_srrip': 'OPT-Distilled SRRIP',
     }[policy]
 
 
@@ -164,6 +183,36 @@ def safe_mean(values):
     return sum(vals) / len(vals)
 
 
+def label_bar_container(ax, bar_container, values, *, fontsize=8, rotation=90):
+    finite_vals = [v for v in values if not math.isnan(v)]
+    if not finite_vals:
+        return
+
+    y_max = max(finite_vals)
+    y_offset = max(0.003, y_max * 0.01)
+    for rect, value in zip(bar_container, values):
+        if math.isnan(value):
+            continue
+        ax.text(
+            rect.get_x() + rect.get_width() / 2.0,
+            rect.get_height() + y_offset,
+            f"{value:.3f}",
+            ha='center',
+            va='bottom',
+            fontsize=fontsize,
+            rotation=rotation,
+        )
+
+
+def print_plot_values(title, entries):
+    print(title)
+    for label, value in entries:
+        if math.isnan(value):
+            print(f"  {label}: nan")
+        else:
+            print(f"  {label}: {value:.6f}")
+
+
 def short_cfg_label(cfg):
     keys = [
         ('train_workload', 'tw'),
@@ -200,8 +249,6 @@ def write_summary_csv(path, rows):
         'avg_prob_rank_rate',
         'avg_pacipv_rate',
         'avg_pacipv_dist_rate',
-        'avg_pacipv_vec_rate',
-        'avg_pacipv_lfu_rate',
         'avg_belady_driven_sampling_rate',
         'avg_gap_prob_minus_belady',
     ]
@@ -267,8 +314,6 @@ def load_rows_from_sweep_summary(summary_csv, provided_filters, active_filter_ke
             row['avg_prob_rank_rate'] = parse_metric_value(raw_row.get('avg_prob_rank_rate'))
             row['avg_pacipv_rate'] = parse_metric_value(raw_row.get('avg_pacipv_rate'))
             row['avg_pacipv_dist_rate'] = parse_metric_value(raw_row.get('avg_pacipv_dist_rate'))
-            row['avg_pacipv_vec_rate'] = parse_metric_value(raw_row.get('avg_pacipv_vec_rate'))
-            row['avg_pacipv_lfu_rate'] = parse_metric_value(raw_row.get('avg_pacipv_lfu_rate'))
             row['avg_belady_driven_sampling_rate'] = parse_metric_value(raw_row.get('avg_belady_driven_sampling_rate'))
 
             if 'belady' in selected_policies and 'prob_rank' in selected_policies:
@@ -308,16 +353,20 @@ def render_policy_only_plot(rows, plots_dir, prefix, selected_policies, file_for
         vals = [r[key] for r in found if not math.isnan(r[key])]
         y_vals.append(safe_mean(vals))
 
-    fig, ax = plt.subplots(figsize=(max(7, 1.2 * len(labels)), 5.5))
+    fig, ax = plt.subplots(figsize=(max(7, 1.2 * len(labels)), 5.8))
     x_positions = list(range(len(labels)))
-    ax.bar(x_positions, y_vals, width=0.65, alpha=0.9)
+    bars = ax.bar(x_positions, y_vals, width=0.65, alpha=0.9, label='Miss-Rate')
     ax.set_title('Miss-Rate by Policy')
     ax.set_xlabel('Policy')
     ax.set_ylabel('Miss-Rate')
     ax.set_xticks(x_positions)
     ax.set_xticklabels(labels)
+    ax.set_axisbelow(True)
     ax.grid(axis='y', alpha=0.25)
+    label_bar_container(ax, bars, y_vals)
     fig.tight_layout()
+
+    print_plot_values('Bar values by policy:', list(zip(labels, y_vals)))
 
     path = os.path.join(plots_dir, f'{prefix}_bar_miss_rates_by_policy.{file_format}')
     fig.savefig(path, dpi=170)
@@ -393,6 +442,7 @@ def render_plots(rows, plots_dir, prefix, baseline_cfg, selected_policies, featu
         offset_start = -0.4 + (bar_width / 2.0)
 
         any_bar = False
+        plot_value_entries = []
         for method_idx, (rate_key, method_label) in enumerate(method_specs):
             y_vals = []
             for value in feature_values:
@@ -404,7 +454,9 @@ def render_plots(rows, plots_dir, prefix, baseline_cfg, selected_policies, featu
                 any_bar = True
 
             bar_positions = [x + offset_start + (method_idx * bar_width) for x in x_positions]
-            ax.bar(bar_positions, y_vals, width=bar_width, label=method_label, alpha=0.9)
+            bars = ax.bar(bar_positions, y_vals, width=bar_width, label=method_label, alpha=0.9)
+            label_bar_container(ax, bars, y_vals, fontsize=7)
+            plot_value_entries.extend((f"{method_label} @ {tick_labels[idx]}", value) for idx, value in enumerate(y_vals))
 
         if not any_bar:
             plt.close(fig)
@@ -422,8 +474,9 @@ def render_plots(rows, plots_dir, prefix, baseline_cfg, selected_policies, featu
         ax.set_xticklabels(tick_labels)
         ax.set_xlim(-0.5, len(feature_values) - 0.5)
         ax.margins(x=0.01)
+        ax.set_axisbelow(True)
         ax.grid(axis='y', alpha=0.25)
-        ax.legend(loc='best')
+        ax.legend(loc='upper center', bbox_to_anchor=(0.5, 1.12), ncol=min(len(method_specs), 6), borderaxespad=0)
 
         # Keep labels readable for categorical features with long names.
         if any(len(lbl) > 12 for lbl in tick_labels):
@@ -443,6 +496,8 @@ def render_plots(rows, plots_dir, prefix, baseline_cfg, selected_policies, featu
         fig.savefig(path, dpi=170)
         plot_paths.append(path)
         plt.close(fig)
+
+        print_plot_values(f'Bar values for {feature_name}:', plot_value_entries)
 
     return plot_paths
 
@@ -482,7 +537,7 @@ def main():
     parser.add_argument('--missing-policy', choices=['skip', 'error'], default='skip',
                         help='How to handle missing expected result files')
     parser.add_argument('--policies',
-                        default='belady,lfu,learned,prob_rank,pacipv,pacipv_lfu,belady_driven_sampling',
+                        default='belady,lfu,learned,prob_rank,pacipv,belady_driven_sampling',
                         help='Comma-separated policies to include in summary/plots '
                              '(same names as run_belady_sweep.py)')
 
@@ -574,7 +629,7 @@ def main():
             row['output_csv'] = output_path
             row['status'] = 'found'
 
-            for policy in ['belady', 'lfu', 'learned', 'prob_rank', 'pacipv', 'pacipv_lfu', 'belady_driven_sampling']:
+            for policy in ['belady', 'lfu', 'learned', 'prob_rank', 'pacipv', 'belady_driven_sampling']:
                 rate_key = policy_rate_key(policy)
                 if policy in selected_policies:
                     row[rate_key] = mean_column(output_path, policy_input_key(policy))
@@ -582,7 +637,6 @@ def main():
                     row[rate_key] = float('nan')
 
             row['avg_pacipv_dist_rate'] = mean_column(output_path, 'pacipv_dist_rate')
-            row['avg_pacipv_vec_rate'] = mean_column(output_path, 'pacipv_vec_rate')
 
             if 'belady' in selected_policies and 'prob_rank' in selected_policies:
                 row['avg_gap_prob_minus_belady'] = row['avg_prob_rank_rate'] - row['avg_belady_rate']

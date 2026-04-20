@@ -444,9 +444,6 @@ public:
           } else if (strcmp(rep_pol_name, "pacipv") == 0) {
             std::cout << "\tUsing PACIPV replacement policy for TXVC" << std::endl;
             replacementPol = new PACIPV(num_set, num_way, 3);
-          } else if (strcmp(rep_pol_name, "pacipv_lfu") == 0) {
-            std::cout << "\tUsing PACIPV_LFU replacement policy for TXVC" << std::endl;
-            replacementPol = new PACIPV_LFU(num_set, num_way, 3);
           } else {          
             std::cerr << "Unknown replacement policy for TXVC: " << rep_pol_name << std::endl;
             exit(1);

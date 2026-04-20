@@ -1,2 +1,11 @@
 __pycache__/
 *.pyc
+exp_conf/autogen_conf/
+sim_conf/
+figures/
+models/
+data/
+cache/
+slides/
+dump/
+traces
