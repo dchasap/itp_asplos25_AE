@@ -31,6 +31,79 @@ def resolve_ipv_for_context(ipv_spec, is_instr, max_rrpv):
     return clamp_ipv_vector(vec, max_rrpv)
 
 
+def _normalize_probability_row(row, fallback_idx):
+    cleaned = [max(0.0, float(v)) for v in row]
+    total = sum(cleaned)
+    if total <= 0.0:
+        out = [0.0] * len(cleaned)
+        out[fallback_idx] = 1.0
+        return out
+    return [v / total for v in cleaned]
+
+
+def _sample_from_probabilities(probs, rng):
+    draw = rng.random()
+    cumulative = 0.0
+    for idx, prob in enumerate(probs):
+        cumulative += prob
+        if draw <= cumulative:
+            return idx
+    return len(probs) - 1
+
+
+def resolve_ipv_distribution_for_context(ipv_dist_spec, is_instr, max_rrpv):
+    """Return normalized probabilistic IPV policy for this access context."""
+    if isinstance(ipv_dist_spec, dict) and (
+        'insert_probs' in ipv_dist_spec or 'hit_transition_probs' in ipv_dist_spec
+    ):
+        spec = ipv_dist_spec
+    elif isinstance(ipv_dist_spec, dict):
+        spec = ipv_dist_spec.get(context_from_is_instr(is_instr))
+        if spec is None:
+            spec = ipv_dist_spec.get(CTX_DATA)
+    else:
+        spec = ipv_dist_spec
+
+    if spec is None:
+        # SRRIP-like fallback.
+        insert_fallback = max(0, max_rrpv - 1)
+        hit_rows = []
+        for old_state in range(max_rrpv + 1):
+            fallback_target = max(0, old_state - 1)
+            row = [0.0] * (max_rrpv + 1)
+            row[fallback_target] = 1.0
+            hit_rows.append(row)
+        insert_probs = [0.0] * (max_rrpv + 1)
+        insert_probs[insert_fallback] = 1.0
+        return {
+            'hit_transition_probs': hit_rows,
+            'insert_probs': insert_probs,
+        }
+
+    raw_insert = spec.get('insert_probs', [0.0] * (max_rrpv + 1))
+    if len(raw_insert) != (max_rrpv + 1):
+        raise ValueError('insert_probs length mismatch for probabilistic PACIPV policy')
+    insert_fallback = max(0, max_rrpv - 1)
+    insert_probs = _normalize_probability_row(raw_insert, fallback_idx=insert_fallback)
+
+    raw_hit = spec.get('hit_transition_probs', [])
+    if len(raw_hit) != (max_rrpv + 1):
+        raise ValueError('hit_transition_probs row count mismatch for probabilistic PACIPV policy')
+
+    hit_rows = []
+    for old_state in range(max_rrpv + 1):
+        row = raw_hit[old_state]
+        if len(row) != (max_rrpv + 1):
+            raise ValueError('hit_transition_probs column count mismatch for probabilistic PACIPV policy')
+        fallback_target = max(0, old_state - 1)
+        hit_rows.append(_normalize_probability_row(row, fallback_idx=fallback_target))
+
+    return {
+        'hit_transition_probs': hit_rows,
+        'insert_probs': insert_probs,
+    }
+
+
 def map_reuse_to_rrpv(reuse_distance, max_rrpv, t1, t2):
     if reuse_distance == float('inf'):
         return max_rrpv
@@ -229,6 +302,43 @@ def simulate_pacipv(num_sets, num_ways, trace_entries, ipv_vec, max_rrpv=3):
                     cache[cand] = min(max_rrpv, cache[cand] + 1)
 
         cache[pte] = max(0, min(max_rrpv, ctx_ipv[4]))
+
+    return misses / len(trace_entries)
+
+
+def simulate_pacipv_probabilistic(num_sets, num_ways, trace_entries, ipv_dist_spec, max_rrpv=3, seed=1):
+    """Simulate PACIPV with sampled hit transitions and sampled insertions."""
+    rng = random.Random(seed)
+    sets = [dict() for _ in range(num_sets)]
+    misses = 0
+
+    for pte, is_instr in trace_entries:
+        set_id = hash(pte) % num_sets
+        cache = sets[set_id]
+        ctx_policy = resolve_ipv_distribution_for_context(ipv_dist_spec, is_instr, max_rrpv)
+
+        if pte in cache:
+            old_rrpv = max(0, min(max_rrpv, int(cache[pte])))
+            row = ctx_policy['hit_transition_probs'][old_rrpv]
+            cache[pte] = _sample_from_probabilities(row, rng)
+            continue
+
+        misses += 1
+
+        if len(cache) >= num_ways:
+            while True:
+                victim = None
+                for cand, rrpv in cache.items():
+                    if rrpv == max_rrpv:
+                        victim = cand
+                        break
+                if victim is not None:
+                    del cache[victim]
+                    break
+                for cand in list(cache.keys()):
+                    cache[cand] = min(max_rrpv, cache[cand] + 1)
+
+        cache[pte] = _sample_from_probabilities(ctx_policy['insert_probs'], rng)
 
     return misses / len(trace_entries)
 

@@ -13,7 +13,7 @@ def parse_csv_list(value, cast=str):
 
 
 def parse_policy_list(policy_str):
-    supported = ['belady', 'lfu', 'learned', 'prob_rank', 'pacipv', 'pacipv_shadow', 'belady_driven_sampling', 'srrip', 'opt_distilled_srrip']
+    supported = ['belady', 'lfu', 'learned', 'prob_rank', 'pacipv', 'pacipv_shadow', 'pacipv_shadow_dist', 'belady_driven_sampling', 'srrip', 'opt_distilled_srrip']
     raw = [p.strip() for p in policy_str.split(',') if p.strip()]
     if not raw:
         return supported
@@ -41,6 +41,10 @@ def uses_pacipv_shadow(selected_policies):
     return 'pacipv_shadow' in selected_policies
 
 
+def uses_pacipv_shadow_dist(selected_policies):
+    return 'pacipv_shadow_dist' in selected_policies
+
+
 def uses_belady_driven_sampling(selected_policies):
     return 'belady_driven_sampling' in selected_policies
 
@@ -58,6 +62,7 @@ def uses_training(selected_policies):
         uses_prob_rank(selected_policies)
         or uses_pacipv(selected_policies)
         or uses_pacipv_shadow(selected_policies)
+        or uses_pacipv_shadow_dist(selected_policies)
         or uses_belady_driven_sampling(selected_policies)
     )
 
@@ -70,6 +75,7 @@ def policy_rate_key(policy):
         'prob_rank': 'avg_prob_rank_rate',
         'pacipv': 'avg_pacipv_rate',
         'pacipv_shadow': 'avg_pacipv_shadow_rate',
+        'pacipv_shadow_dist': 'avg_pacipv_shadow_dist_rate',
         'belady_driven_sampling': 'avg_belady_driven_sampling_rate',
         'srrip': 'avg_srrip_rate',
         'opt_distilled_srrip': 'avg_opt_distilled_srrip_rate',
@@ -84,6 +90,7 @@ def policy_input_key(policy):
         'prob_rank': 'prob_rank_rate',
         'pacipv': 'pacipv_rate',
         'pacipv_shadow': 'pacipv_shadow_rate',
+        'pacipv_shadow_dist': 'pacipv_shadow_dist_rate',
         'belady_driven_sampling': 'belady_driven_sampling_rate',
         'srrip': 'srrip_rate',
         'opt_distilled_srrip': 'opt_distilled_srrip_rate',
@@ -98,6 +105,7 @@ def policy_label(policy):
         'prob_rank': 'Prob Rank',
         'pacipv': 'PACIPV',
         'pacipv_shadow': 'PACIPV Shadow Distill',
+        'pacipv_shadow_dist': 'PACIPV Shadow Distill (Prob)',
         'belady_driven_sampling': 'Belady-Driven Sampling',
         'srrip': 'Vanilla SRRIP',
         'opt_distilled_srrip': 'OPT-Distilled SRRIP',
@@ -242,6 +250,8 @@ def write_summary_csv(path, rows):
         'train_fraction',
         'seed',
         'bds_alpha',
+        'srrip_max_rrpv',
+        'srrip_hit_delta',
         'output_csv',
         'avg_belady_rate',
         'avg_lfu_rate',
@@ -250,6 +260,10 @@ def write_summary_csv(path, rows):
         'avg_pacipv_rate',
         'avg_pacipv_dist_rate',
         'avg_belady_driven_sampling_rate',
+        'avg_srrip_rate',
+        'avg_opt_distilled_srrip_rate',
+        'avg_pacipv_shadow_rate',
+        'avg_pacipv_shadow_dist_rate',
         'avg_gap_prob_minus_belady',
     ]
     with open(path, 'w', newline='') as f:
@@ -290,6 +304,8 @@ def load_rows_from_sweep_summary(summary_csv, provided_filters, active_filter_ke
                 'train_fraction': parse_optional_float(raw_row.get('train_fraction')),
                 'seed': int(raw_row['seed']) if raw_row.get('seed') else None,
                 'bds_alpha': parse_optional_float(raw_row.get('bds_alpha')),
+                'srrip_max_rrpv': int(raw_row['srrip_max_rrpv']) if raw_row.get('srrip_max_rrpv') else None,
+                'srrip_hit_delta': int(raw_row['srrip_hit_delta']) if raw_row.get('srrip_hit_delta') else None,
             }
 
             keep = True
@@ -315,6 +331,10 @@ def load_rows_from_sweep_summary(summary_csv, provided_filters, active_filter_ke
             row['avg_pacipv_rate'] = parse_metric_value(raw_row.get('avg_pacipv_rate'))
             row['avg_pacipv_dist_rate'] = parse_metric_value(raw_row.get('avg_pacipv_dist_rate'))
             row['avg_belady_driven_sampling_rate'] = parse_metric_value(raw_row.get('avg_belady_driven_sampling_rate'))
+            row['avg_srrip_rate'] = parse_metric_value(raw_row.get('avg_srrip_rate'))
+            row['avg_opt_distilled_srrip_rate'] = parse_metric_value(raw_row.get('avg_opt_distilled_srrip_rate'))
+            row['avg_pacipv_shadow_rate'] = parse_metric_value(raw_row.get('avg_pacipv_shadow_rate'))
+            row['avg_pacipv_shadow_dist_rate'] = parse_metric_value(raw_row.get('avg_pacipv_shadow_dist_rate'))
 
             if 'belady' in selected_policies and 'prob_rank' in selected_policies:
                 row['avg_gap_prob_minus_belady'] = row['avg_prob_rank_rate'] - row['avg_belady_rate']
@@ -396,6 +416,8 @@ def render_plots(rows, plots_dir, prefix, baseline_cfg, selected_policies, featu
     all_features = [
         ('train_fraction', 'Training Fraction'),
         ('bds_alpha', 'BDS Alpha'),
+        ('srrip_max_rrpv', 'SRRIP Max RRPV'),
+        ('srrip_hit_delta', 'SRRIP Hit Delta'),
         ('train_workload', 'Train Workload'),
         ('eval_workload', 'Eval Workload'),
         ('num_sets', 'Number of Sets'),
@@ -520,6 +542,8 @@ def main():
     parser.add_argument('--train-fractions', default=None, help='Optional comma-separated floats in [0,1]')
     parser.add_argument('--seeds', default=None, help='Optional comma-separated ints')
     parser.add_argument('--bds-alphas', default=None, help='Optional comma-separated floats for belady_driven_sampling alpha')
+    parser.add_argument('--srrip-max-rrpvs', default=None, help='Optional comma-separated SRRIP max RRPV values')
+    parser.add_argument('--srrip-hit-deltas', default=None, help='Optional comma-separated SRRIP hit delta values')
     parser.add_argument('--train-trace-path-template', default=None,
                         help='Accepted for CLI compatibility; not used for CSV lookup naming.')
     parser.add_argument('--eval-trace-path-template', default=None,
@@ -554,6 +578,8 @@ def main():
     fractions = parse_csv_list(args.train_fractions, float) if args.train_fractions else None
     seeds = parse_csv_list(args.seeds, int) if args.seeds else None
     bds_alphas = parse_csv_list(args.bds_alphas, float) if args.bds_alphas else None
+    srrip_max_rrpvs = parse_csv_list(args.srrip_max_rrpvs, int) if args.srrip_max_rrpvs else None
+    srrip_hit_deltas = parse_csv_list(args.srrip_hit_deltas, int) if args.srrip_hit_deltas else None
 
     provided_filters = {
         'train_workload': train_workloads,
@@ -566,6 +592,8 @@ def main():
         'train_fraction': fractions,
         'seed': seeds,
         'bds_alpha': bds_alphas,
+        'srrip_max_rrpv': srrip_max_rrpvs,
+        'srrip_hit_delta': srrip_hit_deltas,
     }
 
     active_filter_keys = ['eval_workload', 'num_sets', 'num_ways']
@@ -575,6 +603,8 @@ def main():
         active_filter_keys.extend(['rank_model_scope', 'prob_top_k', 'rank_sampling', 'seed'])
     if uses_belady_driven_sampling(selected_policies):
         active_filter_keys.append('bds_alpha')
+    if uses_srrip(selected_policies):
+        active_filter_keys.extend(['srrip_max_rrpv', 'srrip_hit_delta'])
 
     names_for_title = {
         'train_workload': 'Train Workload',
@@ -587,6 +617,8 @@ def main():
         'train_fraction': 'Training Fraction',
         'seed': 'Seed',
         'bds_alpha': 'BDS Alpha',
+        'srrip_max_rrpv': 'SRRIP Max RRPV',
+        'srrip_hit_delta': 'SRRIP Hit Delta',
     }
     provided_optional_keys = [
         k for k in active_filter_keys
@@ -664,7 +696,7 @@ def main():
         sys.exit(1)
 
     dynamic_suffix_parts = []
-    for k in ['train_workload', 'eval_workload', 'num_sets', 'num_ways', 'rank_model_scope', 'prob_top_k', 'rank_sampling', 'train_fraction', 'seed', 'bds_alpha']:
+    for k in ['train_workload', 'eval_workload', 'num_sets', 'num_ways', 'rank_model_scope', 'prob_top_k', 'rank_sampling', 'train_fraction', 'seed', 'bds_alpha', 'srrip_max_rrpv', 'srrip_hit_delta']:
         if k not in active_filter_keys:
             continue
         allowed = provided_filters[k]

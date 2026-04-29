@@ -11,11 +11,10 @@ echo "Syncing experiment: $EXP_ID"
 rsync -av \
   --include="*/" \
   --include="*.yaml" \
-  --include="*.json" \
-  --include="*.parquet" \
   --include="*.csv" \
   --include="*.png" \
   --include="*.pdf" \
+  --include="*.txt" \
   --exclude="*" \
   "$REMOTE/" \
   "$LOCAL/"

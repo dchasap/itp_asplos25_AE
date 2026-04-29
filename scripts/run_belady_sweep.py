@@ -14,7 +14,7 @@ def parse_csv_list(value, cast=str):
 
 
 def parse_policy_list(policy_str):
-    supported = ['belady', 'lfu', 'learned', 'prob_rank', 'pacipv', 'pacipv_shadow', 'belady_driven_sampling', 'srrip', 'opt_distilled_srrip']
+    supported = ['belady', 'lfu', 'learned', 'prob_rank', 'pacipv', 'pacipv_shadow', 'pacipv_shadow_dist', 'srrip', 'opt_distilled_srrip']
     raw = [p.strip() for p in policy_str.split(',') if p.strip()]
     if not raw:
         return supported
@@ -42,8 +42,8 @@ def uses_pacipv_shadow(selected_policies):
     return 'pacipv_shadow' in selected_policies
 
 
-def uses_belady_driven_sampling(selected_policies):
-    return 'belady_driven_sampling' in selected_policies
+def uses_pacipv_shadow_dist(selected_policies):
+    return 'pacipv_shadow_dist' in selected_policies
 
 
 def uses_srrip(selected_policies):
@@ -54,21 +54,61 @@ def uses_opt_distilled_srrip(selected_policies):
     return 'opt_distilled_srrip' in selected_policies
 
 
-def uses_training(selected_policies):
-    return uses_prob_rank(selected_policies) or uses_pacipv(selected_policies) or uses_pacipv_shadow(selected_policies) or uses_belady_driven_sampling(selected_policies) or uses_opt_distilled_srrip(selected_policies)
+def pacipv_requires_training(args, selected_policies):
+    return uses_pacipv(selected_policies) and not args.pacipv_demand_vector
+
+
+def uses_training(args, selected_policies):
+    return (
+        uses_prob_rank(selected_policies)
+        or pacipv_requires_training(args, selected_policies)
+        or uses_pacipv_shadow(selected_policies)
+        or uses_pacipv_shadow_dist(selected_policies)
+        or uses_opt_distilled_srrip(selected_policies)
+    )
 
 
 def frac_tag(value):
+    if value is None:
+        return 'na'
     return f"{value:.3f}".replace('.', 'p')
 
 
 def alpha_tag(value):
+    if value is None:
+        return 'na'
     return f"{value:.3f}".replace('.', 'p')
 
 
-def materialize_cfg(cfg, selected_policies):
+def default_artifact_templates(summary_csv_path):
+    output_dir = Path(summary_csv_path).parent
+    output_dir_str = str(output_dir)
+    return {
+        'rank_model_file_template': (
+            output_dir_str + '/rank_model_{train_workload}_to_{eval_workload}_'
+            's{num_sets}_w{num_ways}_scope.{rank_model_scope}_topk.{prob_top_k}_'
+            'sampling.{rank_sampling}_frac.{train_fraction_tag}_seed.{seed}.csv'
+        ),
+        'pacipv_vectors_file_template': (
+            output_dir_str + '/pacipv_vectors_{train_workload}_to_{eval_workload}_'
+            's{num_sets}_w{num_ways}_frac{train_fraction_tag}_seed{seed}.txt'
+        ),
+        'pacipv_shadow_vectors_file_template': (
+            output_dir_str + '/pacipv_shadow_vectors_{train_workload}_to_{eval_workload}_'
+            's{num_sets}_w{num_ways}_frac{train_fraction_tag}_'
+            'rrpv{pacipv_shadow_max_rrpv}_ctx{pacipv_shadow_per_context}.txt'
+        ),
+        'pacipv_shadow_dist_vectors_file_template': (
+            output_dir_str + '/pacipv_shadow_dist_vectors_{train_workload}_to_{eval_workload}_'
+            's{num_sets}_w{num_ways}_frac{train_fraction_tag}_'
+            'rrpv{pacipv_shadow_max_rrpv}_ctx{pacipv_shadow_per_context}.json'
+        ),
+    }
+
+
+def materialize_cfg(args, cfg, selected_policies):
     effective = dict(cfg)
-    if uses_training(selected_policies):
+    if uses_training(args, selected_policies):
         if effective.get('train_workload') is None:
             raise ValueError('train_workload is required for the selected policies')
         if effective.get('train_fraction') is None:
@@ -84,10 +124,6 @@ def materialize_cfg(cfg, selected_policies):
         if effective.get('seed') is None:
             effective['seed'] = 42
 
-    if uses_belady_driven_sampling(selected_policies):
-        if effective.get('bds_alpha') is None:
-            effective['bds_alpha'] = 1.0
-
     if uses_srrip(selected_policies):
         if effective.get('srrip_max_rrpv') is None:
             effective['srrip_max_rrpv'] = max(0, int(effective['num_ways']) - 1)
@@ -98,7 +134,7 @@ def materialize_cfg(cfg, selected_policies):
         if effective.get('opt_distilled_max_rrpv') is None:
             effective['opt_distilled_max_rrpv'] = 3
 
-    if uses_pacipv_shadow(selected_policies):
+    if uses_pacipv_shadow(selected_policies) or uses_pacipv_shadow_dist(selected_policies):
         if effective.get('pacipv_shadow_max_rrpv') is None:
             effective['pacipv_shadow_max_rrpv'] = 3
         if effective.get('pacipv_shadow_per_context') is None:
@@ -122,8 +158,8 @@ def render_cfg_template(template, cfg):
             train_fraction=cfg['train_fraction'],
             train_fraction_tag=frac_tag(cfg['train_fraction']),
             seed=cfg['seed'],
-            bds_alpha=cfg['bds_alpha'],
-            bds_alpha_tag=alpha_tag(cfg['bds_alpha']),
+            bds_alpha=cfg.get('bds_alpha'),
+            bds_alpha_tag=alpha_tag(cfg.get('bds_alpha')),
             srrip_max_rrpv=cfg.get('srrip_max_rrpv', 0),
             srrip_hit_delta=cfg.get('srrip_hit_delta', 1),
             opt_distilled_max_rrpv=cfg.get('opt_distilled_max_rrpv', 3),
@@ -176,12 +212,12 @@ def mean_from_csv(csv_path, column):
     return (total / count) if count else float('nan')
 
 
-def build_expected_output_csv(cfg, selected_policies, summary_csv_path):
+def build_expected_output_csv(args, cfg, selected_policies, summary_csv_path):
     output_dir = Path(summary_csv_path).parent
-    effective_cfg = materialize_cfg(cfg, selected_policies)
+    effective_cfg = materialize_cfg(args, cfg, selected_policies)
     parts = ['cache_miss_rates']
 
-    if uses_training(selected_policies) and effective_cfg['train_workload'] is not None:
+    if uses_training(args, selected_policies) and effective_cfg['train_workload'] is not None:
         parts.append(f"train.{effective_cfg['train_workload']}")
 
     parts.append(f"eval.{effective_cfg['eval_workload']}")
@@ -192,8 +228,6 @@ def build_expected_output_csv(cfg, selected_policies, summary_csv_path):
         parts.append(f"scope.{effective_cfg['rank_model_scope']}")
         parts.append(f"topk.{effective_cfg['prob_top_k']}")
         parts.append(f"sampling.{effective_cfg['rank_sampling']}")
-    if uses_belady_driven_sampling(selected_policies):
-        parts.append(f"alpha.{alpha_tag(effective_cfg['bds_alpha'])}")
     if uses_srrip(selected_policies):
         parts.append(f"srrip_max.{effective_cfg['srrip_max_rrpv']}")
         parts.append(f"srrip_delta.{effective_cfg['srrip_hit_delta']}")
@@ -202,7 +236,16 @@ def build_expected_output_csv(cfg, selected_policies, summary_csv_path):
     if uses_pacipv_shadow(selected_policies):
         parts.append(f"pacipv_shadow_rrpv.{effective_cfg['pacipv_shadow_max_rrpv']}")
         parts.append(f"pacipv_shadow_ctx.{effective_cfg['pacipv_shadow_per_context']}")
-    if uses_training(selected_policies):
+    if uses_pacipv_shadow_dist(selected_policies):
+        parts.append(f"pacipv_shadow_dist_rrpv.{effective_cfg['pacipv_shadow_max_rrpv']}")
+        parts.append(f"pacipv_shadow_dist_ctx.{effective_cfg['pacipv_shadow_per_context']}")
+    if uses_pacipv(selected_policies) and args.pacipv_train_per_benchmark:
+        parts.append('pacipv_train.per_benchmark')
+    if uses_pacipv_shadow(selected_policies) and args.pacipv_shadow_train_per_benchmark:
+        parts.append('pacipv_shadow_train.per_benchmark')
+    if uses_pacipv_shadow_dist(selected_policies) and args.pacipv_shadow_train_per_benchmark:
+        parts.append('pacipv_shadow_dist_train.per_benchmark')
+    if uses_training(args, selected_policies):
         parts.append(f"frac.{frac_tag(effective_cfg['train_fraction'])}")
     if uses_prob_rank(selected_policies):
         parts.append(f"seed.{effective_cfg['seed']}")
@@ -211,17 +254,38 @@ def build_expected_output_csv(cfg, selected_policies, summary_csv_path):
 
 
 def build_summary_row(args, cfg, selected_policies):
-    effective_cfg = materialize_cfg(cfg, selected_policies)
-    pacipv_vectors_file = render_cfg_template(args.pacipv_vectors_file_template, effective_cfg) if uses_pacipv(selected_policies) else ''
-    output_csv = build_expected_output_csv(cfg, selected_policies, args.summary_csv)
+    effective_cfg = materialize_cfg(args, cfg, selected_policies)
+    pacipv_vectors_file = (
+        render_cfg_template(args.pacipv_vectors_file_template, effective_cfg)
+        if pacipv_requires_training(args, selected_policies) and not args.pacipv_train_per_benchmark
+        else ''
+    )
+    pacipv_shadow_vectors_file = (
+        render_cfg_template(args.pacipv_shadow_vectors_file_template, effective_cfg)
+        if uses_pacipv_shadow(selected_policies) and not args.pacipv_shadow_train_per_benchmark
+        else ''
+    )
+    pacipv_shadow_dist_vectors_file = (
+        render_cfg_template(args.pacipv_shadow_dist_vectors_file_template, effective_cfg)
+        if uses_pacipv_shadow_dist(selected_policies) and not args.pacipv_shadow_train_per_benchmark
+        else ''
+    )
+    output_csv = build_expected_output_csv(args, cfg, selected_policies, args.summary_csv)
     row = dict(cfg)
     row.update({
+        'pacipv_train_per_benchmark': int(args.pacipv_train_per_benchmark),
+        'pacipv_shadow_train_per_benchmark': int(args.pacipv_shadow_train_per_benchmark),
         'returncode': '',
         'rank_model_file': render_cfg_template(args.rank_model_file_template, effective_cfg) if uses_prob_rank(selected_policies) else '',
         'pacipv_vectors_file': pacipv_vectors_file,
+        'pacipv_shadow_vectors_file': pacipv_shadow_vectors_file,
+        'pacipv_shadow_dist_vectors_file': pacipv_shadow_dist_vectors_file,
         'learned_inst_ipv': '',
         'learned_data_ipv': '',
         'learned_demand_ipv': '',
+        'learned_shadow_inst_ipv': '',
+        'learned_shadow_data_ipv': '',
+        'learned_shadow_demand_ipv': '',
         'output_csv': output_csv,
         'avg_belady_rate': '',
         'avg_lfu_rate': '',
@@ -229,10 +293,10 @@ def build_summary_row(args, cfg, selected_policies):
         'avg_prob_rank_rate': '',
         'avg_pacipv_rate': '',
         'avg_pacipv_dist_rate': '',
-        'avg_belady_driven_sampling_rate': '',
         'avg_srrip_rate': '',
         'avg_opt_distilled_srrip_rate': '',
         'avg_pacipv_shadow_rate': '',
+        'avg_pacipv_shadow_dist_rate': '',
         'stderr_tail': '',
         'job_script': '',
     })
@@ -251,6 +315,12 @@ def populate_summary_row_from_files(row, selected_policies):
         row['learned_data_ipv'] = pacipv_vectors['learned_data_ipv']
         row['learned_demand_ipv'] = pacipv_vectors['learned_demand_ipv']
 
+    if uses_pacipv_shadow(selected_policies) and row.get('pacipv_shadow_vectors_file'):
+        shadow_vectors = parse_learned_pacipv_vectors(row['pacipv_shadow_vectors_file'])
+        row['learned_shadow_inst_ipv'] = shadow_vectors['learned_inst_ipv']
+        row['learned_shadow_data_ipv'] = shadow_vectors['learned_data_ipv']
+        row['learned_shadow_demand_ipv'] = shadow_vectors['learned_demand_ipv']
+
     row['status'] = 'ok'
     row['avg_belady_rate'] = mean_from_csv(output_csv, 'belady_rate')
     row['avg_lfu_rate'] = mean_from_csv(output_csv, 'lfu_rate')
@@ -258,16 +328,16 @@ def populate_summary_row_from_files(row, selected_policies):
     row['avg_prob_rank_rate'] = mean_from_csv(output_csv, 'prob_rank_rate')
     row['avg_pacipv_rate'] = mean_from_csv(output_csv, 'pacipv_rate')
     row['avg_pacipv_dist_rate'] = mean_from_csv(output_csv, 'pacipv_dist_rate')
-    row['avg_belady_driven_sampling_rate'] = mean_from_csv(output_csv, 'belady_driven_sampling_rate')
     row['avg_srrip_rate'] = mean_from_csv(output_csv, 'srrip_rate')
     row['avg_opt_distilled_srrip_rate'] = mean_from_csv(output_csv, 'opt_distilled_srrip_rate')
     row['avg_pacipv_shadow_rate'] = mean_from_csv(output_csv, 'pacipv_shadow_rate')
+    row['avg_pacipv_shadow_dist_rate'] = mean_from_csv(output_csv, 'pacipv_shadow_dist_rate')
     return row
 
 
 def build_cmd(args, cfg, selected_policies):
     script = Path(__file__).with_name('estimate_belady_opt.py')
-    effective_cfg = materialize_cfg(cfg, selected_policies)
+    effective_cfg = materialize_cfg(args, cfg, selected_policies)
     output_dir = str(Path(args.summary_csv).parent)
     cmd = [
         args.python_exe,
@@ -278,7 +348,7 @@ def build_cmd(args, cfg, selected_policies):
         '--output-dir', output_dir,
         '--policies', args.policies,
     ]
-    if uses_training(selected_policies):
+    if uses_training(args, selected_policies):
         cmd.extend(['--train-workload', effective_cfg['train_workload']])
         cmd.extend(['--train-fraction', str(effective_cfg['train_fraction'])])
     if uses_prob_rank(selected_policies):
@@ -292,23 +362,50 @@ def build_cmd(args, cfg, selected_policies):
         cmd.extend(['--eval-trace-path-template', args.eval_trace_path_template])
     rank_model_file = render_cfg_template(args.rank_model_file_template, effective_cfg) if uses_prob_rank(selected_policies) else None
     if rank_model_file:
+        rank_model_parent = Path(rank_model_file).parent
+        rank_model_parent.mkdir(parents=True, exist_ok=True)
         cmd.extend(['--rank-model-file', rank_model_file])
 
-    pacipv_vectors_file = render_cfg_template(args.pacipv_vectors_file_template, effective_cfg) if uses_pacipv(selected_policies) else None
+    pacipv_vectors_file = (
+        render_cfg_template(args.pacipv_vectors_file_template, effective_cfg)
+        if pacipv_requires_training(args, selected_policies) and not args.pacipv_train_per_benchmark
+        else None
+    )
     if pacipv_vectors_file:
         pacipv_vectors_parent = Path(pacipv_vectors_file).parent
         pacipv_vectors_parent.mkdir(parents=True, exist_ok=True)
         cmd.extend(['--pacipv-vectors-file', pacipv_vectors_file])
+    if uses_pacipv(selected_policies) and args.pacipv_demand_vector:
+        cmd.extend(['--pacipv-demand-vector', args.pacipv_demand_vector])
+    if uses_pacipv(selected_policies) and args.pacipv_train_per_benchmark:
+        cmd.append('--pacipv-train-per-benchmark')
+
+    pacipv_shadow_vectors_file = (
+        render_cfg_template(args.pacipv_shadow_vectors_file_template, effective_cfg)
+        if uses_pacipv_shadow(selected_policies) and not args.pacipv_shadow_train_per_benchmark
+        else None
+    )
+    if pacipv_shadow_vectors_file:
+        pacipv_shadow_vectors_parent = Path(pacipv_shadow_vectors_file).parent
+        pacipv_shadow_vectors_parent.mkdir(parents=True, exist_ok=True)
+        cmd.extend(['--pacipv-shadow-vectors-file', pacipv_shadow_vectors_file])
+
+    pacipv_shadow_dist_vectors_file = (
+        render_cfg_template(args.pacipv_shadow_dist_vectors_file_template, effective_cfg)
+        if uses_pacipv_shadow_dist(selected_policies) and not args.pacipv_shadow_train_per_benchmark
+        else None
+    )
+    if pacipv_shadow_dist_vectors_file:
+        pacipv_shadow_dist_vectors_parent = Path(pacipv_shadow_dist_vectors_file).parent
+        pacipv_shadow_dist_vectors_parent.mkdir(parents=True, exist_ok=True)
+        cmd.extend(['--pacipv-shadow-dist-vectors-file', pacipv_shadow_dist_vectors_file])
 
     # Sweep learns demand IPV over all training benchmarks (prefetch IPV is fixed/default).
-    if uses_pacipv(selected_policies):
+    if uses_pacipv(selected_policies) and not args.pacipv_demand_vector:
         cmd.append('--learn-pacipv-vectors')
 
     if uses_pacipv(selected_policies) and args.pacipv_train_max_accesses > 0:
         cmd.extend(['--pacipv-train-max-accesses', str(args.pacipv_train_max_accesses)])
-
-    if uses_belady_driven_sampling(selected_policies):
-        cmd.extend(['--bds-alpha', str(effective_cfg['bds_alpha'])])
 
     if uses_srrip(selected_policies):
         cmd.extend(['--srrip-max-rrpv', str(effective_cfg['srrip_max_rrpv'])])
@@ -322,6 +419,16 @@ def build_cmd(args, cfg, selected_policies):
         cmd.extend(['--pacipv-shadow-max-rrpv', str(effective_cfg['pacipv_shadow_max_rrpv'])])
         if int(effective_cfg['pacipv_shadow_per_context']) != 0:
             cmd.append('--pacipv-shadow-per-context')
+        if args.pacipv_shadow_train_per_benchmark:
+            cmd.append('--pacipv-shadow-train-per-benchmark')
+
+    if uses_pacipv_shadow_dist(selected_policies):
+        cmd.append('--learn-pacipv-shadow-dist')
+        cmd.extend(['--pacipv-shadow-max-rrpv', str(effective_cfg['pacipv_shadow_max_rrpv'])])
+        if int(effective_cfg['pacipv_shadow_per_context']) != 0:
+            cmd.append('--pacipv-shadow-per-context')
+        if args.pacipv_shadow_train_per_benchmark:
+            cmd.append('--pacipv-shadow-train-per-benchmark')
 
     return cmd
 
@@ -389,20 +496,25 @@ def summary_fieldnames():
     return [
         'status', 'returncode', 'train_workload', 'eval_workload',
         'num_sets', 'num_ways', 'rank_model_scope', 'prob_top_k',
-        'rank_sampling', 'train_fraction', 'seed', 'bds_alpha',
+        'rank_sampling', 'train_fraction', 'seed',
         'srrip_max_rrpv', 'srrip_hit_delta', 'opt_distilled_max_rrpv',
         'pacipv_shadow_max_rrpv', 'pacipv_shadow_per_context',
+        'pacipv_train_per_benchmark', 'pacipv_shadow_train_per_benchmark',
         'rank_model_file',
         'pacipv_vectors_file', 'learned_inst_ipv', 'learned_data_ipv', 'learned_demand_ipv',
+        'pacipv_shadow_vectors_file', 'learned_shadow_inst_ipv', 'learned_shadow_data_ipv', 'learned_shadow_demand_ipv',
+        'pacipv_shadow_dist_vectors_file',
         'avg_belady_rate', 'avg_lfu_rate', 'avg_learned_rate', 'avg_prob_rank_rate',
         'avg_pacipv_rate', 'avg_pacipv_dist_rate',
-        'avg_belady_driven_sampling_rate', 'avg_srrip_rate', 'avg_opt_distilled_srrip_rate',
-        'avg_pacipv_shadow_rate',
+        'avg_srrip_rate', 'avg_opt_distilled_srrip_rate',
+        'avg_pacipv_shadow_rate', 'avg_pacipv_shadow_dist_rate',
         'output_csv', 'job_script', 'stderr_tail',
     ]
 
 
 def write_summary_csv(summary_path, rows):
+    summary_path = Path(summary_path)
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
     with open(summary_path, 'w', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=summary_fieldnames())
         writer.writeheader()
@@ -425,7 +537,6 @@ def main():
                         help='Comma-separated values from {weighted,uniform-topk}')
     parser.add_argument('--train-fractions', default=None, help='Comma-separated floats in [0,1]')
     parser.add_argument('--seeds', default=None, help='Comma-separated ints')
-    parser.add_argument('--bds-alphas', default=None, help='Comma-separated floats for belady_driven_sampling alpha')
     parser.add_argument('--srrip-max-rrpvs', default=None, help='Comma-separated SRRIP max RRPV values')
     parser.add_argument('--srrip-hit-deltas', default=None, help='Comma-separated SRRIP hit delta values')
     parser.add_argument('--opt-distilled-max-rrpvs', default=None, help='Comma-separated opt_distilled_srrip max RRPV values')
@@ -438,21 +549,43 @@ def main():
                         help='Forwarded to estimate_belady_opt.py. Supports {benchmark} and {num_sets}.')
     parser.add_argument('--eval-trace-path-template', default=None,
                         help='Forwarded to estimate_belady_opt.py. Supports {benchmark} and {num_sets}.')
-    parser.add_argument('--rank-model-file-template', default='data/belady_sweep/rank_model_{train_workload}_to_{eval_workload}_s{num_sets}_w{num_ways}_scope.{rank_model_scope}_topk.{prob_top_k}_sampling.{rank_sampling}_frac.{train_fraction_tag}_seed.{seed}.csv',
+    parser.add_argument('--rank-model-file-template', default=None,
                         help='Rendered per config and forwarded as --rank-model-file. Supports '
                              '{train_workload}, {eval_workload}, {num_sets}, {num_ways}, '
                              '{rank_model_scope}, {prob_top_k}, {rank_sampling}, '
                              '{train_fraction}, {train_fraction_tag}, {seed}, {bds_alpha}, and {bds_alpha_tag}.')
     parser.add_argument('--pacipv-vectors-file-template', '--pacipv-output-file-template',
                         dest='pacipv_vectors_file_template',
-                        default='data/belady_sweep/pacipv_vectors_{train_workload}_to_{eval_workload}_s{num_sets}_w{num_ways}_frac{train_fraction_tag}_seed{seed}.txt',
+                        default=None,
                         help='Rendered per config and forwarded as --pacipv-vectors-file. Supports '
                             '{train_workload}, {eval_workload}, {num_sets}, {num_ways}, '
                             '{rank_model_scope}, {prob_top_k}, {rank_sampling}, '
                             '{train_fraction}, {train_fraction_tag}, {seed}, {bds_alpha}, and {bds_alpha_tag}.')
+    parser.add_argument('--pacipv-demand-vector', default=None,
+                        help='Forwarded to estimate_belady_opt.py. Hardcoded PACIPV demand vector as comma-separated ints, e.g. 0,1,1,0,3.')
+    parser.add_argument('--pacipv-train-per-benchmark', action='store_true',
+                        help='Forwarded to estimate_belady_opt.py. Train exhaustive PACIPV separately per benchmark and evaluate each benchmark with its own learned vector.')
+    parser.add_argument('--pacipv-shadow-vectors-file-template',
+                        dest='pacipv_shadow_vectors_file_template',
+                        default=None,
+                        help='Rendered per config and forwarded as --pacipv-shadow-vectors-file. Supports '
+                            '{train_workload}, {eval_workload}, {num_sets}, {num_ways}, '
+                            '{rank_model_scope}, {prob_top_k}, {rank_sampling}, '
+                            '{train_fraction}, {train_fraction_tag}, {seed}, {bds_alpha}, {bds_alpha_tag}, '
+                            '{pacipv_shadow_max_rrpv}, and {pacipv_shadow_per_context}.')
+    parser.add_argument('--pacipv-shadow-dist-vectors-file-template',
+                        dest='pacipv_shadow_dist_vectors_file_template',
+                        default=None,
+                        help='Rendered per config and forwarded as --pacipv-shadow-dist-vectors-file. Supports '
+                            '{train_workload}, {eval_workload}, {num_sets}, {num_ways}, '
+                            '{rank_model_scope}, {prob_top_k}, {rank_sampling}, '
+                            '{train_fraction}, {train_fraction_tag}, {seed}, {bds_alpha}, {bds_alpha_tag}, '
+                            '{pacipv_shadow_max_rrpv}, and {pacipv_shadow_per_context}.')
     parser.add_argument('--pacipv-train-max-accesses', type=int, default=0,
                         help='Forwarded to estimate_belady_opt.py to cap accesses per train benchmark '
                             'during IPV learning (0 = no cap).')
+    parser.add_argument('--pacipv-shadow-train-per-benchmark', action='store_true',
+                        help='Forwarded to estimate_belady_opt.py. Train PACIPV shadow separately per benchmark and evaluate each benchmark with its own learned vector.')
     parser.add_argument('--python-exe', default=sys.executable, help='Python interpreter')
     parser.add_argument('--summary-csv', default='data/belady_sweep/belady_sweep_summary.csv', help='Output summary CSV')
     parser.add_argument('--collect-existing-results', action='store_true',
@@ -480,9 +613,24 @@ def main():
 
     args = parser.parse_args()
 
+    derived_templates = default_artifact_templates(args.summary_csv)
+    if args.rank_model_file_template is None:
+        args.rank_model_file_template = derived_templates['rank_model_file_template']
+    if args.pacipv_vectors_file_template is None:
+        args.pacipv_vectors_file_template = derived_templates['pacipv_vectors_file_template']
+    if args.pacipv_shadow_vectors_file_template is None:
+        args.pacipv_shadow_vectors_file_template = derived_templates['pacipv_shadow_vectors_file_template']
+    if args.pacipv_shadow_dist_vectors_file_template is None:
+        args.pacipv_shadow_dist_vectors_file_template = derived_templates['pacipv_shadow_dist_vectors_file_template']
+
+    if args.pacipv_demand_vector and not uses_pacipv(parse_policy_list(args.policies)):
+        parser.error('--pacipv-demand-vector requires pacipv to be included in --policies')
+    if args.pacipv_train_per_benchmark and args.pacipv_demand_vector:
+        parser.error('--pacipv-train-per-benchmark cannot be combined with --pacipv-demand-vector')
+
     selected_policies = parse_policy_list(args.policies)
-    if uses_training(selected_policies) and not args.train_workloads:
-        parser.error('--train-workloads is required when prob_rank, pacipv, pacipv_shadow, belady_driven_sampling, or opt_distilled_srrip is enabled')
+    if uses_training(args, selected_policies) and not args.train_workloads:
+        parser.error('--train-workloads is required when prob_rank, pacipv, pacipv_shadow, pacipv_shadow_dist, or opt_distilled_srrip is enabled')
 
     train_workloads = parse_csv_list(args.train_workloads) if args.train_workloads else [None]
     eval_workloads = parse_csv_list(args.eval_workloads)
@@ -493,7 +641,6 @@ def main():
     samplings = parse_csv_list(args.rank_samplings) if args.rank_samplings else [None]
     fractions = parse_csv_list(args.train_fractions, float) if args.train_fractions else [None]
     seeds = parse_csv_list(args.seeds, int) if args.seeds else [None]
-    bds_alphas = parse_csv_list(args.bds_alphas, float) if args.bds_alphas else [None]
     srrip_max_rrpvs = parse_csv_list(args.srrip_max_rrpvs, int) if args.srrip_max_rrpvs else [None]
     srrip_hit_deltas = parse_csv_list(args.srrip_hit_deltas, int) if args.srrip_hit_deltas else [None]
     opt_distilled_max_rrpvs = parse_csv_list(args.opt_distilled_max_rrpvs, int) if args.opt_distilled_max_rrpvs else [None]
@@ -501,7 +648,7 @@ def main():
     pacipv_shadow_per_context_values = [1 if args.pacipv_shadow_per_context else 0]
 
     configs = []
-    for (train_workload, eval_workload, num_sets, num_ways, scope, topk, sampling, frac, seed, bds_alpha, srrip_max_rrpv, srrip_hit_delta, opt_distilled_max_rrpv, pacipv_shadow_max_rrpv, pacipv_shadow_per_context) in itertools.product(
+    for (train_workload, eval_workload, num_sets, num_ways, scope, topk, sampling, frac, seed, srrip_max_rrpv, srrip_hit_delta, opt_distilled_max_rrpv, pacipv_shadow_max_rrpv, pacipv_shadow_per_context) in itertools.product(
         train_workloads,
         eval_workloads,
         num_sets_list,
@@ -511,7 +658,6 @@ def main():
         samplings,
         fractions,
         seeds,
-        bds_alphas,
         srrip_max_rrpvs,
         srrip_hit_deltas,
         opt_distilled_max_rrpvs,
@@ -528,7 +674,6 @@ def main():
             'rank_sampling': sampling,
             'train_fraction': frac,
             'seed': seed,
-            'bds_alpha': bds_alpha,
             'srrip_max_rrpv': srrip_max_rrpv,
             'srrip_hit_delta': srrip_hit_delta,
             'opt_distilled_max_rrpv': opt_distilled_max_rrpv,
@@ -603,7 +748,7 @@ def main():
     #  Local (sequential) execution path                                   #
     # ------------------------------------------------------------------ #
     for idx, cfg in enumerate(configs, start=1):
-        effective_cfg = materialize_cfg(cfg, selected_policies)
+        effective_cfg = materialize_cfg(args, cfg, selected_policies)
         cmd = build_cmd(args, cfg, selected_policies)
         print(f"[{idx}/{len(configs)}] {' '.join(cmd)}")
         if args.dry_run:

@@ -25,20 +25,20 @@ from cache_sim.belady import (
     simulate_opt,
 )
 from cache_sim.constants import CTX_DATA, CTX_INST
-from cache_sim.belady_driven_sampling import (
-    learn_belady_driven_sampling,
-    simulate_belady_driven_sampling,
-)
 from cache_sim.lfu import simulate_lfu_stack
 from cache_sim.pacipv import (
     learn_pacipv_vectors,
     save_pacipv_vectors,
     simulate_pacipv_distribution,
     simulate_pacipv,
+    simulate_pacipv_probabilistic,
 )
 from cache_sim.pacipv_shadow_distill import (
+    load_pacipv_shadow_probabilistic_vectors,
     load_pacipv_shadow_vectors,
+    save_pacipv_shadow_probabilistic_vectors,
     save_pacipv_shadow_vectors,
+    train_pacipv_shadow_distilled_probabilistic,
     train_pacipv_shadow_distilled,
 )
 from cache_sim.opt_distilled_srrip import (
@@ -101,16 +101,27 @@ parser.add_argument('--pacipv-learn-prefetch', dest='pacipv_learn_prefetch', act
                     help="Also learn a separate prefetch PACIPV vector (currently ignored).")
 parser.add_argument('--pacipv-vectors-file', '--pacipv-output-file', dest='pacipv_output_file', default=None,
                     help="Output text file with learned PACIPV vectors and ready-to-use env exports.")
+parser.add_argument('--pacipv-demand-vector', dest='pacipv_demand_vector', default=None,
+                help="Hardcoded PACIPV demand vector as comma-separated ints, e.g. 0,1,1,0,3. "
+                    "When provided, PACIPV evaluation uses this vector directly instead of learning one.")
 parser.add_argument('--pacipv-train-max-accesses', dest='pacipv_train_max_accesses', type=int, default=0,
                     help="Optional cap of accesses per training benchmark for PACIPV vector learning (0 = no cap).")
+parser.add_argument('--pacipv-train-per-benchmark', dest='pacipv_train_per_benchmark', action='store_true',
+                    help="Train a separate exhaustive PACIPV vector per benchmark and evaluate each benchmark with its own learned vector.")
 parser.add_argument('--learn-pacipv-shadow', dest='learn_pacipv_shadow', action='store_true',
                     help="Learn PACIPV vector by Belady-guided shadow SRRIP state distillation.")
 parser.add_argument('--pacipv-shadow-max-rrpv', dest='pacipv_shadow_max_rrpv', type=int, default=3,
                     help="Maximum RRPV used for PACIPV shadow distillation (default: 3).")
 parser.add_argument('--pacipv-shadow-per-context', dest='pacipv_shadow_per_context', action='store_true',
                     help="Learn separate INST/DATA vectors for PACIPV shadow distillation.")
+parser.add_argument('--pacipv-shadow-train-per-benchmark', dest='pacipv_shadow_train_per_benchmark', action='store_true',
+                    help="Train a separate PACIPV shadow vector per benchmark and evaluate each benchmark with its own learned vector.")
 parser.add_argument('--pacipv-shadow-vectors-file', dest='pacipv_shadow_vectors_file', default=None,
                     help="Path to save/load PACIPV shadow-distilled vectors.")
+parser.add_argument('--learn-pacipv-shadow-dist', dest='learn_pacipv_shadow_dist', action='store_true',
+                    help="Learn probabilistic PACIPV policy via shadow SRRIP distillation.")
+parser.add_argument('--pacipv-shadow-dist-vectors-file', dest='pacipv_shadow_dist_vectors_file', default=None,
+                    help="Path to save/load probabilistic PACIPV shadow policy (JSON).")
 parser.add_argument('--learn-opt-distilled-srrip', dest='learn_opt_distilled_srrip', action='store_true',
                     help="Learn OPT-distilled SRRIP IPV + hit-correction from training traces.")
 parser.add_argument('--opt-distilled-srrip-file', dest='opt_distilled_srrip_file', default=None,
@@ -126,16 +137,14 @@ parser.add_argument('--srrip-max-rrpv', dest='srrip_max_rrpv', type=int, default
                     help="Maximum RRPV for vanilla SRRIP (default: num_ways-1).")
 parser.add_argument('--srrip-hit-delta', dest='srrip_hit_delta', type=int, default=1,
                     help="Hit promotion delta for vanilla SRRIP (default: 1).")
-parser.add_argument('--bds-alpha', dest='bds_alpha', type=float, default=1.0,
-                    help="Hit update strength alpha for belady_driven_sampling (0..1).")
 parser.add_argument('--output-dir', dest='output_dir', default='.',
                     help="Directory where the per-run result CSV will be written.")
 parser.add_argument('--policies', dest='policies', default='belady,lfu,learned,prob_rank,pacipv',
-                    help="Comma-separated policies to run. Supported: belady,lfu,learned,prob_rank,pacipv,pacipv_shadow,belady_driven_sampling,srrip,opt_distilled_srrip")
+                    help="Comma-separated policies to run. Supported: belady,lfu,learned,prob_rank,pacipv,pacipv_shadow,pacipv_shadow_dist,srrip,opt_distilled_srrip")
 
 
 def parse_policy_list(policy_str):
-    supported = ['belady', 'lfu', 'learned', 'prob_rank', 'pacipv', 'pacipv_shadow', 'belady_driven_sampling', 'srrip', 'opt_distilled_srrip']
+    supported = ['belady', 'lfu', 'learned', 'prob_rank', 'pacipv', 'pacipv_shadow', 'pacipv_shadow_dist', 'srrip', 'opt_distilled_srrip']
     selected = [p.strip() for p in policy_str.split(',') if p.strip()]
     invalid = [p for p in selected if p not in supported]
     if invalid:
@@ -160,34 +169,52 @@ def uses_training(selected_policies):
         uses_prob_rank(selected_policies)
         or uses_pacipv(selected_policies)
         or ('pacipv_shadow' in selected_policies)
-        or ('belady_driven_sampling' in selected_policies)
+        or ('pacipv_shadow_dist' in selected_policies)
+        or ('opt_distilled_srrip' in selected_policies)
+    )
+
+
+def pacipv_requires_training(args, selected_policies):
+    return uses_pacipv(selected_policies) and not args.pacipv_demand_vector
+
+
+def requires_training_inputs(args, selected_policies):
+    return (
+        uses_prob_rank(selected_policies)
+        or pacipv_requires_training(args, selected_policies)
+        or ('pacipv_shadow' in selected_policies)
+        or ('pacipv_shadow_dist' in selected_policies)
         or ('opt_distilled_srrip' in selected_policies)
     )
 
 
 def resolve_runtime_options(args, selected_policies):
-    if uses_training(selected_policies) and not args.train_workload:
+    needs_training = requires_training_inputs(args, selected_policies)
+
+    if needs_training and not args.train_workload:
         raise ValueError(
             "--train-workload is required when prob_rank, pacipv, or "
-            "pacipv_shadow, belady_driven_sampling, or opt_distilled_srrip is enabled."
+            "pacipv_shadow, pacipv_shadow_dist, or opt_distilled_srrip is enabled."
         )
 
     return {
-        'train_fraction': args.train_fraction if uses_training(selected_policies) and args.train_fraction is not None else (1.0 if uses_training(selected_policies) else None),
+        'train_fraction': args.train_fraction if needs_training and args.train_fraction is not None else (1.0 if needs_training else None),
         'rank_model_scope': args.rank_model_scope if uses_prob_rank(selected_policies) and args.rank_model_scope is not None else ('per-set' if uses_prob_rank(selected_policies) else None),
         'prob_top_k': args.prob_top_k if uses_prob_rank(selected_policies) and args.prob_top_k is not None else (3 if uses_prob_rank(selected_policies) else None),
         'rank_sampling': args.rank_sampling if uses_prob_rank(selected_policies) and args.rank_sampling is not None else ('weighted' if uses_prob_rank(selected_policies) else None),
         'seed': args.seed if uses_prob_rank(selected_policies) and args.seed is not None else (1 if uses_prob_rank(selected_policies) else None),
-        'pacipv_output_file': (args.pacipv_output_file or 'pacipv_vectors.txt') if uses_pacipv(selected_policies) else None,
+        'pacipv_output_file': (args.pacipv_output_file or 'pacipv_vectors.txt') if pacipv_requires_training(args, selected_policies) else None,
         'pacipv_shadow_vectors_file': (args.pacipv_shadow_vectors_file or 'pacipv_shadow_vectors.txt') if ('pacipv_shadow' in selected_policies) else None,
+        'pacipv_shadow_dist_vectors_file': (args.pacipv_shadow_dist_vectors_file or 'pacipv_shadow_dist_vectors.json') if ('pacipv_shadow_dist' in selected_policies) else None,
         'opt_distilled_srrip_file': (args.opt_distilled_srrip_file or 'opt_distilled_srrip.txt') if ('opt_distilled_srrip' in selected_policies) else None,
     }
 
 
 def build_output_csv_name(args, selected_policies, runtime_options):
     parts = ['cache_miss_rates']
+    needs_training = requires_training_inputs(args, selected_policies)
 
-    if uses_training(selected_policies) and args.train_workload is not None:
+    if needs_training and args.train_workload is not None:
         parts.append(f"train.{args.train_workload}")
 
     parts.append(f"eval.{args.eval_workload}")
@@ -200,9 +227,6 @@ def build_output_csv_name(args, selected_policies, runtime_options):
         parts.append(f"topk.{runtime_options['prob_top_k']}")
     if uses_prob_rank(selected_policies) and args.rank_sampling is not None:
         parts.append(f"sampling.{runtime_options['rank_sampling']}")
-    if 'belady_driven_sampling' in selected_policies:
-        alpha_tag = f"{args.bds_alpha:.3f}".replace('.', 'p')
-        parts.append(f"alpha.{alpha_tag}")
     if 'srrip' in selected_policies:
         srrip_max_rrpv = args.srrip_max_rrpv if args.srrip_max_rrpv is not None else int(args.num_ways) - 1
         parts.append(f"srrip_max.{srrip_max_rrpv}")
@@ -210,9 +234,18 @@ def build_output_csv_name(args, selected_policies, runtime_options):
     if 'pacipv_shadow' in selected_policies:
         parts.append(f"pacipv_shadow_rrpv.{args.pacipv_shadow_max_rrpv}")
         parts.append(f"pacipv_shadow_ctx.{1 if args.pacipv_shadow_per_context else 0}")
+    if 'pacipv_shadow_dist' in selected_policies:
+        parts.append(f"pacipv_shadow_dist_rrpv.{args.pacipv_shadow_max_rrpv}")
+        parts.append(f"pacipv_shadow_dist_ctx.{1 if args.pacipv_shadow_per_context else 0}")
+    if 'pacipv' in selected_policies and args.pacipv_train_per_benchmark:
+        parts.append('pacipv_train.per_benchmark')
+    if 'pacipv_shadow' in selected_policies and args.pacipv_shadow_train_per_benchmark:
+        parts.append('pacipv_shadow_train.per_benchmark')
+    if 'pacipv_shadow_dist' in selected_policies and args.pacipv_shadow_train_per_benchmark:
+        parts.append('pacipv_shadow_dist_train.per_benchmark')
     if 'opt_distilled_srrip' in selected_policies:
         parts.append(f"opt_distilled_rrpv.{args.opt_distilled_max_rrpv}")
-    if uses_training(selected_policies) and args.train_fraction is not None:
+    if needs_training and args.train_fraction is not None:
         frac_tag = f"{runtime_options['train_fraction']:.3f}".replace('.', 'p')
         parts.append(f"frac.{frac_tag}")
     if uses_prob_rank(selected_policies) and args.seed is not None:
@@ -272,22 +305,95 @@ def _normalize_trace_for_srrip(trace, num_sets):
     return normalized
 
 
+def _resolve_context_ipv(ipv_result):
+    """Return (data_vec, inst_vec) from a PACIPV-style result payload."""
+    if ipv_result is None:
+        return None, None
+
+    ipv_spec = ipv_result.get('ipv_by_context')
+    if ipv_spec is None:
+        ipv_spec = ipv_result.get('ipv_vec')
+
+    if isinstance(ipv_spec, dict):
+        data_vec = ipv_spec.get(CTX_DATA)
+        inst_vec = ipv_spec.get(CTX_INST)
+        if data_vec is None:
+            data_vec = inst_vec
+        if inst_vec is None:
+            inst_vec = data_vec
+    else:
+        data_vec = ipv_spec
+        inst_vec = ipv_spec
+
+    return data_vec, inst_vec
+
+
+def _print_used_context_ipv(label, ipv_result, default_max_rrpv=None):
+    """Print the effective INST/DATA vectors used at evaluation time."""
+    if ipv_result is None:
+        return
+
+    data_vec, inst_vec = _resolve_context_ipv(ipv_result)
+    max_rrpv = ipv_result.get('max_rrpv', default_max_rrpv)
+    print(f"{label} vectors used (max_rrpv={max_rrpv}): data={data_vec}, inst={inst_vec}")
+
+
+def _resolve_per_benchmark_trace_path(train_trace_paths, benchmark, label):
+    trace_path = train_trace_paths.get(benchmark)
+    if trace_path is None:
+        raise ValueError(
+            f"{label} per-benchmark training requires benchmark '{benchmark}' "
+            "to exist in both the training and evaluation workloads."
+        )
+    return trace_path
+
+
+def _parse_pacipv_vector(raw_value, max_rrpv):
+    entries = [item.strip() for item in raw_value.split(',') if item.strip()]
+    expected_len = max_rrpv + 2
+    if len(entries) != expected_len:
+        raise ValueError(
+            f"--pacipv-demand-vector expects {expected_len} comma-separated integers "
+            f"for max_rrpv={max_rrpv}, got {len(entries)}"
+        )
+
+    vector = []
+    for item in entries:
+        try:
+            value = int(item)
+        except ValueError as exc:
+            raise ValueError(
+                f"--pacipv-demand-vector contains a non-integer entry: {item!r}"
+            ) from exc
+        if value < 0 or value > max_rrpv:
+            raise ValueError(
+                f"--pacipv-demand-vector entries must be in [0, {max_rrpv}], got {value}"
+            )
+        vector.append(value)
+
+    return tuple(vector)
+
+
 def main():
     args = parser.parse_args()
-    if not 0.0 <= args.bds_alpha <= 1.0:
-        raise ValueError("--bds-alpha must be in [0, 1].")
+
+    if args.learn_pacipv_vectors and args.pacipv_demand_vector:
+        parser.error('--learn-pacipv-vectors cannot be combined with --pacipv-demand-vector')
+    if args.pacipv_train_per_benchmark and args.pacipv_demand_vector:
+        parser.error('--pacipv-train-per-benchmark cannot be combined with --pacipv-demand-vector')
 
     num_sets = int(args.num_sets)
     num_ways = int(args.num_ways)
 
     selected_policies = parse_policy_list(args.policies)
+    needs_training = requires_training_inputs(args, selected_policies)
     run_belady = 'belady' in selected_policies
     run_lfu = 'lfu' in selected_policies
     run_learned = 'learned' in selected_policies
     run_prob_rank = 'prob_rank' in selected_policies
     run_pacipv = 'pacipv' in selected_policies
     run_pacipv_shadow = 'pacipv_shadow' in selected_policies
-    run_belady_driven_sampling = 'belady_driven_sampling' in selected_policies
+    run_pacipv_shadow_dist = 'pacipv_shadow_dist' in selected_policies
     run_srrip = 'srrip' in selected_policies
     run_opt_distilled_srrip = 'opt_distilled_srrip' in selected_policies
 
@@ -299,17 +405,18 @@ def main():
     seed = runtime_options['seed']
     pacipv_output_file = runtime_options['pacipv_output_file']
     pacipv_shadow_vectors_file = runtime_options['pacipv_shadow_vectors_file']
+    pacipv_shadow_dist_vectors_file = runtime_options['pacipv_shadow_dist_vectors_file']
     opt_distilled_srrip_file = runtime_options['opt_distilled_srrip_file']
 
     train_benchmarks = []
-    if uses_training(selected_policies):
+    if needs_training:
         train_workload = workloads.Workloads(args.train_workload)
         train_benchmarks = train_workload.get_benchmark_names()
     eval_workload = workloads.Workloads(args.eval_workload)
     eval_benchmarks = eval_workload.get_benchmark_names()
 
     train_trace_paths = {}
-    if uses_training(selected_policies):
+    if needs_training:
         train_trace_paths = validate_trace_paths(
             args.train_trace_path_template,
             train_benchmarks,
@@ -324,13 +431,20 @@ def main():
     )
 
     uniform_sampling = (rank_sampling == 'uniform-topk') if run_prob_rank else False
+    hardcoded_pacipv_vector = None
+    if args.pacipv_demand_vector:
+        hardcoded_pacipv_vector = _parse_pacipv_vector(args.pacipv_demand_vector, args.pacipv_max_rrpv)
+
     # Demand-IPV-only learning mode.
     if args.pacipv_learn_prefetch:
         print("Ignoring --pacipv-learn-prefetch: sweep is configured to learn demand IPV only.")
 
     if run_pacipv and not args.learn_pacipv_vectors:
-        print("PACIPV policy selected; enabling --learn-pacipv-vectors automatically.")
-        args.learn_pacipv_vectors = True
+        if hardcoded_pacipv_vector is not None:
+            print("PACIPV policy selected; using hardcoded demand vector from --pacipv-demand-vector.")
+        else:
+            print("PACIPV policy selected; enabling --learn-pacipv-vectors automatically.")
+            args.learn_pacipv_vectors = True
     if not run_pacipv and args.learn_pacipv_vectors:
         print("Ignoring --learn-pacipv-vectors because pacipv was not selected.")
         args.learn_pacipv_vectors = False
@@ -344,6 +458,16 @@ def main():
     if not run_pacipv_shadow and args.learn_pacipv_shadow:
         print("Ignoring --learn-pacipv-shadow because pacipv_shadow was not selected.")
         args.learn_pacipv_shadow = False
+
+    if run_pacipv_shadow_dist and not args.learn_pacipv_shadow_dist:
+        if pacipv_shadow_dist_vectors_file and os.path.exists(pacipv_shadow_dist_vectors_file):
+            print(f"Using existing PACIPV shadow probabilistic vectors from {pacipv_shadow_dist_vectors_file}.")
+        else:
+            print("pacipv_shadow_dist policy selected; enabling --learn-pacipv-shadow-dist automatically.")
+            args.learn_pacipv_shadow_dist = True
+    if not run_pacipv_shadow_dist and args.learn_pacipv_shadow_dist:
+        print("Ignoring --learn-pacipv-shadow-dist because pacipv_shadow_dist was not selected.")
+        args.learn_pacipv_shadow_dist = False
 
     if run_opt_distilled_srrip and not args.learn_opt_distilled_srrip:
         if opt_distilled_srrip_file and os.path.exists(opt_distilled_srrip_file):
@@ -395,9 +519,23 @@ def main():
                 save_rank_model(rank_model_path, train_per_set_counts, train_global_counts)
 
     pacipv_result = None
+    pacipv_result_by_benchmark = None
     pacipv_shadow_result = None
-    bds_result = None
+    pacipv_shadow_result_by_benchmark = None
+    pacipv_shadow_dist_result = None
+    pacipv_shadow_dist_result_by_benchmark = None
     opt_distilled_srrip_result = None
+
+    if run_pacipv and hardcoded_pacipv_vector is not None:
+        pacipv_result = {
+            'ipv_vec': hardcoded_pacipv_vector,
+            'ipv_by_context': {
+                CTX_DATA: hardcoded_pacipv_vector,
+                CTX_INST: hardcoded_pacipv_vector,
+            },
+            'max_rrpv': args.pacipv_max_rrpv,
+        }
+        _print_used_context_ipv('PACIPV', pacipv_result, default_max_rrpv=args.pacipv_max_rrpv)
 
     # ------------------------------------------------------------------
     # Learn PACIPV vectors from training traces (optional)
@@ -443,87 +581,204 @@ def main():
         else:
             print(f"[pacipv] {len(trace_loaders)}/{len(train_benchmarks)} training traces are usable.")
 
-        pacipv_result = learn_pacipv_vectors(
-            num_sets,
-            num_ways,
-            trace_loaders,
-            max_rrpv=args.pacipv_max_rrpv,
-        )
-        save_pacipv_vectors(pacipv_output_file, pacipv_result)
-        context_ipv = pacipv_result.get('ipv_by_context', {CTX_DATA: pacipv_result['ipv_vec'], CTX_INST: pacipv_result['ipv_vec']})
-        print(
-            f"Learned PACIPV vectors: data={context_ipv[CTX_DATA]}, inst={context_ipv[CTX_INST]}"
-        )
-
-    if run_belady_driven_sampling:
-        def _make_bds_loader(benchmark):
-            def _loader():
-                te = load_trace_entries(
-                    train_trace_paths[benchmark],
+        if args.pacipv_train_per_benchmark:
+            pacipv_result_by_benchmark = {}
+            for benchmark in eval_benchmarks:
+                trace_path = _resolve_per_benchmark_trace_path(
+                    train_trace_paths, benchmark, 'PACIPV'
                 )
-                if train_fraction < 1.0:
-                    te = te[:max(1, int(len(te) * train_fraction))]
-                return te
-            return _loader
+                loader = _make_loader(benchmark)
+                te = loader()
+                size = os.path.getsize(trace_path) if os.path.exists(trace_path) else -1
+                if not te:
+                    raise ValueError(
+                        f"PACIPV per-benchmark training trace is empty/unreadable for "
+                        f"'{benchmark}' ({trace_path}, file size: {size} bytes)"
+                    )
+                del te
 
-        bds_trace_loaders = []
-        for benchmark in train_benchmarks:
-            loader = _make_bds_loader(benchmark)
-            te = loader()
-            if te:
-                bds_trace_loaders.append(loader)
-            del te
-
-        if not bds_trace_loaders:
-            print(
-                f"No usable training traces found for belady_driven_sampling "
-                f"({len(train_benchmarks)} benchmarks tried)."
+                pacipv_result_by_benchmark[benchmark] = learn_pacipv_vectors(
+                    num_sets,
+                    num_ways,
+                    [loader],
+                    max_rrpv=args.pacipv_max_rrpv,
+                )
+                _print_used_context_ipv(
+                    f"PACIPV[{benchmark}]",
+                    pacipv_result_by_benchmark[benchmark],
+                    default_max_rrpv=args.pacipv_max_rrpv,
+                )
+        else:
+            pacipv_result = learn_pacipv_vectors(
+                num_sets,
+                num_ways,
+                trace_loaders,
+                max_rrpv=args.pacipv_max_rrpv,
             )
-            sys.exit(1)
-
-        bds_result = learn_belady_driven_sampling(
-            num_sets,
-            num_ways,
-            bds_trace_loaders,
-            max_rrpv=args.pacipv_max_rrpv,
-        )
-        print("Learned belady_driven_sampling context distributions from training traces.")
+            save_pacipv_vectors(pacipv_output_file, pacipv_result)
+            _print_used_context_ipv('PACIPV', pacipv_result, default_max_rrpv=args.pacipv_max_rrpv)
 
     if run_pacipv_shadow:
-        if pacipv_shadow_vectors_file and os.path.exists(pacipv_shadow_vectors_file) and not args.learn_pacipv_shadow:
-            pacipv_shadow_result = load_pacipv_shadow_vectors(
-                pacipv_shadow_vectors_file,
-                max_rrpv=args.pacipv_shadow_max_rrpv,
-            )
-        else:
-            train_trace_entries = []
-            for benchmark in train_benchmarks:
-                te = load_trace_entries(train_trace_paths[benchmark])
-                if train_fraction < 1.0:
-                    te = te[:max(1, int(len(te) * train_fraction))]
-                train_trace_entries.extend(te)
-
-            if not train_trace_entries:
+        if args.pacipv_shadow_train_per_benchmark:
+            if not train_benchmarks:
                 print(
                     f"No usable training traces found for pacipv_shadow "
                     f"({len(train_benchmarks)} benchmarks tried)."
                 )
                 sys.exit(1)
 
+            def _make_shadow_loader(benchmark, fraction):
+                def _loader():
+                    te = load_trace_entries(train_trace_paths[benchmark])
+                    if fraction < 1.0:
+                        te = te[:max(1, int(len(te) * fraction))]
+                    return te
+                return _loader
+
+            pacipv_shadow_result_by_benchmark = {}
+            for benchmark in eval_benchmarks:
+                trace_path = _resolve_per_benchmark_trace_path(
+                    train_trace_paths, benchmark, 'PACIPV shadow'
+                )
+                loader = _make_shadow_loader(benchmark, train_fraction)
+                te = loader()
+                size = os.path.getsize(trace_path) if os.path.exists(trace_path) else -1
+                if not te:
+                    raise ValueError(
+                        f"PACIPV shadow per-benchmark training trace is empty/unreadable for "
+                        f"'{benchmark}' ({trace_path}, file size: {size} bytes)"
+                    )
+                del te
+
+                pacipv_shadow_result_by_benchmark[benchmark] = train_pacipv_shadow_distilled(
+                    num_sets,
+                    num_ways,
+                    [loader],
+                    max_rrpv=args.pacipv_shadow_max_rrpv,
+                    per_context=args.pacipv_shadow_per_context,
+                )
+                _print_used_context_ipv(
+                    f"PACIPV shadow[{benchmark}]",
+                    pacipv_shadow_result_by_benchmark[benchmark],
+                    default_max_rrpv=args.pacipv_shadow_max_rrpv,
+                )
+        elif pacipv_shadow_vectors_file and os.path.exists(pacipv_shadow_vectors_file) and not args.learn_pacipv_shadow:
+            pacipv_shadow_result = load_pacipv_shadow_vectors(
+                pacipv_shadow_vectors_file,
+                max_rrpv=args.pacipv_shadow_max_rrpv,
+            )
+            _print_used_context_ipv('PACIPV shadow', pacipv_shadow_result, default_max_rrpv=args.pacipv_shadow_max_rrpv)
+        else:
+            if not train_benchmarks:
+                print(
+                    f"No usable training traces found for pacipv_shadow "
+                    f"({len(train_benchmarks)} benchmarks tried)."
+                )
+                sys.exit(1)
+
+            def _make_shadow_loader(benchmark, fraction):
+                def _loader():
+                    te = load_trace_entries(train_trace_paths[benchmark])
+                    if fraction < 1.0:
+                        te = te[:max(1, int(len(te) * fraction))]
+                    return te
+                return _loader
+
+            trace_loaders = [
+                _make_shadow_loader(b, train_fraction)
+                for b in train_benchmarks
+            ]
             pacipv_shadow_result = train_pacipv_shadow_distilled(
                 num_sets,
                 num_ways,
-                train_trace_entries,
+                trace_loaders,
                 max_rrpv=args.pacipv_shadow_max_rrpv,
                 per_context=args.pacipv_shadow_per_context,
             )
-            learned_ipv = pacipv_shadow_result.get('ipv_by_context', pacipv_shadow_result['ipv_vec'])
-            print(
-                "Learned PACIPV shadow-distilled vectors: "
-                f"data={learned_ipv[CTX_DATA]}, inst={learned_ipv[CTX_INST]}"
-            )
+            _print_used_context_ipv('PACIPV shadow', pacipv_shadow_result, default_max_rrpv=args.pacipv_shadow_max_rrpv)
             if pacipv_shadow_vectors_file:
                 save_pacipv_shadow_vectors(pacipv_shadow_vectors_file, pacipv_shadow_result)
+
+    if run_pacipv_shadow_dist:
+        if args.pacipv_shadow_train_per_benchmark:
+            if not train_benchmarks:
+                print(
+                    f"No usable training traces found for pacipv_shadow_dist "
+                    f"({len(train_benchmarks)} benchmarks tried)."
+                )
+                sys.exit(1)
+
+            def _make_shadow_dist_loader(benchmark, fraction):
+                def _loader():
+                    te = load_trace_entries(train_trace_paths[benchmark])
+                    if fraction < 1.0:
+                        te = te[:max(1, int(len(te) * fraction))]
+                    return te
+                return _loader
+
+            pacipv_shadow_dist_result_by_benchmark = {}
+            for benchmark in eval_benchmarks:
+                trace_path = _resolve_per_benchmark_trace_path(
+                    train_trace_paths, benchmark, 'PACIPV shadow probabilistic'
+                )
+                loader = _make_shadow_dist_loader(benchmark, train_fraction)
+                te = loader()
+                size = os.path.getsize(trace_path) if os.path.exists(trace_path) else -1
+                if not te:
+                    raise ValueError(
+                        f"PACIPV shadow probabilistic per-benchmark training trace is empty/unreadable for "
+                        f"'{benchmark}' ({trace_path}, file size: {size} bytes)"
+                    )
+                del te
+
+                pacipv_shadow_dist_result_by_benchmark[benchmark] = train_pacipv_shadow_distilled_probabilistic(
+                    num_sets,
+                    num_ways,
+                    [loader],
+                    max_rrpv=args.pacipv_shadow_max_rrpv,
+                    per_context=args.pacipv_shadow_per_context,
+                )
+        elif (
+            pacipv_shadow_dist_vectors_file
+            and os.path.exists(pacipv_shadow_dist_vectors_file)
+            and not args.learn_pacipv_shadow_dist
+        ):
+            pacipv_shadow_dist_result = load_pacipv_shadow_probabilistic_vectors(
+                pacipv_shadow_dist_vectors_file,
+                max_rrpv=args.pacipv_shadow_max_rrpv,
+            )
+        else:
+            if not train_benchmarks:
+                print(
+                    f"No usable training traces found for pacipv_shadow_dist "
+                    f"({len(train_benchmarks)} benchmarks tried)."
+                )
+                sys.exit(1)
+
+            def _make_shadow_dist_loader(benchmark, fraction):
+                def _loader():
+                    te = load_trace_entries(train_trace_paths[benchmark])
+                    if fraction < 1.0:
+                        te = te[:max(1, int(len(te) * fraction))]
+                    return te
+                return _loader
+
+            trace_loaders = [
+                _make_shadow_dist_loader(b, train_fraction)
+                for b in train_benchmarks
+            ]
+            pacipv_shadow_dist_result = train_pacipv_shadow_distilled_probabilistic(
+                num_sets,
+                num_ways,
+                trace_loaders,
+                max_rrpv=args.pacipv_shadow_max_rrpv,
+                per_context=args.pacipv_shadow_per_context,
+            )
+            if pacipv_shadow_dist_vectors_file:
+                save_pacipv_shadow_probabilistic_vectors(
+                    pacipv_shadow_dist_vectors_file,
+                    pacipv_shadow_dist_result,
+                )
 
     if run_opt_distilled_srrip:
         if opt_distilled_srrip_file and os.path.exists(opt_distilled_srrip_file) and not args.learn_opt_distilled_srrip:
@@ -581,7 +836,7 @@ def main():
         'prob_rank': 'prob_rank_rate',
         'pacipv': 'pacipv_rate',
         'pacipv_shadow': 'pacipv_shadow_rate',
-        'belady_driven_sampling': 'belady_driven_sampling_rate',
+        'pacipv_shadow_dist': 'pacipv_shadow_dist_rate',
         'srrip': 'srrip_rate',
         'opt_distilled_srrip': 'opt_distilled_srrip_rate',
     }
@@ -645,12 +900,23 @@ def main():
         pacipv_rate = float('nan')
         pacipv_dist_rate = float('nan')
         pacipv_shadow_rate = float('nan')
-        bds_rate = float('nan')
+        pacipv_shadow_dist_rate = float('nan')
         srrip_rate = float('nan')
         opt_distilled_srrip_rate = float('nan')
-        if pacipv_result is not None and run_pacipv:
-            learned_ipv = pacipv_result.get('ipv_by_context', pacipv_result['ipv_vec'])
-            pacipv_probs = pacipv_result.get('rrpv_probs_by_context')
+        current_pacipv_result = None
+        if run_pacipv:
+            if pacipv_result_by_benchmark is not None:
+                current_pacipv_result = pacipv_result_by_benchmark.get(benchmark)
+                if current_pacipv_result is None:
+                    raise ValueError(
+                        f"Missing per-benchmark PACIPV result for evaluation benchmark '{benchmark}'"
+                    )
+            else:
+                current_pacipv_result = pacipv_result
+
+        if current_pacipv_result is not None and run_pacipv:
+            learned_ipv = current_pacipv_result.get('ipv_by_context', current_pacipv_result['ipv_vec'])
+            pacipv_probs = current_pacipv_result.get('rrpv_probs_by_context')
             if pacipv_probs:
                 # Run PACIPV using insertion sampling from learned distributions.
                 pacipv_dist_rate = simulate_pacipv_distribution(
@@ -658,7 +924,7 @@ def main():
                     num_ways,
                     trace_entries,
                     pacipv_probs,
-                    max_rrpv=pacipv_result['max_rrpv'],
+                    max_rrpv=current_pacipv_result['max_rrpv'],
                     seed=bench_idx + 1,
                 )
             else:
@@ -668,28 +934,55 @@ def main():
                 num_ways,
                 trace_entries,
                 learned_ipv,
-                max_rrpv=pacipv_result['max_rrpv'],
+                max_rrpv=current_pacipv_result['max_rrpv'],
             )
 
-        if run_pacipv_shadow and pacipv_shadow_result is not None:
-            learned_ipv = pacipv_shadow_result.get('ipv_by_context', pacipv_shadow_result['ipv_vec'])
+        current_pacipv_shadow_result = None
+        if run_pacipv_shadow:
+            if pacipv_shadow_result_by_benchmark is not None:
+                current_pacipv_shadow_result = pacipv_shadow_result_by_benchmark.get(benchmark)
+                if current_pacipv_shadow_result is None:
+                    raise ValueError(
+                        f"Missing per-benchmark PACIPV shadow result for evaluation benchmark '{benchmark}'"
+                    )
+            else:
+                current_pacipv_shadow_result = pacipv_shadow_result
+
+        if run_pacipv_shadow and current_pacipv_shadow_result is not None:
+            learned_ipv = current_pacipv_shadow_result.get(
+                'ipv_by_context_constrained',
+                current_pacipv_shadow_result.get('ipv_by_context', current_pacipv_shadow_result['ipv_vec'])
+            )
             pacipv_shadow_rate = simulate_pacipv(
                 num_sets,
                 num_ways,
                 trace_entries,
                 learned_ipv,
-                max_rrpv=pacipv_shadow_result['max_rrpv'],
+                max_rrpv=current_pacipv_shadow_result['max_rrpv'],
             )
 
-        if run_belady_driven_sampling and bds_result is not None:
-            bds_rate = simulate_belady_driven_sampling(
+        current_pacipv_shadow_dist_result = None
+        if run_pacipv_shadow_dist:
+            if pacipv_shadow_dist_result_by_benchmark is not None:
+                current_pacipv_shadow_dist_result = pacipv_shadow_dist_result_by_benchmark.get(benchmark)
+                if current_pacipv_shadow_dist_result is None:
+                    raise ValueError(
+                        f"Missing per-benchmark PACIPV shadow probabilistic result for evaluation benchmark '{benchmark}'"
+                    )
+            else:
+                current_pacipv_shadow_dist_result = pacipv_shadow_dist_result
+
+        if run_pacipv_shadow_dist and current_pacipv_shadow_dist_result is not None:
+            policy_spec = current_pacipv_shadow_dist_result.get('ipv_distribution_by_context')
+            if policy_spec is None:
+                raise ValueError('Missing ipv_distribution_by_context for pacipv_shadow_dist evaluation')
+            pacipv_shadow_dist_rate = simulate_pacipv_probabilistic(
                 num_sets,
                 num_ways,
                 trace_entries,
-                bds_result['rrpv_probs_by_context'],
-                max_rrpv=bds_result['max_rrpv'],
+                policy_spec,
+                max_rrpv=current_pacipv_shadow_dist_result['max_rrpv'],
                 seed=bench_idx + 1,
-                alpha=args.bds_alpha,
             )
 
         if run_srrip:
@@ -734,8 +1027,8 @@ def main():
             metric_parts.append(f"pacipv(dist) misses: {pacipv_dist_rate:.3f}")
         if run_pacipv_shadow:
             metric_parts.append(f"pacipv-shadow misses: {pacipv_shadow_rate:.3f}")
-        if run_belady_driven_sampling:
-            metric_parts.append(f"belady-driven-sampling misses: {bds_rate:.3f}")
+        if run_pacipv_shadow_dist:
+            metric_parts.append(f"pacipv-shadow-dist misses: {pacipv_shadow_dist_rate:.3f}")
         if run_srrip:
             metric_parts.append(f"srrip misses: {srrip_rate:.3f}")
         if run_opt_distilled_srrip:
@@ -756,8 +1049,8 @@ def main():
             results.setdefault('pacipv_dist_rate', []).append(pacipv_dist_rate)
         if run_pacipv_shadow:
             results['pacipv_shadow_rate'].append(pacipv_shadow_rate)
-        if run_belady_driven_sampling:
-            results['belady_driven_sampling_rate'].append(bds_rate)
+        if run_pacipv_shadow_dist:
+            results['pacipv_shadow_dist_rate'].append(pacipv_shadow_dist_rate)
         if run_srrip:
             results['srrip_rate'].append(srrip_rate)
         if run_opt_distilled_srrip:
@@ -775,8 +1068,8 @@ def main():
         print(f"Average pacipv(dist) rate: {safe_mean(results['pacipv_dist_rate']):.4f}")
     if run_pacipv_shadow:
         print(f"Average pacipv-shadow rate: {safe_mean(results['pacipv_shadow_rate']):.4f}")
-    if run_belady_driven_sampling:
-        print(f"Average belady-driven-sampling rate: {safe_mean(results['belady_driven_sampling_rate']):.4f}")
+    if run_pacipv_shadow_dist:
+        print(f"Average pacipv-shadow-dist rate: {safe_mean(results['pacipv_shadow_dist_rate']):.4f}")
     if run_srrip:
         print(f"Average srrip rate: {safe_mean(results['srrip_rate']):.4f}")
     if run_opt_distilled_srrip:
