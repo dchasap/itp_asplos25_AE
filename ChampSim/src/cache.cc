@@ -789,6 +789,7 @@
 #if defined TRANSLATION_EXCLUSIVE_CACHE
 					BLOCK txvc_block_entry;
 					bool entry_found = false;
+					uint64_t txvc_prefetch_addr = 0;
 					if (NAME.find(_CACHE_) != std::string::npos) {
 						//PACKET txc_copy_pkt{handle_pkt};
 							
@@ -802,9 +803,13 @@
 							
 						if (enable_tx_victim_cache && vc_entry_cond) {
 
+							txvc_prefetch_addr = tx_victim_cache->get_prefetch_candidate(handle_pkt.address);
 							auto [_entry, _entry_found] = tx_victim_cache->lookup(handle_pkt.address, handle_pkt.is_instr, current_cycle, handle_pkt.ip);
 							entry_found = _entry_found;
 							txvc_block_entry = _entry;
+
+							if (!entry_found && txvc_prefetch_addr != 0 && get_occupancy(0, txvc_prefetch_addr) < (get_size(0, txvc_prefetch_addr) / 2))
+								prefetch_pte_line(txvc_prefetch_addr, true, handle_pkt.translation_level);
 							//copy_pkt.data = _entry.data;
 						}
 					}
@@ -1326,6 +1331,39 @@ int CACHE::prefetch_line(uint64_t pf_addr, bool fill_this_level, uint32_t prefet
   return success;
 }
 
+int CACHE::prefetch_pte_line(uint64_t pf_addr, bool fill_this_level, std::size_t translation_level)
+{
+	sim_stats.back().pf_requested++;
+
+	PACKET pf_packet;
+	pf_packet.type = PREFETCH;
+	pf_packet.prefetch_from_this = true;
+	pf_packet.fill_this_level = fill_this_level;
+	pf_packet.cpu = cpu;
+	pf_packet.address = pf_addr;
+	pf_packet.v_address = virtual_prefetch ? pf_addr : 0;
+	pf_packet.translation_level = translation_level;
+
+#if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT || defined TRANSLATION_EXCLUSIVE_CACHE
+	pf_packet.is_pte = true;
+	pf_packet.access_freq = 0;
+	pf_packet.is_instr = false;
+#endif
+
+#if defined MULTIPLE_PAGE_SIZE
+	pf_packet.page_size = PAGE_SIZE;
+	pf_packet.base_vpn = pf_addr;
+#endif
+
+	auto success = this->add_pq(pf_packet);
+	if (success) {
+		++sim_stats.back().pf_issued;
+		++sim_stats.back().pf_txvc_pte_issued;
+	}
+
+	return success;
+}
+
 int CACHE::prefetch_line(uint64_t, uint64_t, uint64_t pf_addr, bool fill_this_level, uint32_t prefetch_metadata)
 {
   return prefetch_line(pf_addr, fill_this_level, prefetch_metadata);
@@ -1470,6 +1508,7 @@ void CACHE::end_phase(unsigned finished_cpu)
 
   roi_stats.back().pf_requested = sim_stats.back().pf_requested;
   roi_stats.back().pf_issued = sim_stats.back().pf_issued;
+	roi_stats.back().pf_txvc_pte_issued = sim_stats.back().pf_txvc_pte_issued;
   roi_stats.back().pf_useful = sim_stats.back().pf_useful;
   roi_stats.back().pf_useless = sim_stats.back().pf_useless;
   roi_stats.back().pf_fill = sim_stats.back().pf_fill;

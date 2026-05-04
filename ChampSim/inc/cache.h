@@ -22,6 +22,7 @@
 #include <cassert>
 #include <deque>
 #include <functional>
+#include <limits>
 #include <list>
 #include <string>
 #include <vector>
@@ -67,6 +68,7 @@ struct cache_stats {
   // prefetch stats
   uint64_t pf_requested = 0;
   uint64_t pf_issued = 0;
+  uint64_t pf_txvc_pte_issued = 0;
   uint64_t pf_useful = 0;
   uint64_t pf_useless = 0;
   uint64_t pf_fill = 0;
@@ -345,9 +347,18 @@ public:
   class VICTIM_CACHE 
   {
     private:
+      static constexpr std::size_t STRIDE_PREDICTOR_SIZE = 64;
+      struct stride_predictor_entry {
+        uint64_t last_cl_addr = 0;
+        int64_t last_delta = 0;
+        uint8_t confidence = 0;
+        bool valid = false;
+      };
+
       uint64_t num_set, num_way, offset_bits;
       //std::queue<PACKET> rd_queue;
       std::vector<BLOCK>  blocks;
+      std::array<stride_predictor_entry, STRIDE_PREDICTOR_SIZE> stride_predictor = {};
       ReplacementPolicy* replacementPol;
       std::string _name_;
 
@@ -645,6 +656,37 @@ public:
 
       }
 
+      uint64_t get_prefetch_candidate(uint64_t address)
+      {
+        const uint64_t cl_addr = address >> offset_bits;
+        auto& pred = stride_predictor.at(cl_addr % STRIDE_PREDICTOR_SIZE);
+        uint64_t candidate = 0;
+
+        if (pred.valid && pred.confidence >= 2) {
+          const int64_t next_cl_addr = static_cast<int64_t>(cl_addr) + pred.last_delta;
+          if (next_cl_addr >= 0 && next_cl_addr <= static_cast<int64_t>(std::numeric_limits<uint64_t>::max() >> offset_bits))
+            candidate = static_cast<uint64_t>(next_cl_addr) << offset_bits;
+        }
+
+        if (pred.valid) {
+          const int64_t delta = static_cast<int64_t>(cl_addr) - static_cast<int64_t>(pred.last_cl_addr);
+          if (delta == pred.last_delta) {
+            if (pred.confidence < 3)
+              pred.confidence++;
+          } else {
+            pred.last_delta = delta;
+            pred.confidence = 0;
+          }
+        } else {
+          pred.valid = true;
+          pred.last_delta = 0;
+          pred.confidence = 0;
+        }
+
+        pred.last_cl_addr = cl_addr;
+        return candidate;
+      }
+
 
       std::pair<BLOCK, bool> lookup(uint64_t address, bool is_instr, uint64_t curr_cycle, uint64_t pc) 
       {
@@ -777,6 +819,7 @@ public:
 #endif
 
   int prefetch_line(uint64_t pf_addr, bool fill_this_level, uint32_t prefetch_metadata);
+  int prefetch_pte_line(uint64_t pf_addr, bool fill_this_level, std::size_t translation_level);
 
   [[deprecated("Use CACHE::prefetch_line(pf_addr, fill_this_level, prefetch_metadata) instead.")]] int
   prefetch_line(uint64_t ip, uint64_t base_addr, uint64_t pf_addr, bool fill_this_level, uint32_t prefetch_metadata);

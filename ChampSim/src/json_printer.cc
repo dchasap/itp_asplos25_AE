@@ -85,6 +85,7 @@ void champsim::json_printer::print(CACHE::stats_type stats)
 
   stream << indent() << "\"prefetch requested\": " << stats.pf_requested << "," << std::endl;
   stream << indent() << "\"prefetch issued\": " << stats.pf_issued << "," << std::endl;
+  stream << indent() << "\"txvc pte prefetch issued\": " << stats.pf_txvc_pte_issued << "," << std::endl;
   stream << indent() << "\"useful prefetch\": " << stats.pf_useful << "," << std::endl;
   stream << indent() << "\"useless prefetch\": " << stats.pf_useless << "," << std::endl;
 
