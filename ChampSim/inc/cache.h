@@ -347,18 +347,10 @@ public:
   class VICTIM_CACHE 
   {
     private:
-      static constexpr std::size_t STRIDE_PREDICTOR_SIZE = 64;
-      struct stride_predictor_entry {
-        uint64_t last_cl_addr = 0;
-        int64_t last_delta = 0;
-        uint8_t confidence = 0;
-        bool valid = false;
-      };
-
       uint64_t num_set, num_way, offset_bits;
       //std::queue<PACKET> rd_queue;
       std::vector<BLOCK>  blocks;
-      std::array<stride_predictor_entry, STRIDE_PREDICTOR_SIZE> stride_predictor = {};
+      PrefetchPolicy* prefetchPolicy = nullptr;
       ReplacementPolicy* replacementPol;
       std::string _name_;
 
@@ -558,6 +550,17 @@ public:
 																						    false, true);
 #endif
 
+        const char* pf_policy_name = getenv("TXVC_PF_POLICY");
+        if (pf_policy_name == nullptr || strcmp(pf_policy_name, "stride") == 0) {
+          std::cout << "\tUsing stride prefetch policy for TXVC" << std::endl;
+          prefetchPolicy = new StridePrefetcher(offset_bits);
+        } else if (strcmp(pf_policy_name, "none") == 0) {
+          std::cout << "\tUsing none prefetch policy for TXVC" << std::endl;
+          prefetchPolicy = new NonePrefetcher();
+        } else {
+          std::cerr << "Unknown prefetch policy for TXVC: " << pf_policy_name << std::endl;
+          exit(1);
+        }
       }
 
 
@@ -566,6 +569,7 @@ public:
 #if defined ENABLE_EXTRA_CACHE_STATS
         delete reuseDistMon;
 #endif
+        delete prefetchPolicy;
         delete replacementPol;
         delete cacheFilter;
       }
@@ -658,33 +662,12 @@ public:
 
       uint64_t get_prefetch_candidate(uint64_t address)
       {
-        const uint64_t cl_addr = address >> offset_bits;
-        auto& pred = stride_predictor.at(cl_addr % STRIDE_PREDICTOR_SIZE);
-        uint64_t candidate = 0;
+        return prefetchPolicy->get_prefetch_candidate(address);
+      }
 
-        if (pred.valid && pred.confidence >= 2) {
-          const int64_t next_cl_addr = static_cast<int64_t>(cl_addr) + pred.last_delta;
-          if (next_cl_addr >= 0 && next_cl_addr <= static_cast<int64_t>(std::numeric_limits<uint64_t>::max() >> offset_bits))
-            candidate = static_cast<uint64_t>(next_cl_addr) << offset_bits;
-        }
-
-        if (pred.valid) {
-          const int64_t delta = static_cast<int64_t>(cl_addr) - static_cast<int64_t>(pred.last_cl_addr);
-          if (delta == pred.last_delta) {
-            if (pred.confidence < 3)
-              pred.confidence++;
-          } else {
-            pred.last_delta = delta;
-            pred.confidence = 0;
-          }
-        } else {
-          pred.valid = true;
-          pred.last_delta = 0;
-          pred.confidence = 0;
-        }
-
-        pred.last_cl_addr = cl_addr;
-        return candidate;
+      uint32_t get_pf_mshr_gate_pct() const
+      {
+        return prefetchPolicy->get_mshr_gate_pct();
       }
 
 

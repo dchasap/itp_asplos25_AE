@@ -1239,5 +1239,142 @@ class HREP : public ReplacementPolicy
 	    return victim_idx;
     }
 };
+/************************************************************************/
+
+/*************
+ * TXVC Prefetcher interface
+ *************/
+class PrefetchPolicy
+{
+  public:
+    virtual ~PrefetchPolicy() = default;
+
+    // Return a non-zero prefetch candidate byte-address for the given access address,
+    // or 0 if no prefetch should be issued.
+    virtual uint64_t get_prefetch_candidate(uint64_t address) = 0;
+
+    // Fraction (0-100) of the MSHR that must be free before a prefetch is issued.
+    virtual uint32_t get_mshr_gate_pct() const = 0;
+};
+
+class NonePrefetcher : public PrefetchPolicy
+{
+  public:
+    NonePrefetcher()
+    {
+      std::cout << "TXVC PrefetchPolicy: none" << std::endl;
+    }
+
+    uint64_t get_prefetch_candidate(uint64_t) override
+    {
+      return 0; // this disables prefetching 
+    }
+
+    uint32_t get_mshr_gate_pct() const override
+    {
+      return 100; // put anything here, doesn't matter since prefetching is disableds
+    }
+};
+
+/*************
+ * TXVC Stride Prefetcher
+ *
+ * Env vars:
+ *   TXVC_PF_TABLE_SIZE       - number of predictor entries (default 64)
+ *   TXVC_PF_CONF_THRESHOLD   - minimum confidence (0-3) to issue a prefetch (default 2)
+ *   TXVC_PF_MSHR_GATE_PCT    - issue only when MSHR occupancy < size * pct / 100 (default 50)
+ *************/
+class StridePrefetcher : public PrefetchPolicy
+{
+  private:
+    struct Entry {
+      uint64_t last_cl_addr = 0;
+      int64_t  last_delta   = 0;
+      uint8_t  confidence   = 0;
+      bool     valid        = false;
+    };
+
+    std::size_t table_size;
+    uint8_t     conf_threshold;
+    uint32_t    mshr_gate_pct;
+    uint64_t    offset_bits;
+    std::vector<Entry> table;
+
+  public:
+    StridePrefetcher(uint64_t _offset_bits) : offset_bits(_offset_bits)
+    {
+      // table size
+      if (const char* e = getenv("TXVC_PF_TABLE_SIZE")) {
+        std::size_t v = static_cast<std::size_t>(std::stoull(e));
+        table_size = (v >= 1) ? v : 64;
+        if (v < 1)
+          std::cerr << "TXVC_PF_TABLE_SIZE must be >= 1, using default 64" << std::endl;
+      } else {
+        table_size = 64;
+      }
+
+      // confidence threshold
+      if (const char* e = getenv("TXVC_PF_CONF_THRESHOLD")) {
+        int v = std::stoi(e);
+        if (v < 0 || v > 3) {
+          std::cerr << "TXVC_PF_CONF_THRESHOLD must be 0-3, using default 2" << std::endl;
+          v = 2;
+        }
+        conf_threshold = static_cast<uint8_t>(v);
+      } else {
+        conf_threshold = 2;
+      }
+
+      // MSHR gate percentage
+      if (const char* e = getenv("TXVC_PF_MSHR_GATE_PCT")) {
+        int v = std::stoi(e);
+        if (v <= 0 || v > 100) {
+          std::cerr << "TXVC_PF_MSHR_GATE_PCT must be 1-100, using default 50" << std::endl;
+          v = 50;
+        }
+        mshr_gate_pct = static_cast<uint32_t>(v);
+      } else {
+        mshr_gate_pct = 50;
+      }
+
+      table.resize(table_size);
+
+      std::cout << "TXVC StridePrefetcher: table_size=" << table_size
+                << " conf_threshold=" << static_cast<int>(conf_threshold)
+                << " mshr_gate_pct=" << mshr_gate_pct << std::endl;
+    }
+
+    uint32_t get_mshr_gate_pct() const override { return mshr_gate_pct; }
+
+    uint64_t get_prefetch_candidate(uint64_t address) override
+    {
+      const uint64_t cl_addr = address >> offset_bits;
+      auto& pred = table[cl_addr % table_size];
+      uint64_t candidate = 0;
+
+      if (pred.valid && pred.confidence >= conf_threshold) {
+        const int64_t next_cl = static_cast<int64_t>(cl_addr) + pred.last_delta;
+        if (next_cl >= 0 && next_cl <= static_cast<int64_t>(std::numeric_limits<uint64_t>::max() >> offset_bits))
+          candidate = static_cast<uint64_t>(next_cl) << offset_bits;
+      }
+
+      if (pred.valid) {
+        const int64_t delta = static_cast<int64_t>(cl_addr) - static_cast<int64_t>(pred.last_cl_addr);
+        if (delta == pred.last_delta) {
+          if (pred.confidence < 3) pred.confidence++;
+        } else {
+          pred.last_delta = delta;
+          pred.confidence = 0;
+        }
+      } else {
+        pred.valid      = true;
+        pred.last_delta = 0;
+        pred.confidence = 0;
+      }
+
+      pred.last_cl_addr = cl_addr;
+      return candidate;
+    }
+};
 
 #endif

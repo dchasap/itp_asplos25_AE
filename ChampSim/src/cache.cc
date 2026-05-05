@@ -808,7 +808,7 @@
 							entry_found = _entry_found;
 							txvc_block_entry = _entry;
 
-							if (!entry_found && txvc_prefetch_addr != 0 && get_occupancy(0, txvc_prefetch_addr) < (get_size(0, txvc_prefetch_addr) / 2))
+							if (!entry_found && txvc_prefetch_addr != 0 && get_occupancy(0, txvc_prefetch_addr) * 100 < get_size(0, txvc_prefetch_addr) * tx_victim_cache->get_pf_mshr_gate_pct())
 								prefetch_pte_line(txvc_prefetch_addr, true, handle_pkt.translation_level);
 							//copy_pkt.data = _entry.data;
 						}
