@@ -61,6 +61,14 @@ default_enviromental_variables = {
 	'TXVC_PF_TABLE_SIZE': "64",
 	'TXVC_PF_CONF_THRESHOLD': "2",
 	'TXVC_PF_MSHR_GATE_PCT': "50",
+	'TXVC_PF_SBLG_TABLE_SIZE': "128",
+	'TXVC_PF_SBLG_CONF_THRESHOLD': "2",
+	'TXVC_PF_SBLG_ACC_WINDOW': "32",
+	'TXVC_PF_SBLG_ACC_THRESHOLD': "20",
+	'TXVC_PF_SBLG_DEGREE': "1",
+	'TXVC_PF_CHILD_TABLE_SIZE': "256",
+	'TXVC_PF_CHILD_PENDING_SIZE': "64",
+	'TXVC_PF_CHILD_CONF_THRESHOLD': "2",
 	'TXVC_DBPRED_CNTR_SZ': "3",
 	'TXVC_DBPRED_THRESHOLD': "0",
 	'TXVC_DBPRED_USE_BIAS': "false",
@@ -111,9 +119,17 @@ confnames_to_envars = {
 	'txvc.cache_filter_reuse_bypass_log_path': 'CACHE_FILTER_REUSE_BYPASS_LOG_PATH',
 	'txvc.level': 'TXVC_CACHE_LEVEL',
 	'txvc.pf_policy': 'TXVC_PF_POLICY',
-	'txvc.pf_table_size': 'TXVC_PF_TABLE_SIZE',
-	'txvc.pf_conf_threshold': 'TXVC_PF_CONF_THRESHOLD',
 	'txvc.pf_mshr_gate_pct': 'TXVC_PF_MSHR_GATE_PCT',
+	'txvc.pf_stride_table_size': 'TXVC_PF_STRIDE_TABLE_SIZE',
+	'txvc.pf_stride_conf_threshold': 'TXVC_PF_STRIDE_CONF_THRESHOLD',
+	'txvc.pf_sblg_table_size': 'TXVC_PF_SBLG_TABLE_SIZE',
+	'txvc.pf_sblg_conf_threshold': 'TXVC_PF_SBLG_CONF_THRESHOLD',
+	'txvc.pf_sblg_acc_window': 'TXVC_PF_SBLG_ACC_WINDOW',
+	'txvc.pf_sblg_acc_threshold': 'TXVC_PF_SBLG_ACC_THRESHOLD',
+	'txvc.pf_sblg_degree': 'TXVC_PF_SBLG_DEGREE',
+	'txvc.pf_child_table_size': 'TXVC_PF_CHILD_TABLE_SIZE',
+	'txvc.pf_child_pending_size': 'TXVC_PF_CHILD_PENDING_SIZE',
+	'txvc.pf_child_conf_threshold': 'TXVC_PF_CHILD_CONF_THRESHOLD',
 	'txvc.dbpred_use_bias': 'TXVC_DBPRED_USE_BIAS',
 	'txvc.dbpred_cntr_size': 'TXVC_DBPRED_CNTR_SZ',
 	'txvc.dbpred_threshold': 'TXVC_DBPRED_THRESHOLD',
@@ -145,7 +161,10 @@ cache_env_parameters = [ 	'sets', 'ways', 'set_indexer', 'level',
 							'cache_filter_reuse_distance_threshold', 'cache_filter_reuse_min_samples', 'cache_filter_reuse_long_ratio',
 							'cache_filter_memory_trace_path', 'cache_filter_reuse_profile_log_path', 'cache_filter_reuse_bypass_log_path',
 							'filter_mem_trace_path',
-							'pf_policy', 'pf_table_size', 'pf_conf_threshold', 'pf_mshr_gate_pct', 
+							'pf_policy', 'pf_mshr_gate_pct',
+							'pf_stride_table_size', 'pf_stride_conf_threshold',
+							'pf_sblg_table_size', 'pf_sblg_conf_threshold', 'pf_sblg_acc_window', 'pf_sblg_acc_threshold', 'pf_sblg_degree',
+							'pf_child_table_size', 'pf_child_pending_size', 'pf_child_conf_threshold',
 							'dbpred_cntr_size', 'dbpred_threshold', 'dbpred_use_bias',
 							'filter_cleanup_interval', 'filter_top_n_factor', 'filter_frequency_threshold', 
 							'filter_size', 'filter_num_hashes',
@@ -258,7 +277,7 @@ def parse_experimental_data(config):
 	for sim in simulations:
 
 		# download data if needed
-		fetch_experiment_data(sim)
+		fetch_experiment_data(root_dir, exp_name, sim)
 
 		if config.has_option(sim, 'simulation_stats'):
 			printer.print_warning("Skipping " + sim + "...")
@@ -392,19 +411,20 @@ def build_presentation(config):
 	#os.system("cd ..")
 
 
-def fetch_experiment_data(EXP_ID):
+def fetch_experiment_data(root_dir, exp_name, sim):
 
-	remote = f"bsc018186@transfer1.bsc.es:/gpfs/scratch/bsc18/bsc018186/VMem/data/{EXP_ID}"
-	local = f"./data/{EXP_ID}/"
-
+	remote = f"bsc018186@transfer1.bsc.es:/gpfs/scratch/bsc18/bsc018186/VMem/data/{exp_name}/{sim}"
+	local = f"{root_dir}/data/{exp_name}"
+	
 	cmd = [
 			"rsync", "-av",
-			"--include=*.csv",
+			"--include=*/",
+			"--include=*.out",
 			"--exclude=*",
 			remote,
 			local
 	]
-
+	print(cmd)
 	subprocess.run(cmd, check=True)
 
 

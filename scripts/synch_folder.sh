@@ -2,7 +2,8 @@
 
 EXP_ID=$1
 REMOTE="bsc018186@transfer1.bsc.es:/gpfs/scratch/bsc18/bsc018186/VMem/data/$EXP_ID"
-LOCAL="./data/$EXP_ID"
+#LOCAL="./data/$EXP_ID"
+LOCAL=$2
 
 mkdir -p "$LOCAL"
 

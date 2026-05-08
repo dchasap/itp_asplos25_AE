@@ -1249,12 +1249,18 @@ class PrefetchPolicy
   public:
     virtual ~PrefetchPolicy() = default;
 
-    // Return a non-zero prefetch candidate byte-address for the given access address,
-    // or 0 if no prefetch should be issued.
-    virtual uint64_t get_prefetch_candidate(uint64_t address) = 0;
+    // Return zero or more prefetch candidate byte-addresses for the given access.
+    // Inner vector ordering: highest priority first. Empty vector means no prefetch.
+    // translation_level: ChampSim PTW level (1=PTE leaf, 4=PGD root; 0=non-PTE).
+    // ip: walker instruction pointer.
+    virtual std::vector<uint64_t> get_prefetch_candidates(uint64_t address, std::size_t translation_level, uint64_t ip) = 0;
 
     // Fraction (0-100) of the MSHR that must be free before a prefetch is issued.
     virtual uint32_t get_mshr_gate_pct() const = 0;
+
+    // Feedback from the cache: called when a prefetch was useful (demand hit) or useless (evicted).
+    virtual void notify_useful()  {}
+    virtual void notify_useless() {}
 };
 
 class NonePrefetcher : public PrefetchPolicy
@@ -1265,9 +1271,9 @@ class NonePrefetcher : public PrefetchPolicy
       std::cout << "TXVC PrefetchPolicy: none" << std::endl;
     }
 
-    uint64_t get_prefetch_candidate(uint64_t) override
+    std::vector<uint64_t> get_prefetch_candidates(uint64_t, std::size_t, uint64_t) override
     {
-      return 0; // this disables prefetching 
+      return {}; // prefetching disabled
     }
 
     uint32_t get_mshr_gate_pct() const override
@@ -1280,8 +1286,8 @@ class NonePrefetcher : public PrefetchPolicy
  * TXVC Stride Prefetcher
  *
  * Env vars:
- *   TXVC_PF_TABLE_SIZE       - number of predictor entries (default 64)
- *   TXVC_PF_CONF_THRESHOLD   - minimum confidence (0-3) to issue a prefetch (default 2)
+ *   TXVC_PF_STRIDE_TABLE_SIZE       - number of predictor entries (default 256)
+ *   TXVC_PF_STRIDE_CONF_THRESHOLD   - minimum confidence (0-3) to issue a prefetch (default 2)
  *   TXVC_PF_MSHR_GATE_PCT    - issue only when MSHR occupancy < size * pct / 100 (default 50)
  *************/
 class StridePrefetcher : public PrefetchPolicy
@@ -1304,20 +1310,20 @@ class StridePrefetcher : public PrefetchPolicy
     StridePrefetcher(uint64_t _offset_bits) : offset_bits(_offset_bits)
     {
       // table size
-      if (const char* e = getenv("TXVC_PF_TABLE_SIZE")) {
+      if (const char* e = getenv("TXVC_PF_STRIDE_TABLE_SIZE")) {
         std::size_t v = static_cast<std::size_t>(std::stoull(e));
-        table_size = (v >= 1) ? v : 64;
+        table_size = (v >= 1) ? v : 256;
         if (v < 1)
-          std::cerr << "TXVC_PF_TABLE_SIZE must be >= 1, using default 64" << std::endl;
+          std::cerr << "TXVC_PF_STRIDE_TABLE_SIZE must be >= 1, using default 256" << std::endl;
       } else {
-        table_size = 64;
+        table_size = 256;
       }
 
       // confidence threshold
-      if (const char* e = getenv("TXVC_PF_CONF_THRESHOLD")) {
+      if (const char* e = getenv("TXVC_PF_STRIDE_CONF_THRESHOLD")) {
         int v = std::stoi(e);
         if (v < 0 || v > 3) {
-          std::cerr << "TXVC_PF_CONF_THRESHOLD must be 0-3, using default 2" << std::endl;
+          std::cerr << "TXVC_PF_STRIDE_CONF_THRESHOLD must be 0-3, using default 2" << std::endl;
           v = 2;
         }
         conf_threshold = static_cast<uint8_t>(v);
@@ -1346,16 +1352,16 @@ class StridePrefetcher : public PrefetchPolicy
 
     uint32_t get_mshr_gate_pct() const override { return mshr_gate_pct; }
 
-    uint64_t get_prefetch_candidate(uint64_t address) override
+    std::vector<uint64_t> get_prefetch_candidates(uint64_t address, std::size_t /*translation_level*/, uint64_t /*ip*/) override
     {
       const uint64_t cl_addr = address >> offset_bits;
       auto& pred = table[cl_addr % table_size];
-      uint64_t candidate = 0;
+      std::vector<uint64_t> candidates;
 
       if (pred.valid && pred.confidence >= conf_threshold) {
         const int64_t next_cl = static_cast<int64_t>(cl_addr) + pred.last_delta;
         if (next_cl >= 0 && next_cl <= static_cast<int64_t>(std::numeric_limits<uint64_t>::max() >> offset_bits))
-          candidate = static_cast<uint64_t>(next_cl) << offset_bits;
+          candidates.push_back(static_cast<uint64_t>(next_cl) << offset_bits);
       }
 
       if (pred.valid) {
@@ -1373,7 +1379,425 @@ class StridePrefetcher : public PrefetchPolicy
       }
 
       pred.last_cl_addr = cl_addr;
-      return candidate;
+      return candidates;
+    }
+};
+
+/*************
+ * TXVC Sibling Prefetcher
+ *
+ * Exploits page-table tree structure: adjacent virtual pages tend to access
+ * PTEs that share the same 4KB page-table page (siblings in the PT tree).
+ * The predictor tracks the stride between successive accesses *within* the
+ * same PT page and prefetches the next cache line in that page, guaranteeing
+ * it never crosses the page-table-page boundary.
+ *
+ * Usefulness controller: rolling accuracy window (bitset, max 64 entries)
+ * auto-throttles degree to 0 when accuracy drops below acc_threshold %.
+ * Re-enables as soon as accuracy recovers above the threshold.
+ *
+ * Env vars:
+ *   TXVC_PF_SBLG_TABLE_SIZE     - predictor entries (default 128)
+ *   TXVC_PF_SBLG_CONF_THRESHOLD - min confidence 0-3 to issue (default 2)
+ *   TXVC_PF_SBLG_ACC_WINDOW     - rolling window size, 4-64 (default 32)
+ *   TXVC_PF_SBLG_ACC_THRESHOLD  - min % accuracy to stay enabled (default 20)
+ *   TXVC_PF_MSHR_GATE_PCT       - shared with stride prefetcher (default 50)
+ *************/
+class SiblingPrefetcher : public PrefetchPolicy
+{
+  private:
+    struct Entry {
+      uint64_t page_tag    = 0;
+      int16_t  last_cl_off = 0;
+      int16_t  last_delta  = 0;
+      uint8_t  confidence  = 0;
+      bool     valid       = false;
+    };
+
+    struct UsefulnessController {
+      uint64_t bits       = 0;
+      uint32_t pos        = 0;
+      uint32_t useful_cnt = 0;
+      uint32_t filled     = 0;
+      uint32_t window_sz;
+      uint32_t threshold;
+      bool     enabled    = true;
+
+      UsefulnessController() : window_sz(32), threshold(20) {}
+      UsefulnessController(uint32_t w, uint32_t t) : window_sz(w), threshold(t) {}
+
+      void push(bool useful) {
+        const uint32_t idx = pos % window_sz;
+        const bool evicted = (bits >> idx) & 1ULL;
+        if (evicted) useful_cnt--;
+        if (useful) {
+          bits |= (1ULL << idx);
+          useful_cnt++;
+        } else {
+          bits &= ~(1ULL << idx);
+        }
+        pos = (pos + 1) % window_sz;
+        if (filled < window_sz) filled++;
+        // Only update the enable flag once we have filled at least half the window
+        if (filled >= window_sz / 2) {
+          enabled = (useful_cnt * 100 / filled >= threshold);
+        }
+      }
+
+      bool is_enabled() const { return enabled; }
+    };
+
+    std::size_t          table_size;
+    uint8_t              conf_threshold;
+    uint32_t             mshr_gate_pct;
+    uint64_t             offset_bits;
+    uint64_t             cls_per_page;
+    uint64_t             cls_per_page_bits;
+    std::vector<Entry>   table;
+    UsefulnessController uc;
+    uint32_t             degree;
+
+  public:
+    SiblingPrefetcher(uint64_t _offset_bits) : offset_bits(_offset_bits)
+    {
+      // 4KB page-table page, derive number of CLs per page
+      const uint64_t page_bits = 12;
+      cls_per_page = (1ULL << page_bits) >> offset_bits;  // 64 for 64B CLs
+      cls_per_page_bits = 0;
+      for (uint64_t tmp = cls_per_page >> 1; tmp; tmp >>= 1) cls_per_page_bits++;
+
+      // table size
+      if (const char* e = getenv("TXVC_PF_SBLG_TABLE_SIZE")) {
+        std::size_t v = static_cast<std::size_t>(std::stoull(e));
+        table_size = (v >= 1) ? v : 128;
+        if (v < 1)
+          std::cerr << "TXVC_PF_SBLG_TABLE_SIZE must be >= 1, using default 128" << std::endl;
+      } else {
+        table_size = 128;
+      }
+
+      // confidence threshold
+      if (const char* e = getenv("TXVC_PF_SBLG_CONF_THRESHOLD")) {
+        int v = std::stoi(e);
+        if (v < 0 || v > 3) {
+          std::cerr << "TXVC_PF_SBLG_CONF_THRESHOLD must be 0-3, using default 2" << std::endl;
+          v = 2;
+        }
+        conf_threshold = static_cast<uint8_t>(v);
+      } else {
+        conf_threshold = 2;
+      }
+
+      // MSHR gate percentage
+      if (const char* e = getenv("TXVC_PF_MSHR_GATE_PCT")) {
+        int v = std::stoi(e);
+        if (v <= 0 || v > 100) {
+          std::cerr << "TXVC_PF_MSHR_GATE_PCT must be 1-100, using default 50" << std::endl;
+          v = 50;
+        }
+        mshr_gate_pct = static_cast<uint32_t>(v);
+      } else {
+        mshr_gate_pct = 50;
+      }
+
+      // Usefulness window
+      uint32_t acc_window = 32;
+      if (const char* e = getenv("TXVC_PF_SBLG_ACC_WINDOW")) {
+        int v = std::stoi(e);
+        if (v >= 4 && v <= 64)
+          acc_window = static_cast<uint32_t>(v);
+        else
+          std::cerr << "TXVC_PF_SBLG_ACC_WINDOW must be 4-64, using default 32" << std::endl;
+      }
+      uint32_t acc_threshold = 20;
+      if (const char* e = getenv("TXVC_PF_SBLG_ACC_THRESHOLD")) {
+        int v = std::stoi(e);
+        if (v >= 0 && v <= 100)
+          acc_threshold = static_cast<uint32_t>(v);
+        else
+          std::cerr << "TXVC_PF_SBLG_ACC_THRESHOLD must be 0-100, using default 20" << std::endl;
+      }
+
+      uc = UsefulnessController(acc_window, acc_threshold);
+
+      // Prefetch degree (max candidates per access)
+      degree = 1;
+      if (const char* e = getenv("TXVC_PF_SBLG_DEGREE")) {
+        int v = std::stoi(e);
+        if (v >= 1 && v <= 8)
+          degree = static_cast<uint32_t>(v);
+        else
+          std::cerr << "TXVC_PF_SBLG_DEGREE must be 1-8, using default 1" << std::endl;
+      }
+
+      table.resize(table_size);
+
+      std::cout << "TXVC SiblingPrefetcher: table_size=" << table_size
+                << " conf_threshold=" << static_cast<int>(conf_threshold)
+                << " mshr_gate_pct=" << mshr_gate_pct
+                << " cls_per_page=" << cls_per_page
+                << " acc_window=" << acc_window
+                << " acc_threshold=" << acc_threshold
+                << " degree=" << degree << std::endl;
+    }
+
+    uint32_t get_mshr_gate_pct() const override { return mshr_gate_pct; }
+
+    void notify_useful()  override { uc.push(true);  }
+    void notify_useless() override { uc.push(false); }
+
+    std::vector<uint64_t> get_prefetch_candidates(uint64_t address, std::size_t /*translation_level*/, uint64_t /*ip*/) override
+    {
+      if (!uc.is_enabled()) return {};
+
+      const uint64_t cl_addr  = address >> offset_bits;
+      const uint64_t page_tag = cl_addr >> cls_per_page_bits;
+      const int16_t  cl_off   = static_cast<int16_t>(cl_addr & (cls_per_page - 1));
+      auto& pred = table[page_tag % table_size];
+      std::vector<uint64_t> candidates;
+
+      // Emit up to `degree` candidates before updating the predictor state.
+      // Each candidate is cl_off + k*delta for k = 1..degree, clamped to the
+      // PT page boundary so we never reference a different page-table page.
+      if (pred.valid && pred.page_tag == page_tag && pred.confidence >= conf_threshold) {
+        for (uint32_t k = 1; k <= degree; ++k) {
+          const int16_t next_off = static_cast<int16_t>(cl_off + static_cast<int16_t>(k) * pred.last_delta);
+          if (next_off < 0 || next_off >= static_cast<int16_t>(cls_per_page))
+            break; // stop at boundary, don't skip and continue
+          candidates.push_back(((page_tag << cls_per_page_bits) | static_cast<uint64_t>(next_off)) << offset_bits);
+        }
+      }
+
+      // Update entry
+      if (pred.valid && pred.page_tag == page_tag) {
+        const int16_t delta = cl_off - pred.last_cl_off;
+        if (delta == pred.last_delta) {
+          if (pred.confidence < 3) pred.confidence++;
+        } else {
+          pred.last_delta = delta;
+          pred.confidence = 0;
+        }
+      } else {
+        // Different page_tag evicts the old entry
+        pred.page_tag   = page_tag;
+        pred.last_delta = 0;
+        pred.confidence = 0;
+      }
+
+      pred.valid       = true;
+      pred.last_cl_off = cl_off;
+      return candidates;
+    }
+};
+
+/*************
+ * TXVC Child Prefetcher
+ *
+ * Exploits the parent→child relationship in the page table walk chain.
+ * When the PTW misses at level L (a parent node), this predictor looks up a
+ * learned (IP, parent_cl_addr) → child_cl_addr mapping and prefetches the
+ * expected level L-1 entry before the parent miss has even returned.
+ *
+ * Training: every miss at level L is paired with the most recently seen miss
+ * at level L+1 from the same IP.  That (parent, child) pair trains the table.
+ *
+ * Prediction: on a miss at any level > 1, look up (IP, current_cl_addr) and
+ * return the predicted child cl address if confidence is sufficient.
+ *
+ * Env vars:
+ *   TXVC_PF_CHILD_TABLE_SIZE     - prediction table entries (default 256)
+ *   TXVC_PF_CHILD_PENDING_SIZE   - pending-parent table entries (default 64)
+ *   TXVC_PF_CHILD_CONF_THRESHOLD - min confidence 0-3 to issue (default 2)
+ *   TXVC_PF_MSHR_GATE_PCT        - shared with other prefetchers (default 50)
+ *************/
+class ChildPrefetcher : public PrefetchPolicy
+{
+  private:
+    struct PredEntry {
+      uint64_t ip             = 0;
+      uint64_t parent_cl_addr = 0;
+      uint64_t child_cl_addr  = 0;
+      uint8_t  confidence     = 0;
+      bool     valid          = false;
+    };
+
+    // Records the most recent miss at a given level for a given IP.
+    struct PendingParent {
+      uint64_t   ip      = 0;
+      uint64_t   cl_addr = 0;
+      std::size_t level  = 0;
+      bool       valid   = false;
+    };
+
+    std::size_t              table_size;
+    std::size_t              pending_size;
+    uint8_t                  conf_threshold;
+    uint32_t                 mshr_gate_pct;
+    uint64_t                 offset_bits;
+    std::vector<PredEntry>   table;
+    std::vector<PendingParent> pending; // indexed by ip % pending_size
+
+    std::size_t pred_index(uint64_t ip, uint64_t parent_cl_addr) const
+    {
+      // Mix IP and parent address bits to reduce aliasing
+      return (ip ^ (parent_cl_addr * 2654435761ULL)) % table_size;
+    }
+
+  public:
+    ChildPrefetcher(uint64_t _offset_bits) : offset_bits(_offset_bits)
+    {
+      if (const char* e = getenv("TXVC_PF_CHILD_TABLE_SIZE")) {
+        std::size_t v = static_cast<std::size_t>(std::stoull(e));
+        table_size = (v >= 1) ? v : 256;
+        if (v < 1) std::cerr << "TXVC_PF_CHILD_TABLE_SIZE must be >= 1, using 256" << std::endl;
+      } else {
+        table_size = 256;
+      }
+
+      if (const char* e = getenv("TXVC_PF_CHILD_PENDING_SIZE")) {
+        std::size_t v = static_cast<std::size_t>(std::stoull(e));
+        pending_size = (v >= 1) ? v : 64;
+        if (v < 1) std::cerr << "TXVC_PF_CHILD_PENDING_SIZE must be >= 1, using 64" << std::endl;
+      } else {
+        pending_size = 64;
+      }
+
+      if (const char* e = getenv("TXVC_PF_CHILD_CONF_THRESHOLD")) {
+        int v = std::stoi(e);
+        if (v < 0 || v > 3) {
+          std::cerr << "TXVC_PF_CHILD_CONF_THRESHOLD must be 0-3, using default 2" << std::endl;
+          v = 2;
+        }
+        conf_threshold = static_cast<uint8_t>(v);
+      } else {
+        conf_threshold = 2;
+      }
+
+      if (const char* e = getenv("TXVC_PF_MSHR_GATE_PCT")) {
+        int v = std::stoi(e);
+        mshr_gate_pct = (v > 0 && v <= 100) ? static_cast<uint32_t>(v) : 50u;
+      } else {
+        mshr_gate_pct = 50;
+      }
+
+      table.resize(table_size);
+      pending.resize(pending_size);
+
+      std::cout << "TXVC ChildPrefetcher: table_size=" << table_size
+                << " pending_size=" << pending_size
+                << " conf_threshold=" << static_cast<int>(conf_threshold)
+                << " mshr_gate_pct=" << mshr_gate_pct << std::endl;
+    }
+
+    uint32_t get_mshr_gate_pct() const override { return mshr_gate_pct; }
+
+    std::vector<uint64_t> get_prefetch_candidates(uint64_t address, std::size_t translation_level, uint64_t ip) override
+    {
+      // Only operates on PTE-path accesses (level > 0)
+      if (translation_level == 0) return {};
+
+      const uint64_t cl_addr = address >> offset_bits;
+      std::vector<uint64_t> candidates;
+
+      // --- Training ---
+      // Check if there is a pending parent at level+1 for this IP.
+      // If so, this access (cl_addr at level L) is the child of that parent.
+      PendingParent& pp = pending[ip % pending_size];
+      if (pp.valid && pp.ip == ip && pp.level == translation_level + 1) {
+        const std::size_t idx = pred_index(ip, pp.cl_addr);
+        PredEntry& entry = table[idx];
+        if (entry.valid && entry.ip == ip && entry.parent_cl_addr == pp.cl_addr) {
+          // Entry exists for this (IP, parent): update confidence
+          if (entry.child_cl_addr == cl_addr) {
+            if (entry.confidence < 3) entry.confidence++;
+          } else {
+            // New child observed for same parent — reset
+            entry.child_cl_addr = cl_addr;
+            entry.confidence    = 0;
+          }
+        } else {
+          // Allocate fresh entry
+          entry.valid          = true;
+          entry.ip             = ip;
+          entry.parent_cl_addr = pp.cl_addr;
+          entry.child_cl_addr  = cl_addr;
+          entry.confidence     = 0;
+        }
+      }
+
+      // Update pending parent: record this miss as the new "last seen at level L" for this IP
+      pp.valid   = true;
+      pp.ip      = ip;
+      pp.cl_addr = cl_addr;
+      pp.level   = translation_level;
+
+      // --- Prediction ---
+      // Only prefetch if this is not a leaf (level > 1): there is a child level below.
+      if (translation_level > 1) {
+        const std::size_t idx = pred_index(ip, cl_addr);
+        const PredEntry& entry = table[idx];
+        if (entry.valid && entry.ip == ip && entry.parent_cl_addr == cl_addr
+            && entry.confidence >= conf_threshold)
+          candidates.push_back(entry.child_cl_addr << offset_bits);
+      }
+
+      return candidates;
+    }
+};
+
+/*************
+ * TXVC Combined (Stride + Sibling) Prefetcher
+ *
+ * Priority order: child (cross-level) → sibling (within PT page) → stride (fallback).
+ * Child fires on upper-level misses (level > 1), sibling on any level.
+ * Useful/useless feedback is forwarded to sibling (which has a usefulness controller);
+ * child and stride don't need it as they have confidence-gating instead.
+ *************/
+class CombinedPrefetcher : public PrefetchPolicy
+{
+  private:
+    StridePrefetcher  stride_pf;
+    SiblingPrefetcher sibling_pf;
+    ChildPrefetcher   child_pf;
+    uint32_t          mshr_gate_pct;
+
+  public:
+    CombinedPrefetcher(uint64_t offset_bits)
+      : stride_pf(offset_bits), sibling_pf(offset_bits), child_pf(offset_bits)
+    {
+      if (const char* e = getenv("TXVC_PF_MSHR_GATE_PCT")) {
+        int v = std::stoi(e);
+        mshr_gate_pct = (v > 0 && v <= 100) ? static_cast<uint32_t>(v) : 50u;
+      } else {
+        mshr_gate_pct = 50;
+      }
+      std::cout << "TXVC CombinedPrefetcher (child+sibling+stride): mshr_gate_pct=" << mshr_gate_pct << std::endl;
+    }
+
+    uint32_t get_mshr_gate_pct() const override { return mshr_gate_pct; }
+
+    void notify_useful() override
+    {
+      stride_pf.notify_useful();
+      sibling_pf.notify_useful();
+    }
+
+    void notify_useless() override
+    {
+      stride_pf.notify_useless();
+      sibling_pf.notify_useless();
+    }
+
+    std::vector<uint64_t> get_prefetch_candidates(uint64_t address, std::size_t translation_level, uint64_t ip) override
+    {
+      // Child first: cross-level prefetch (parent→child), only fires for level > 1
+      std::vector<uint64_t> child = child_pf.get_prefetch_candidates(address, translation_level, ip);
+      if (!child.empty()) return child;
+      // Sibling: within-PT-page stride, fires at any level
+      std::vector<uint64_t> sblg = sibling_pf.get_prefetch_candidates(address, translation_level, ip);
+      if (!sblg.empty()) return sblg;
+      // Fall back to global stride predictor
+      return stride_pf.get_prefetch_candidates(address, translation_level, ip);
     }
 };
 

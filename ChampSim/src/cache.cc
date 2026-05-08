@@ -33,6 +33,10 @@
 				extern double STLB_MPKI;
 #endif
 
+namespace {
+constexpr uint32_t TXVC_PTE_PREFETCH_METADATA = 0x54585643; // 'TXVC'
+}
+
 				bool CACHE::handle_fill(const PACKET& fill_mshr)
 				{
 					cpu = fill_mshr.cpu;
@@ -215,11 +219,25 @@
 							//TODO: we don't handle really writes, writebacks because pte are never written to
 #endif	
 
-							if (way->prefetch)
+							if (way->prefetch) {
 								sim_stats.back().pf_useless++;
+								if (way->pf_metadata == TXVC_PTE_PREFETCH_METADATA) {
+#if defined TRANSLATION_EXCLUSIVE_CACHE
+									if (enable_tx_victim_cache && NAME.find(_CACHE_) != std::string::npos && tx_victim_cache)
+										tx_victim_cache->record_pf_useless();
+#endif
+								}
+							}
 
-							if (fill_mshr.type == PREFETCH)
+							if (fill_mshr.type == PREFETCH) {
 								sim_stats.back().pf_fill++;
+								if (fill_mshr.pf_metadata == TXVC_PTE_PREFETCH_METADATA) {
+#if defined TRANSLATION_EXCLUSIVE_CACHE
+									if (enable_tx_victim_cache && NAME.find(_CACHE_) != std::string::npos && tx_victim_cache)
+										tx_victim_cache->record_pf_fill();
+#endif
+								}
+							}
 
 #if defined ENABLE_PAGE_CROSSING_STATS 
 							if ((NAME.find("ITLB") != std::string::npos) && (NAME.find("DTLB") != std::string::npos)
@@ -525,6 +543,12 @@
 						// update prefetch stats and reset prefetch bit
 						if (way->prefetch && !handle_pkt.prefetch_from_this) {
 							sim_stats.back().pf_useful++;
+							if (way->pf_metadata == TXVC_PTE_PREFETCH_METADATA) {
+#if defined TRANSLATION_EXCLUSIVE_CACHE
+								if (enable_tx_victim_cache && NAME.find(_CACHE_) != std::string::npos && tx_victim_cache)
+									tx_victim_cache->record_pf_useful();
+#endif
+							}
 							way->prefetch = false;
 //#if defined(ENABLE_PAGE_CROSSING_STATS)
 //							if (way->page_crossing == 2) sim_stats.back().pf_crossing_pages_tlb_miss++;
@@ -789,7 +813,6 @@
 #if defined TRANSLATION_EXCLUSIVE_CACHE
 					BLOCK txvc_block_entry;
 					bool entry_found = false;
-					uint64_t txvc_prefetch_addr = 0;
 					if (NAME.find(_CACHE_) != std::string::npos) {
 						//PACKET txc_copy_pkt{handle_pkt};
 							
@@ -803,13 +826,22 @@
 							
 						if (enable_tx_victim_cache && vc_entry_cond) {
 
-							txvc_prefetch_addr = tx_victim_cache->get_prefetch_candidate(handle_pkt.address);
+							std::vector<uint64_t> txvc_prefetch_candidates = tx_victim_cache->get_prefetch_candidates(handle_pkt.address, handle_pkt.translation_level, handle_pkt.ip);
 							auto [_entry, _entry_found] = tx_victim_cache->lookup(handle_pkt.address, handle_pkt.is_instr, current_cycle, handle_pkt.ip);
 							entry_found = _entry_found;
 							txvc_block_entry = _entry;
 
-							if (!entry_found && txvc_prefetch_addr != 0 && get_occupancy(0, txvc_prefetch_addr) * 100 < get_size(0, txvc_prefetch_addr) * tx_victim_cache->get_pf_mshr_gate_pct())
-								prefetch_pte_line(txvc_prefetch_addr, true, handle_pkt.translation_level);
+							// Only generate TXVC prefetches from demand/PTW misses.
+							// Generating a prefetch while handling a PREFETCH packet can append to
+							// PQ during PQ traversal and invalidate iterators used by operate_queue.
+							if (handle_pkt.type != PREFETCH && !entry_found) {
+								for (uint64_t txvc_prefetch_addr : txvc_prefetch_candidates) {
+									if (txvc_prefetch_addr == 0) continue;
+									if (get_occupancy(0, txvc_prefetch_addr) * 100 >= get_size(0, txvc_prefetch_addr) * tx_victim_cache->get_pf_mshr_gate_pct())
+										break; // MSHR pressure — stop issuing further candidates
+									prefetch_pte_line(txvc_prefetch_addr, true, handle_pkt.translation_level);
+								}
+							}
 							//copy_pkt.data = _entry.data;
 						}
 					}
@@ -831,8 +863,15 @@
 
 						if (mshr_entry->type == PREFETCH && handle_pkt.type != PREFETCH) {
 							// Mark the prefetch as useful
-							if (mshr_entry->prefetch_from_this)
+							if (mshr_entry->prefetch_from_this) {
 								sim_stats.back().pf_useful++;
+								if (mshr_entry->pf_metadata == TXVC_PTE_PREFETCH_METADATA) {
+#if defined TRANSLATION_EXCLUSIVE_CACHE
+									if (enable_tx_victim_cache && NAME.find(_CACHE_) != std::string::npos && tx_victim_cache)
+										tx_victim_cache->record_pf_useful();
+#endif
+								}
+							}
 
 							uint64_t prior_event_cycle = mshr_entry->event_cycle;
 							auto to_return = std::move(mshr_entry->to_return);
@@ -1335,6 +1374,11 @@ int CACHE::prefetch_pte_line(uint64_t pf_addr, bool fill_this_level, std::size_t
 {
 	sim_stats.back().pf_requested++;
 
+#if defined TRANSLATION_EXCLUSIVE_CACHE
+	if (enable_tx_victim_cache && NAME.find(_CACHE_) != std::string::npos && tx_victim_cache)
+		tx_victim_cache->record_pf_requested();
+#endif
+
 	PACKET pf_packet;
 	pf_packet.type = PREFETCH;
 	pf_packet.prefetch_from_this = true;
@@ -1342,6 +1386,7 @@ int CACHE::prefetch_pte_line(uint64_t pf_addr, bool fill_this_level, std::size_t
 	pf_packet.cpu = cpu;
 	pf_packet.address = pf_addr;
 	pf_packet.v_address = virtual_prefetch ? pf_addr : 0;
+	pf_packet.pf_metadata = TXVC_PTE_PREFETCH_METADATA;
 	pf_packet.translation_level = translation_level;
 
 #if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT || defined TRANSLATION_EXCLUSIVE_CACHE
@@ -1358,7 +1403,11 @@ int CACHE::prefetch_pte_line(uint64_t pf_addr, bool fill_this_level, std::size_t
 	auto success = this->add_pq(pf_packet);
 	if (success) {
 		++sim_stats.back().pf_issued;
-		++sim_stats.back().pf_txvc_pte_issued;
+
+#if defined TRANSLATION_EXCLUSIVE_CACHE
+		if (enable_tx_victim_cache && NAME.find(_CACHE_) != std::string::npos && tx_victim_cache)
+			tx_victim_cache->record_pf_issued();
+#endif
 	}
 
 	return success;
@@ -1467,6 +1516,8 @@ void CACHE::begin_phase()
 	//	tx_cache->queues.begin_phase();
 	//	tx_cache->begin_phase();
 	//}
+	if (enable_tx_victim_cache && NAME.find(_CACHE_) != std::string::npos && tx_victim_cache)
+		tx_victim_cache->on_phase_begin(warmup);
 #endif 
   roi_stats.emplace_back();
   sim_stats.emplace_back();
@@ -1508,7 +1559,6 @@ void CACHE::end_phase(unsigned finished_cpu)
 
   roi_stats.back().pf_requested = sim_stats.back().pf_requested;
   roi_stats.back().pf_issued = sim_stats.back().pf_issued;
-	roi_stats.back().pf_txvc_pte_issued = sim_stats.back().pf_txvc_pte_issued;
   roi_stats.back().pf_useful = sim_stats.back().pf_useful;
   roi_stats.back().pf_useless = sim_stats.back().pf_useless;
   roi_stats.back().pf_fill = sim_stats.back().pf_fill;

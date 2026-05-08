@@ -16,11 +16,12 @@ def parse_champsim_stats(input_file, output_file):
     #print(args.input_file)
     # Get Cache and TLB statistics
 
-    CACHES = ['cpu0_DTLB', 'cpu0_ITLB', 'cpu0_STLB', 'cpu0_L1I', 'cpu0_L1D', 'cpu0_L2C', 'LLC', 'cpu0_L1D_VC']
+    CACHES = ['cpu0_DTLB', 'cpu0_ITLB', 'cpu0_STLB', 'cpu0_L1I', 'cpu0_L1D', 'cpu0_L2C', 'LLC', 'TXVC']
     OPERATIONS = ['TOTAL', 'LOAD', 'RFO', 'PREFETCH', 'WRITEBACK', 'TRANSLATION']
     STATS = [   'ACCESS', 'HIT', 'MISS', 'dACCESS', 'dHIT', 'dMISS', 'iACCESS', 'iHIT', 'iMISS', 
                 'dtHIT', 'dtMISS', 'itHIT', 'itMISS', 'itACCESS', 'dtACCESS',
-                'REQUESTED', 'ISSUED', 'USEFUL', 'USELESS']
+                'REQUESTED', 'ISSUED', 'USEFUL', 'USELESS',
+                'TXVC_PTE_REQUESTED', 'TXVC_PTE_ISSUED', 'TXVC_PTE_FILL', 'TXVC_PTE_USEFUL', 'TXVC_PTE_USELESS']
 
     CACHE_STATS = {}
     for cache in CACHES:

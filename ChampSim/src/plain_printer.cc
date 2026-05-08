@@ -141,7 +141,6 @@ void champsim::plain_printer::print(CACHE::stats_type stats)
     stream << stats.name << " PREFETCH  ";
     stream << "REQUESTED: " << std::setw(10) << stats.pf_requested << "  ";
     stream << "ISSUED: " << std::setw(10) << stats.pf_issued << "  ";
-    stream << "TXVC_PTE: " << std::setw(10) << stats.pf_txvc_pte_issued << "  ";
     stream << "CROSSED: " << std::setw(10) << stats.pf_crossed << "  ";
     stream << "USEFUL: " << std::setw(10) << stats.pf_useful << "  ";
     stream << "USELESS: " << std::setw(10) << stats.pf_useless << std::endl;

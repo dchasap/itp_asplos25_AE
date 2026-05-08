@@ -68,7 +68,6 @@ struct cache_stats {
   // prefetch stats
   uint64_t pf_requested = 0;
   uint64_t pf_issued = 0;
-  uint64_t pf_txvc_pte_issued = 0;
   uint64_t pf_useful = 0;
   uint64_t pf_useless = 0;
   uint64_t pf_fill = 0;
@@ -360,6 +359,8 @@ public:
       uint64_t total_accesses = 0, total_itaccesses = 0, total_dtaccesses = 0;
       uint64_t total_hits = 0, total_ithits = 0, total_dthits = 0;
       uint64_t total_misses = 0, total_itmisses = 0, total_dtmisses = 0;
+      uint64_t pf_requested = 0, pf_issued = 0, pf_fill = 0, pf_useful = 0, pf_useless = 0;
+      bool roi_phase_started = false;
 
       bool save_mem_accesses;
       MemoryTracer memTracer;
@@ -554,6 +555,15 @@ public:
         if (pf_policy_name == nullptr || strcmp(pf_policy_name, "stride") == 0) {
           std::cout << "\tUsing stride prefetch policy for TXVC" << std::endl;
           prefetchPolicy = new StridePrefetcher(offset_bits);
+        } else if (strcmp(pf_policy_name, "sibling") == 0) {
+          std::cout << "\tUsing sibling prefetch policy for TXVC" << std::endl;
+          prefetchPolicy = new SiblingPrefetcher(offset_bits);
+        } else if (strcmp(pf_policy_name, "child") == 0) {
+          std::cout << "\tUsing child prefetch policy for TXVC" << std::endl;
+          prefetchPolicy = new ChildPrefetcher(offset_bits);
+        } else if (strcmp(pf_policy_name, "combined") == 0) {
+          std::cout << "\tUsing combined (child+sibling+stride) prefetch policy for TXVC" << std::endl;
+          prefetchPolicy = new CombinedPrefetcher(offset_bits);
         } else if (strcmp(pf_policy_name, "none") == 0) {
           std::cout << "\tUsing none prefetch policy for TXVC" << std::endl;
           prefetchPolicy = new NonePrefetcher();
@@ -660,9 +670,9 @@ public:
 
       }
 
-      uint64_t get_prefetch_candidate(uint64_t address)
+      std::vector<uint64_t> get_prefetch_candidates(uint64_t address, std::size_t translation_level, uint64_t ip)
       {
-        return prefetchPolicy->get_prefetch_candidate(address);
+        return prefetchPolicy->get_prefetch_candidates(address, translation_level, ip);
       }
 
       uint32_t get_pf_mshr_gate_pct() const
@@ -758,6 +768,14 @@ public:
         std::cout << "dtHIT:" << std::setw(10) << total_dthits << "  "; 
         std::cout << "dtMISS:" << std::setw(10) << total_dtmisses;
         std::cout << std::endl;
+
+        std::cout << "TXVC PREFETCH   ";
+        std::cout << "REQUESTED:" << std::setw(10) << pf_requested << "  ";
+        std::cout << "ISSUED:" << std::setw(10) << pf_issued << "  ";
+        std::cout << "FILL:" << std::setw(10) << pf_fill << "  ";
+        std::cout << "USEFUL:" << std::setw(10) << pf_useful << "  ";
+        std::cout << "USELESS:" << std::setw(10) << pf_useless;
+        std::cout << std::endl;
        
         if (enable_cache_filtering)
           cacheFilter->print_stats();
@@ -765,6 +783,41 @@ public:
 #if defined ENABLE_EXTRA_CACHE_STATS
         reuseDistMon->dump();
 #endif
+      }
+
+      void record_pf_requested() { pf_requested++; }
+      void record_pf_issued() { pf_issued++; }
+      void record_pf_fill() { pf_fill++; }
+      void record_pf_useful()  { pf_useful++;  prefetchPolicy->notify_useful();  }
+      void record_pf_useless() { pf_useless++; prefetchPolicy->notify_useless(); }
+
+      void reset_phase_stats()
+      {
+        total_accesses = 0;
+        total_itaccesses = 0;
+        total_dtaccesses = 0;
+        total_hits = 0;
+        total_ithits = 0;
+        total_dthits = 0;
+        total_misses = 0;
+        total_itmisses = 0;
+        total_dtmisses = 0;
+        pf_requested = 0;
+        pf_issued = 0;
+        pf_fill = 0;
+        pf_useful = 0;
+        pf_useless = 0;
+      }
+
+      void on_phase_begin(bool in_warmup)
+      {
+        if (in_warmup)
+          return;
+
+        if (!roi_phase_started) {
+          reset_phase_stats();
+          roi_phase_started = true;
+        }
       }
 
   };
