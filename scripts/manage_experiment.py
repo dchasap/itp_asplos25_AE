@@ -2,6 +2,7 @@
 
 import argparse
 import configparser
+import fnmatch
 import os
 import subprocess
 import traceback
@@ -174,6 +175,78 @@ cache_env_parameters = [ 	'sets', 'ways', 'set_indexer', 'level',
 							'filter_size', 'filter_num_hashes',
 							'filter_mem_trace_path',
 							'data_only', 'instr_only' ]
+
+
+def _split_simulations(value):
+	return [simulation.strip() for simulation in value.split(',') if simulation.strip()]
+
+
+def _flatten_overrides(raw_overrides):
+	flat_overrides = []
+	for group in raw_overrides:
+		if isinstance(group, list):
+			flat_overrides.extend(group)
+		else:
+			flat_overrides.append(group)
+	return flat_overrides
+
+
+def apply_cli_overrides(config, raw_overrides):
+	overrides = _flatten_overrides(raw_overrides)
+	if not overrides:
+		return
+
+	experiment_simulations = []
+	if config.has_section('EXPERIMENT') and config.has_option('EXPERIMENT', 'simulations'):
+		experiment_simulations = _split_simulations(config['EXPERIMENT']['simulations'])
+
+	for override in overrides:
+		if '=' not in override:
+			printer.print_error("Malformed override (missing '='): " + override)
+			exit(1)
+
+		target, value = override.split('=', 1)
+		target = target.strip()
+		value = value.strip()
+
+		if '.' not in target:
+			printer.print_error("Malformed override target (expected section.option): " + target)
+			exit(1)
+
+		section_selector, option = target.split('.', 1)
+		section_selector = section_selector.strip()
+		option = option.strip()
+
+		if not section_selector or not option:
+			printer.print_error("Malformed override target (empty section or option): " + target)
+			exit(1)
+
+		is_wildcard = any(token in section_selector for token in ['*', '?', '['])
+
+		if is_wildcard:
+			matched_sections = [
+				section
+				for section in experiment_simulations
+				if fnmatch.fnmatch(section, section_selector)
+			]
+
+			for section in matched_sections:
+				if not config.has_section(section):
+					config.add_section(section)
+				config.set(section, option, value)
+
+			printer.print_default(
+				"Override applied: " + target + "='" + value + "' to " + str(len(matched_sections)) + " experiment section(s)."
+			)
+		else:
+			if not config.has_section(section_selector):
+				printer.print_error("Explicit override section not found: " + section_selector)
+				exit(1)
+
+			config.set(section_selector, option, value)
+			printer.print_default(
+				"Override applied: " + target + "='" + value + "'"
+			)
 
 
 def set_champsim_json_params(config, json_conf, sim, component, parameters):
@@ -441,6 +514,15 @@ parser.add_argument('--parse', dest='parse_data', required=False, action='store_
 parser.add_argument('--plot', dest='plot_data', required=False, action='store_true', help='Plot simulations\' data.')
 parser.add_argument('--show', dest='show_data', required=False, action='store_true', help='Show plotted data.')
 parser.add_argument('--build-presentation', dest='build_presentation', required=False, action='store_true', help='Build slides.')
+parser.add_argument(
+	'--override',
+	dest='overrides',
+	required=False,
+	action='append',
+	nargs='+',
+	default=[],
+	help='Override config as section.option=value. Supports multiple values and wildcard section patterns (e.g. "*.txvc.miss_fill_target=l2c txvc") over experiment simulations.'
+)
 
 if __name__ == "__main__":
 
@@ -448,6 +530,7 @@ if __name__ == "__main__":
 
 	config = configparser.ConfigParser()
 	config.read(args.config_file)
+	apply_cli_overrides(config, args.overrides)
 
 	config = conf_preprocessor.preprocess(config, args.config_file)
 
