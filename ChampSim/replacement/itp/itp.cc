@@ -5,6 +5,7 @@
 
 #include "cache.h"
 #include "util.h"
+#include "env_var.h"
 
 //#define maxRRPV 12
 //#define NUM_POLICY 2
@@ -60,19 +61,24 @@ namespace {
 
 void CACHE::initialize_replacement()
 {
-	if (getenv("TLB_LOWER_STRESS_THRESHOLD")) {
-		::TLB_LOWER_STRESS_THRESHOLD = std::stoi(getenv("TLB_LOWER_STRESS_THRESHOLD"));
+	if (auto v = champsim::EnvVar<int>::get("TLB_LOWER_STRESS_THRESHOLD")) {
+		::TLB_LOWER_STRESS_THRESHOLD = *v;
 		//::TLB_STRESS_THRESHOLD = 0;
 	}
 
-	if (getenv("TLB_UPPER_STRESS_THRESHOLD")) {
-		::TLB_UPPER_STRESS_THRESHOLD = std::stoi(getenv("TLB_UPPER_STRESS_THRESHOLD"));
+	if (auto v = champsim::EnvVar<int>::get("TLB_UPPER_STRESS_THRESHOLD")) {
+		::TLB_UPPER_STRESS_THRESHOLD = *v;
 		::TLB_UPPER_STRESS_THRESHOLD = 2.5;
 	}
 
-	maxRRPV = std::stoi(getenv("ITP_MAX_LRU"));
-	instr_pos = std::stoi(getenv("ITP_INSTR_POS"));
-	data_pos = std::stoi(getenv("ITP_DATA_POS"));
+	if (auto v = champsim::EnvVar<int>::get("ITP_MAX_LRU")) {
+	  maxRRPV = *v;
+	} else {
+	  std::cerr << "ITP_MAX_LRU not set!" << std::endl;
+	  exit(1);
+	}
+	if (auto v = champsim::EnvVar<int>::get("ITP_INSTR_POS")) instr_pos = *v; else { std::cerr << "ITP_INSTR_POS not set!" << std::endl; exit(1); }
+	if (auto v = champsim::EnvVar<int>::get("ITP_DATA_POS")) data_pos = *v; else { std::cerr << "ITP_DATA_POS not set!" << std::endl; exit(1); }
 	std::cout << this->NAME << " using iTP with max lru@" << maxRRPV << std::endl;
 	std::cout << this->NAME << " using iTP with instr@" << instr_pos 
 						<< " and data@" << data_pos << std::endl;

@@ -311,7 +311,7 @@ public:
 
   void check_touched_indices() {
     
-    std::string set_access_filename_prefix = getenv("SET_ACCESS_FILENAME_PREFIX");
+    std::string set_access_filename_prefix = champsim::EnvVar<std::string>::get_or("SET_ACCESS_FILENAME_PREFIX", std::string(""));
     std::ofstream dumpfile = std::ofstream(set_access_filename_prefix + "_" + NAME + ".csv", std::ios::out);
     std::cout << "Saving set accesses to " << set_access_filename_prefix << "_" << NAME << ".csv" << std::endl;
     
@@ -396,124 +396,122 @@ public:
 
         std::cout << "TXVC initialized with " << num_set << " sets and " << num_way << " ways." << std::endl;
 
-				if (getenv("TXVC_SET_INDEXER") != nullptr) {
-					char* set_indexer_name = getenv("TXVC_SET_INDEXER");
-					if (strcmp(set_indexer_name, "default") == 0) {
-            std::cout << "\tUsing Default hash as set indexer for TXVC" << std::endl;
-					  setIndexer = new DefaultHash(num_set, num_way, offset_bits);
-					} else if (strcmp(set_indexer_name, "modulo") == 0) {
-            std::cout << "\tUsing Modulo hash as set indexer for TXVC" << std::endl;
-					  setIndexer = new ModuloHash(num_set, num_way, offset_bits);
-          } else if (strcmp(set_indexer_name, "xor") == 0) {
-            std::cout << "\tUsing XOR hash as set indexer for TXVC" << std::endl;
-					  setIndexer = new XORHash(num_set, num_way);
-          } else if (strcmp(set_indexer_name, "knuth") == 0) {
-            std::cout << "\tUsing Multiplicative-Knuth hash as set indexer for TXVC" << std::endl;
-					  setIndexer = new MultiplicativeHash(num_set, num_way);
-          } else {          
-            std::cerr << "Unknown hash indexer for TXVC: " << set_indexer_name << std::endl;
+        if (auto v = champsim::EnvVar<std::string>::get("TXVC_SET_INDEXER")) {
+            std::string set_indexer_name = *v;
+            if (set_indexer_name == "default") {
+              std::cout << "\tUsing Default hash as set indexer for TXVC" << std::endl;
+              setIndexer = new DefaultHash(num_set, num_way, offset_bits);
+            } else if (set_indexer_name == "modulo") {
+              std::cout << "\tUsing Modulo hash as set indexer for TXVC" << std::endl;
+              setIndexer = new ModuloHash(num_set, num_way, offset_bits);
+            } else if (set_indexer_name == "xor") {
+              std::cout << "\tUsing XOR hash as set indexer for TXVC" << std::endl;
+              setIndexer = new XORHash(num_set, num_way);
+            } else if (set_indexer_name == "knuth") {
+              std::cout << "\tUsing Multiplicative-Knuth hash as set indexer for TXVC" << std::endl;
+              setIndexer = new MultiplicativeHash(num_set, num_way);
+            } else {
+              std::cerr << "Unknown hash indexer for TXVC: " << set_indexer_name << std::endl;
+              exit(1);
+            }
+          } else {
+            std::cerr << "TXVC_SET_INDEXER not set!" << std::endl;
             exit(1);
           }
-				} else {
-          std::cerr << "TXVC_SET_INDEXER not set!" << std::endl;
-          exit(1);
-        }
 
-				if (getenv("TXVC_REP_POLICY") != nullptr) {
-					char* rep_pol_name = getenv("TXVC_REP_POLICY");
-					if (strcmp(rep_pol_name, "lru") == 0) {
-            std::cout << "\tUsing LRU replacement policy for TXVC" << std::endl;
-					  replacementPol = new LRU(num_set, num_way);
-					} else if (strcmp(rep_pol_name, "lfu") == 0) {
-            std::cout << "\tUsing LFU replacement policy for TXVC" << std::endl;
-            replacementPol = new LFU(num_set, num_way);
-          } else if (strcmp(rep_pol_name, "lfu_leaf") == 0) {
-            std::cout << "\tUsing LFU_Leaf replacement policy for TXVC" << std::endl;
-            replacementPol = new LFU_Leaf(num_set, num_way);
-          } else if (strcmp(rep_pol_name, "lfupp") == 0) {
-            std::cout << "\tUsing LFU++ replacement policy for TXVC" << std::endl;
-            replacementPol = new LFUPP(num_set, num_way);
-          } else if (strcmp(rep_pol_name, "lfu_decay") == 0) {
-            std::cout << "\tUsing LFU with Decay replacement policy for TXVC" << std::endl;
-            replacementPol = new LFUwDecay(num_set, num_way);
-          } else if (strcmp(rep_pol_name, "lfu_pchot") == 0) {
-            std::cout << "\tUsing LFU+PC-hotness replacement policy for TXVC" << std::endl;
-            replacementPol = new LFU_PCHot(num_set, num_way);
-          } else if (strcmp(rep_pol_name, "lrfu") == 0) {
-            std::cout << "\tUsing LRFU replacement policy for TXVC" << std::endl;
-            replacementPol = new LRFU(num_set, num_way);
-          } else if (strcmp(rep_pol_name, "lrfu_wss") == 0) {
-            std::cout << "\tUsing LRFU_WSS replacement policy for TXVC" << std::endl;
-            replacementPol = new LRFU_WSS(num_set, num_way);
-          } else if (strcmp(rep_pol_name, "lfu_halving") == 0) {
-            std::cout << "\tUsing LFU_Halving replacement policy for TXVC" << std::endl;
-            replacementPol = new LFU_Halving(num_set, num_way);
-          } else if (strcmp(rep_pol_name, "srrip") == 0) {
-            std::cout << "\tUsing SRRIP replacement policy for TXVC" << std::endl;
-            replacementPol = new SRRIP(num_set, num_way, 3);
-          } else if (strcmp(rep_pol_name, "srrip_leaf") == 0) {
-            std::cout << "\tUsing SRRIP replacement policy for TXVC" << std::endl;
-            replacementPol = new SRRIP_Leaf(num_set, num_way, 3);
-          } else if (strcmp(rep_pol_name, "pacipv") == 0) {
-            std::cout << "\tUsing PACIPV replacement policy for TXVC" << std::endl;
-            replacementPol = new PACIPV(num_set, num_way, 3);
-          } else {          
-            std::cerr << "Unknown replacement policy for TXVC: " << rep_pol_name << std::endl;
+        if (auto v = champsim::EnvVar<std::string>::get("TXVC_REP_POLICY")) {
+            std::string rep_pol_name = *v;
+            if (rep_pol_name == "lru") {
+              std::cout << "\tUsing LRU replacement policy for TXVC" << std::endl;
+              replacementPol = new LRU(num_set, num_way);
+            } else if (rep_pol_name == "lfu") {
+              std::cout << "\tUsing LFU replacement policy for TXVC" << std::endl;
+              replacementPol = new LFU(num_set, num_way);
+            } else if (rep_pol_name == "lfu_leaf") {
+              std::cout << "\tUsing LFU_Leaf replacement policy for TXVC" << std::endl;
+              replacementPol = new LFU_Leaf(num_set, num_way);
+            } else if (rep_pol_name == "lfupp") {
+              std::cout << "\tUsing LFU++ replacement policy for TXVC" << std::endl;
+              replacementPol = new LFUPP(num_set, num_way);
+            } else if (rep_pol_name == "lfu_decay") {
+              std::cout << "\tUsing LFU with Decay replacement policy for TXVC" << std::endl;
+              replacementPol = new LFUwDecay(num_set, num_way);
+            } else if (rep_pol_name == "lfu_pchot") {
+              std::cout << "\tUsing LFU+PC-hotness replacement policy for TXVC" << std::endl;
+              replacementPol = new LFU_PCHot(num_set, num_way);
+            } else if (rep_pol_name == "lrfu") {
+              std::cout << "\tUsing LRFU replacement policy for TXVC" << std::endl;
+              replacementPol = new LRFU(num_set, num_way);
+            } else if (rep_pol_name == "lrfu_wss") {
+              std::cout << "\tUsing LRFU_WSS replacement policy for TXVC" << std::endl;
+              replacementPol = new LRFU_WSS(num_set, num_way);
+            } else if (rep_pol_name == "lfu_halving") {
+              std::cout << "\tUsing LFU_Halving replacement policy for TXVC" << std::endl;
+              replacementPol = new LFU_Halving(num_set, num_way);
+            } else if (rep_pol_name == "srrip") {
+              std::cout << "\tUsing SRRIP replacement policy for TXVC" << std::endl;
+              replacementPol = new SRRIP(num_set, num_way, 3);
+            } else if (rep_pol_name == "srrip_leaf") {
+              std::cout << "\tUsing SRRIP replacement policy for TXVC" << std::endl;
+              replacementPol = new SRRIP_Leaf(num_set, num_way, 3);
+            } else if (rep_pol_name == "pacipv") {
+              std::cout << "\tUsing PACIPV replacement policy for TXVC" << std::endl;
+              replacementPol = new PACIPV(num_set, num_way, 3);
+            } else {
+              std::cerr << "Unknown replacement policy for TXVC: " << rep_pol_name << std::endl;
+              exit(1);
+            }
+          } else {
+            std::cerr << "TXVC_REP_POLICY not set!" << std::endl;
             exit(1);
           }
-				} else {
-          std::cerr << "TXVC_REP_POLICY not set!" << std::endl;
-          exit(1);
-        }
 
-        if (getenv("TXVC_CACHE_FILTERING")) {
-					char* cache_filtering_flag = getenv("TXVC_CACHE_FILTERING");
-					if (strcmp(cache_filtering_flag, "true") == 0) {
-						enable_cache_filtering = true;
-					}
-				} else {
+        if (auto v = champsim::EnvVar<bool>::get("TXVC_CACHE_FILTERING")) {
+          if (*v) enable_cache_filtering = true;
+        } else {
           std::cerr << "TXVC_CACHE_FILTERING not defined!" << std::endl;
         }
 
         if (enable_cache_filtering) {
           
-          if (getenv("TXVC_CACHE_FILTER") != nullptr) {
 
-					  char* dbpred_name = getenv("TXVC_CACHE_FILTER");
-            if (strcmp(dbpred_name, "doa-simple") == 0) {
+          if (auto v = champsim::EnvVar<std::string>::get("TXVC_CACHE_FILTER")) {
+
+				  std::string dbpred_name = *v;
+            if (dbpred_name == "doa-simple") {
               std::cout << "\tTXVC: Using DOA-simpe filter" << std::endl;
 					    cacheFilter = new SimpleDOAFilter();
-            } else if (strcmp(dbpred_name, "oracle-doa") == 0) {
+            } else if (dbpred_name == "oracle-doa") {
               std::cout << "\tTXVC: Using Oracle DOA filter" << std::endl;
 					    cacheFilter = new OracleDOAFilter(num_set, num_way, true);  
-            } else if (strcmp(dbpred_name, "doa") == 0) {
+            } else if (dbpred_name == "doa") {
               std::cout << "\tTXVC: Using DOA filter" << std::endl;
 					    cacheFilter = new DOAPredictor(num_set, num_way, true);
-            } else if (strcmp(dbpred_name, "mfu") == 0) {
+            } else if (dbpred_name == "mfu") {
               std::cout << "\tTXVC: Using MFU filter" << std::endl;
               cacheFilter = new MFUFilter(num_set, num_way, false);
-            } else if (strcmp(dbpred_name, "oracle-mfu") == 0) {
+            } else if (dbpred_name == "oracle-mfu") {
               std::cout << "\tTXVC: Using Oracle MFU filter" << std::endl;
               cacheFilter = new OracleMFUFilter(num_set, num_way, true); 
-            } else if (strcmp(dbpred_name, "trace-mem") == 0) {
+            } else if (dbpred_name == "trace-mem") {
               std::cout << "\tTXVC: Generating a memory trace for the cache filter" << std::endl;
               cacheFilter = new FilterTracer();   
-            } else if (strcmp(dbpred_name, "simple-freq-filter") == 0) {
+            } else if (dbpred_name == "simple-freq-filter") {
               std::cout << "\tTXVC: Using simple freq filter" << std::endl;
 					    cacheFilter = new SimpleFreqFilter();
-            } else if (strcmp(dbpred_name, "bloom-freq-filter") == 0) {
+            } else if (dbpred_name == "bloom-freq-filter") {
               std::cout << "\tTXVC: Using bloom freq filter" << std::endl;
 					    cacheFilter = new BloomFreqFilter();
-            } else if (strcmp(dbpred_name, "freq-filter") == 0) {
+            } else if (dbpred_name == "freq-filter") {
               std::cout << "\tTXVC: Using freq filter" << std::endl;
               cacheFilter = new FreqFilter();
-            } else if (strcmp(dbpred_name, "none") == 0) {
+            } else if (dbpred_name == "none") {
               std::cout << "\tTXVC: Using dummy freq filter" << std::endl;
               cacheFilter = new DummyFilter();
-            } else if (strcmp(dbpred_name, "beladyOPT-set") == 0) {
+            } else if (dbpred_name == "beladyOPT-set") {
               std::cout << "\tTXVC: Using BeladyOPT per set filter" << std::endl;
               cacheFilter = new BeladyOPTSetFilter(num_set, num_way, offset_bits);
-            } else if (strcmp(dbpred_name, "reuse-distance") == 0) {
+            } else if (dbpred_name == "reuse-distance") {
               std::cout << "\tTXVC: Using reuse-distance filter" << std::endl;
               cacheFilter = new ReuseDistanceFilter(num_set, num_way, true);
             } else {
@@ -533,11 +531,10 @@ public:
         }
 
 
-        char* _mem_trace_filename = nullptr;
-        if (getenv("TXVC_MEMORY_TRACE_PATH")) {
-          _mem_trace_filename = getenv("TXVC_MEMORY_TRACE_PATH");
+        if (auto v = champsim::EnvVar<std::string>::get("TXVC_MEMORY_TRACE_PATH")) {
+          const std::string& _mem_trace_filename = *v;
           std::cout << "TXVC: Saving memory accesses to " << _mem_trace_filename << std::endl;
-          memTracer.open_tracefile(_mem_trace_filename);
+          memTracer.open_tracefile(_mem_trace_filename.c_str());
           save_mem_accesses = true;
         } else {
           std::cout << "TXVC_MEMORY_TRACE_PATH not set!" << std::endl;
@@ -547,38 +544,44 @@ public:
 
 #if defined ENABLE_EXTRA_CACHE_STATS        
         std::string reuse_dist_filename_prefix;
-        if (getenv("REUSE_DIST_FILENAME_PREFIX")) {
-				  reuse_dist_filename_prefix = getenv("REUSE_DIST_FILENAME_PREFIX");
+        if (auto v = champsim::EnvVar<std::string>::get("REUSE_DIST_FILENAME_PREFIX")) {
+              reuse_dist_filename_prefix = *v;
           std::cout << "REUSE_DIST_FILENAME_PREFIX set to " << reuse_dist_filename_prefix << std::endl;
-			  } else {
-				  std::cout << "REUSE_DIST_FILENAME_PREFIX not set!" << std::endl;
-				  exit(1);
-		  	}
+            } else {
+              std::cout << "REUSE_DIST_FILENAME_PREFIX not set!" << std::endl;
+              exit(1);
+          	}
         
         reuseDistMon = new ReuseDistanceMonitor(num_set, num_way, offset_bits,
 																						    reuse_dist_filename_prefix + "_" + "TXVC" + ".csv",
 																						    false, true);
 #endif
 
-        const char* pf_policy_name = getenv("TXVC_PF_POLICY");
-        if (pf_policy_name == nullptr || strcmp(pf_policy_name, "stride") == 0) {
+        if (auto pf = champsim::EnvVar<std::string>::get("TXVC_PF_POLICY")) {
+          const std::string& pf_policy_name = *pf;
+          if (pf_policy_name == "stride") {
+            std::cout << "\tUsing stride prefetch policy for TXVC" << std::endl;
+            prefetchPolicy = new StridePrefetcher(offset_bits);
+          } else if (pf_policy_name == "sibling") {
+            std::cout << "\tUsing sibling prefetch policy for TXVC" << std::endl;
+            prefetchPolicy = new SiblingPrefetcher(offset_bits);
+          } else if (pf_policy_name == "child") {
+            std::cout << "\tUsing child prefetch policy for TXVC" << std::endl;
+            prefetchPolicy = new ChildPrefetcher(offset_bits);
+          } else if (pf_policy_name == "combined") {
+            std::cout << "\tUsing combined (child+sibling+stride) prefetch policy for TXVC" << std::endl;
+            prefetchPolicy = new CombinedPrefetcher(offset_bits);
+          } else if (pf_policy_name == "none") {
+            std::cout << "\tUsing none prefetch policy for TXVC" << std::endl;
+            prefetchPolicy = new NonePrefetcher();
+          } else {
+            std::cerr << "Unknown prefetch policy for TXVC: " << pf_policy_name << std::endl;
+            exit(1);
+          }
+        } else {
+          // default to stride behavior when not set
           std::cout << "\tUsing stride prefetch policy for TXVC" << std::endl;
           prefetchPolicy = new StridePrefetcher(offset_bits);
-        } else if (strcmp(pf_policy_name, "sibling") == 0) {
-          std::cout << "\tUsing sibling prefetch policy for TXVC" << std::endl;
-          prefetchPolicy = new SiblingPrefetcher(offset_bits);
-        } else if (strcmp(pf_policy_name, "child") == 0) {
-          std::cout << "\tUsing child prefetch policy for TXVC" << std::endl;
-          prefetchPolicy = new ChildPrefetcher(offset_bits);
-        } else if (strcmp(pf_policy_name, "combined") == 0) {
-          std::cout << "\tUsing combined (child+sibling+stride) prefetch policy for TXVC" << std::endl;
-          prefetchPolicy = new CombinedPrefetcher(offset_bits);
-        } else if (strcmp(pf_policy_name, "none") == 0) {
-          std::cout << "\tUsing none prefetch policy for TXVC" << std::endl;
-          prefetchPolicy = new NonePrefetcher();
-        } else {
-          std::cerr << "Unknown prefetch policy for TXVC: " << pf_policy_name << std::endl;
-          exit(1);
         }
       }
 
@@ -1000,8 +1003,8 @@ public:
 
 #if defined TRANSLATION_EXCLUSIVE_CACHE
 
-    if (getenv("TXVC_CACHE_LEVEL")) {
-      uint32_t _level = atoi(getenv("TXVC_CACHE_LEVEL"));
+    if (auto v = champsim::EnvVar<int>::get("TXVC_CACHE_LEVEL")) {
+      uint32_t _level = static_cast<uint32_t>(*v);
       switch (_level) {
         case 1:
             _CACHE_ = "cpu0_L1D";
@@ -1017,9 +1020,8 @@ public:
 
     //TODO: remove this var, we can assume TXVC_CACHE_LEVEL enables it
     if (NAME.find(_CACHE_) != std::string::npos) {
-      char* victim_cache_flag = getenv("ENABLE_TXVC");
-      if (strcmp(victim_cache_flag, "true") == 0) {
-        enable_tx_victim_cache = true;
+      if (auto v = champsim::EnvVar<bool>::get("ENABLE_TXVC")) {
+        if (*v) enable_tx_victim_cache = true;
       }
     }
 
@@ -1039,41 +1041,35 @@ public:
         uint32_t txvc_latency = 1;
         //uint32_t txvc_mshr_size = 8; //64;
 
-        if (getenv("TXVC_LATENCY")) {
-          txvc_latency = std::stoull(getenv("TXVC_LATENCY"));
+        if (auto v = champsim::EnvVar<unsigned long long>::get("TXVC_LATENCY")) {
+          txvc_latency = *v;
         } else {
           std::cerr << "TXVC_LATENCY not set!" << std::endl;
           exit(0);
         }
 
-        if (getenv("TXVC_NUM_SET")) {
-          txvc_num_set = std::stoull(getenv("TXVC_NUM_SET"));
+        if (auto v = champsim::EnvVar<unsigned long long>::get("TXVC_NUM_SET")) {
+          txvc_num_set = static_cast<uint32_t>(*v);
         } else {
           std::cerr << "TXVC_NUM_SET not set!" << std::endl;
           exit(0);
         }
 
-        if (getenv("TXVC_NUM_WAY")) {
-          txvc_num_way = std::stoull(getenv("TXVC_NUM_WAY"));
+        if (auto v = champsim::EnvVar<unsigned long long>::get("TXVC_NUM_WAY")) {
+          txvc_num_way = static_cast<uint32_t>(*v);
         } else {
           std::cerr << "TXVC_NUM_WAY not set!" << std::endl;
           exit(0);
         }
 
-        if (getenv("TXVC_INSTR_ONLY")) {
-          char* instr_only_flag = getenv("TXVC_INSTR_ONLY");
+        if (auto v = champsim::EnvVar<bool>::get("TXVC_INSTR_ONLY")) {
           std::cout << "found instruction only flag" << std::endl;
-          if (strcmp(instr_only_flag, "true") == 0) {
-            enable_instr_only = true;
-          }
+          if (*v) enable_instr_only = true;
         }
 
-        if (getenv("TXVC_DATA_ONLY")) {
-          char* data_only_flag = getenv("TXVC_DATA_ONLY");
+        if (auto v = champsim::EnvVar<bool>::get("TXVC_DATA_ONLY")) {
           std::cout << "found data only flag" << std::endl;
-          if (strcmp(data_only_flag, "true") == 0) {
-            enable_data_only = true;
-          }
+          if (*v) enable_data_only = true;
         }
 
         std::cout << NAME << ": Using PTE " << (enable_tx_victim_cache?"victim":"exclusive")  << " cache." << std::endl;
@@ -1106,8 +1102,8 @@ public:
 
     enable_tx_split_cache = false;
     std::string _TX_SPLIT_CACHE_ = "none";
-    if (getenv("TX_SPLIT_CACHE_LEVEL")) {
-      uint32_t _level = atoi(getenv("TX_SPLIT_CACHE_LEVEL"));
+    if (auto v = champsim::EnvVar<int>::get("TX_SPLIT_CACHE_LEVEL")) {
+      uint32_t _level = static_cast<uint32_t>(*v);
       switch (_level) {
         case 1:
             _TX_SPLIT_CACHE_ = "cpu0_L1D";
@@ -1124,9 +1120,8 @@ public:
       if (NAME.find(_TX_SPLIT_CACHE_) != std::string::npos) {
         
         enable_tx_split_cache = true;
-        if (getenv("TX_NUM_SETS")) {  
-          
-          TX_NUM_SET = std::stoull(getenv("TX_NUM_SETS"));
+        if (auto v2 = champsim::EnvVar<unsigned long long>::get("TX_NUM_SETS")) {
+          TX_NUM_SET = static_cast<uint32_t>(*v2);
 
           std::cout << NAME << ": Using PTE exclusive sets:" << std::endl;
           std::cout << "\t\tSETS: " << TX_NUM_SET << std::endl;
@@ -1139,9 +1134,9 @@ public:
       } else {
         std::cout << NAME + " is not using any Translations exclusive cache sets." << std::endl; 
       }
-    } else {
-      std::cout << "TX_SPLIT_CACHE_LEVEL not set." << std::endl;
-    }
+      } else {
+        std::cout << "TX_SPLIT_CACHE_LEVEL not set." << std::endl;
+      }
 #elif defined TX_SPLIT_CACHE_WAYS
     //NUM_WAY -= 1; // Reserve one way for PTEs
     assert(NUM_WAY > 1); // Need at least 2 ways to split
@@ -1160,18 +1155,18 @@ public:
 
 #if defined ENABLE_EXTRA_CACHE_STATS
 		if (NAME.find("STLB") != std::string::npos) {
-			std::string page_address_stats_file_prefix = getenv("PAGE_ADDRESS_STATS_FILENAME_PREFIX");
+            std::string page_address_stats_file_prefix = champsim::EnvVar<std::string>::get_or("PAGE_ADDRESS_STATS_FILENAME_PREFIX", std::string(""));
 
-			pageAddressStatsMon = new PageAddressStatsHanlder(OFFSET_BITS,
-																								page_address_stats_file_prefix,
-																								false);
+            pageAddressStatsMon = new PageAddressStatsHanlder(OFFSET_BITS,
+                                                                                                page_address_stats_file_prefix,
+                                                                                                false);
 		}	else {
 
 			pageAddressStatsMon = new PageAddressStatsHanlder(OFFSET_BITS, "", false);
 		}
 
-    if (getenv("ACCESS_FREQ_STATS_FILENAME_PREFIX")) {
-          std::string access_freq_stats_filename_prefix = getenv("ACCESS_FREQ_STATS_FILENAME_PREFIX");
+        if (auto v = champsim::EnvVar<std::string>::get("ACCESS_FREQ_STATS_FILENAME_PREFIX")) {
+          std::string access_freq_stats_filename_prefix = *v;
           if (NAME.find("cpu0_L2C") != std::string::npos) {
             addressAccessStatsMon = new AddressAccessStatsHanlder(access_freq_stats_filename_prefix + "_" + NAME + ".csv", true);
           } else {
@@ -1183,7 +1178,7 @@ public:
         exit(0);
     }
 
-		std::string reuse_dist_filename_prefix = getenv("REUSE_DIST_FILENAME_PREFIX");
+    std::string reuse_dist_filename_prefix = champsim::EnvVar<std::string>::get_or("REUSE_DIST_FILENAME_PREFIX", std::string(""));
 
 		bool enable_reuseDistMon = false;
 		if (NAME.find("STLB") != std::string::npos) {

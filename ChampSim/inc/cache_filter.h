@@ -16,6 +16,7 @@
 
 #include "champsim.h"
 #include "memory_trace.h"
+#include "env_var.h"
 
 class CacheFilter {
   
@@ -45,8 +46,8 @@ class FilterTracer : public CacheFilter {
 
     FilterTracer() {
       
-      if (getenv("CACHE_FILTER_MEMORY_TRACE_PATH") != nullptr) { 
-        std::string memtrace_filename = getenv("CACHE_FILTER_MEMORY_TRACE_PATH");
+      if (auto v = champsim::EnvVar<std::string>::get("CACHE_FILTER_MEMORY_TRACE_PATH")) {
+        std::string memtrace_filename = *v;
         std::cerr << "\tSaving memory trace to " << memtrace_filename << std::endl;
         memTracer.open_tracefile(memtrace_filename);
       } else {
@@ -135,8 +136,8 @@ class OracleDOAFilter : public CacheFilter {
 
       std::cout << "CACHE_FILTER: Oracle DOA" << std::endl;
 
-      if (getenv("CACHE_FILTER_MEMORY_TRACE_PATH") != nullptr) { 
-        std::string memtrace_filename = getenv("CACHE_FILTER_MEMORY_TRACE_PATH");
+      if (auto v = champsim::EnvVar<std::string>::get("CACHE_FILTER_MEMORY_TRACE_PATH")) {
+        std::string memtrace_filename = *v;
         if (memTraceReader.open_tracefile(memtrace_filename)) {
           std::cout << "\tReading memory trace from " << memtrace_filename << std::endl;
           accesses_vector = memTraceReader.get_accesses();
@@ -318,31 +319,28 @@ class DOAPredictor : public CacheFilter {
       skip_lookups = _skip_lookups;
 
       uint32_t cntr_sz = 0;
-      if (getenv("TXC_DBPRED_CNTR_SZ")) {
-				cntr_sz = std::stoull(getenv("TXC_DBPRED_CNTR_SZ"));
+      if (auto v = champsim::EnvVar<unsigned long long>::get("TXC_DBPRED_CNTR_SZ")) {
+        cntr_sz = static_cast<uint32_t>(*v);
         max_counter_value = std::exp2(cntr_sz);
-			} else {
-				std::cerr << "TXC_BPRED_CNTR_SZ not set!" << std::endl;
-				exit(0);
-			}
-        
-			uint32_t thrhld = 0;
-      if (getenv("TXC_DBPRED_THRESHOLD")) {
-				thrhld = std::stoull(getenv("TXC_DBPRED_THRESHOLD"));
-			} else {
-				std::cerr << "TXC_DBPRED_THRESHOLD not set!" << std::endl;
-				exit(0);
-			}
+      } else {
+        std::cerr << "TXC_BPRED_CNTR_SZ not set!" << std::endl;
+        exit(0);
+      }
 
-      if (getenv("TXC_DBPRED_USE_BIAS")) {
-				char* _enable_bias_str = getenv("TXC_DBPRED_USE_BIAS");
-        if (strcmp(_enable_bias_str, "true") == 0) {
-          use_bias_flag = true;
-        }
-			} else {
-				std::cerr << "TXC_DBPRED_USE_BIAS not set!" << std::endl;
-				exit(0);
-			}
+      uint32_t thrhld = 0;
+      if (auto v = champsim::EnvVar<unsigned long long>::get("TXC_DBPRED_THRESHOLD")) {
+        thrhld = static_cast<uint32_t>(*v);
+      } else {
+        std::cerr << "TXC_DBPRED_THRESHOLD not set!" << std::endl;
+        exit(0);
+      }
+
+      if (auto v = champsim::EnvVar<bool>::get("TXC_DBPRED_USE_BIAS")) {
+        use_bias_flag = *v;
+      } else {
+        std::cerr << "TXC_DBPRED_USE_BIAS not set!" << std::endl;
+        exit(0);
+      }
 
       // Initialize the predictor
       // std::cout << "DOA Predictor initialized." << std::endl;
@@ -354,10 +352,7 @@ class DOAPredictor : public CacheFilter {
 
       prediction_table.resize(num_sets * num_ways);
 
-      char* use_bias = getenv("TXC_DBPRED_USE_BIAS");
-		  if (strcmp(use_bias, "true") == 0) {
-			  use_bias_flag = true;
-		  }
+      use_bias_flag = champsim::EnvVar<bool>::get_or("TXC_DBPRED_USE_BIAS", use_bias_flag);
 
       //std::cout << "TXVC: Using DOA prediction:" << std::endl;
 #if defined _DOA_BUDGETED
@@ -527,19 +522,19 @@ class MFUFilter : public CacheFilter {
     {
 
       double top_N_scale = 1.0;
-      if (getenv("TXC_FILTER_TOP_N_FACTOR")) {
-				top_N_scale = std::stod(getenv("TXC_FILTER_TOP_N_FACTOR"));
-			} else {
-				std::cerr << "TXC_FILTER_TOP_N_FACTOR not set!" << std::endl;
-				exit(0);
-			}
+      if (auto v = champsim::EnvVar<double>::get("TXC_FILTER_TOP_N_FACTOR")) {
+        top_N_scale = *v;
+      } else {
+        std::cerr << "TXC_FILTER_TOP_N_FACTOR not set!" << std::endl;
+        exit(0);
+      }
       
 
-      if (getenv("TXC_FILTER_CLEANUP_INTERVAL")) {
-				cleanup_cycle_interval = std::stoull(getenv("TXC_FILTER_CLEANUP_INTERVAL"));
-			} else {
-				std::cerr << "TXC_FILTER_CLEANUP_INTERVAL not set!" << std::endl;
-				exit(0);
+      if (auto v = champsim::EnvVar<unsigned long long>::get("TXC_FILTER_CLEANUP_INTERVAL")) {
+        cleanup_cycle_interval = *v;
+      } else {
+        std::cerr << "TXC_FILTER_CLEANUP_INTERVAL not set!" << std::endl;
+        exit(0);
       }
 
       num_sets = sets;
@@ -645,8 +640,8 @@ class OracleMFUFilter : public CacheFilter {
       */
 
       //lower_freq_threshold = 2; // default will remove freq < 2
-      if (getenv("CACHE_FILTER_FREQ_THRESHOLD")) {
-				std::string freq_threshold = getenv("CACHE_FILTER_FREQ_THRESHOLD");
+      if (auto v = champsim::EnvVar<std::string>::get("CACHE_FILTER_FREQ_THRESHOLD")) {
+        std::string freq_threshold = *v;
         size_t start = 0, end = 0;
         while ((end = freq_threshold.find("-", start)) != std::string::npos) {
           lower_freq_threshold = std::stoll(freq_threshold.substr(start, end - start));
@@ -661,10 +656,10 @@ class OracleMFUFilter : public CacheFilter {
           lower_freq_threshold = upper_freq_threshold = std::stoll(freq_threshold.substr(start));
         }
         
-			} else {
-				std::cerr << "CACHE_FILTER_FREQ_THRESHOLD not set!" << std::endl;
-				exit(0);
-			}
+      } else {
+        std::cerr << "CACHE_FILTER_FREQ_THRESHOLD not set!" << std::endl;
+        exit(0);
+      }
 
       /*
       if (getenv("TXC_FILTER_CLEANUP_INTERVAL")) {
@@ -686,8 +681,8 @@ class OracleMFUFilter : public CacheFilter {
       std::cout << "\t-Upper Frequency threshold: " << upper_freq_threshold << std::endl;
 
       save_mem_trace = true;
-      if (getenv("CACHE_FILTER_MEMORY_TRACE_PATH") != nullptr) { 
-        std::string memtrace_filename = getenv("CACHE_FILTER_MEMORY_TRACE_PATH");
+      if (auto v = champsim::EnvVar<std::string>::get("CACHE_FILTER_MEMORY_TRACE_PATH")) { 
+        std::string memtrace_filename = *v;
         if (memTraceReader.open_tracefile(memtrace_filename)) {
           std::cout << "\tReading memory trace from " << memtrace_filename << std::endl;
           save_mem_trace = false;
@@ -868,28 +863,19 @@ class ReuseDistanceFilter : public CacheFilter {
 
     static uint64_t parse_u64_env_or_default(const char* key, uint64_t default_value)
     {
-      const char* raw = std::getenv(key);
-      if (raw == nullptr)
-        return default_value;
       try {
-        return std::stoull(std::string(raw), nullptr, 0);
+        return champsim::EnvVar<unsigned long long>::get_or(key, default_value);
       } catch (...) {
-        std::cerr << "CACHE_FILTER: invalid value for " << key << "='" << raw
-                  << "', using default " << default_value << std::endl;
+        // EnvVar will already report parse errors and exit; fallback here for safety
         return default_value;
       }
     }
 
     static double parse_double_env_or_default(const char* key, double default_value)
     {
-      const char* raw = std::getenv(key);
-      if (raw == nullptr)
-        return default_value;
       try {
-        return std::stod(std::string(raw));
+        return champsim::EnvVar<double>::get_or(key, default_value);
       } catch (...) {
-        std::cerr << "CACHE_FILTER: invalid value for " << key << "='" << raw
-                  << "', using default " << default_value << std::endl;
         return default_value;
       }
     }
@@ -1056,30 +1042,26 @@ class ReuseDistanceFilter : public CacheFilter {
       min_samples = parse_u64_env_or_default("CACHE_FILTER_REUSE_MIN_SAMPLES", 2);
       long_ratio_threshold = parse_double_env_or_default("CACHE_FILTER_REUSE_LONG_RATIO", 0.7);
 
-      const char* trace_env = std::getenv("CACHE_FILTER_MEMORY_TRACE_PATH");
-
-      if (trace_env == nullptr) {
+      auto trace_env = champsim::EnvVar<std::string>::get("CACHE_FILTER_MEMORY_TRACE_PATH");
+      if (!trace_env) {
         std::cerr << "CACHE_FILTER_MEMORY_TRACE_PATH not set!" << std::endl;
         std::exit(1);
       }
-
-      std::string trace_path(trace_env);
+      std::string trace_path(*trace_env);
       std::cout << "CACHE_FILTER: Building reuse distance profiles from trace..." << std::endl;
       std::vector<uint64_t> trace = parse_trace_file(trace_path);
       build_profiles(trace);
 
-      const char* profile_log_env = std::getenv("CACHE_FILTER_REUSE_PROFILE_LOG_PATH");
-      if (profile_log_env != nullptr) {
-        dump_profiles_csv(std::string(profile_log_env));
-        std::cout << "\tProfile log: " << profile_log_env << std::endl;
+      if (auto profile_log_env = champsim::EnvVar<std::string>::get("CACHE_FILTER_REUSE_PROFILE_LOG_PATH")) {
+        dump_profiles_csv(*profile_log_env);
+        std::cout << "\tProfile log: " << *profile_log_env << std::endl;
       } else {
         std::cout << "\tCACHE_FILTER_REUSE_PROFILE_LOG_PATH not set (profile log disabled)" << std::endl;
       }
 
-      const char* bypass_log_env = std::getenv("CACHE_FILTER_REUSE_BYPASS_LOG_PATH");
-      if (bypass_log_env != nullptr) {
-        dump_bypassed_ptes(std::string(bypass_log_env));
-        std::cout << "\tBypass-only log: " << bypass_log_env << std::endl;
+      if (auto bypass_log_env = champsim::EnvVar<std::string>::get("CACHE_FILTER_REUSE_BYPASS_LOG_PATH")) {
+        dump_bypassed_ptes(*bypass_log_env);
+        std::cout << "\tBypass-only log: " << *bypass_log_env << std::endl;
       } else {
         std::cout << "\tCACHE_FILTER_REUSE_BYPASS_LOG_PATH not set (bypass-only log disabled)" << std::endl;
       }
@@ -1199,8 +1181,8 @@ class BeladyOPTSetFilter : public CacheFilter {
       std::cout << "\t-N: " << ways << std::endl;
 
       save_mem_trace = false;
-      if (getenv("CACHE_FILTER_MEMORY_TRACE_PATH") != nullptr) { 
-        std::string memtrace_filename = getenv("CACHE_FILTER_MEMORY_TRACE_PATH");
+      if (auto v = champsim::EnvVar<std::string>::get("CACHE_FILTER_MEMORY_TRACE_PATH")) { 
+        std::string memtrace_filename = *v;
         if (memTraceReader.open_tracefile(memtrace_filename)) {
           std::cout << "\tReading memory trace from " << memtrace_filename << std::endl;
           save_mem_trace = false;
@@ -1320,12 +1302,12 @@ class SimpleFreqFilter : public CacheFilter {
   public: 
     SimpleFreqFilter() 
     {
-      if (getenv("CACHE_FILTER_FREQ_THRESHOLD")) {
-				freq_threshold = std::stoull(getenv("CACHE_FILTER_FREQ_THRESHOLD"));
-			} else {
-				std::cerr << "CACHE_FILTER_FREQ_THRESHOLD not set!" << std::endl;
-				exit(0);
-			}
+        if (auto v = champsim::EnvVar<uint64_t>::get("CACHE_FILTER_FREQ_THRESHOLD")) {
+            freq_threshold = *v;
+          } else {
+            std::cerr << "CACHE_FILTER_FREQ_THRESHOLD not set!" << std::endl;
+            exit(0);
+          }
 
       std::cout << "CACHE_FILTER: Simple Frequency Filter" << std::endl;
       std::cout << "\t-Frequency threshold: " << freq_threshold << std::endl;
@@ -1379,26 +1361,26 @@ class BloomFreqFilter : public CacheFilter {
     BloomFreqFilter() 
     {
 
-      if (getenv("CACHE_FILTER_BLOOM_FILTER_SIZE")) {
-				FILTER_SIZE = std::stoull(getenv("CACHE_FILTER_BLOOM_FILTER_SIZE"));
-			} else {
-				std::cerr << "CACHE_FILTER_BLOOM_FILTER_SIZE not set!" << std::endl;
-				exit(0);
-			}
+        if (auto v = champsim::EnvVar<uint64_t>::get("CACHE_FILTER_BLOOM_FILTER_SIZE")) {
+            FILTER_SIZE = *v;
+          } else {
+            std::cerr << "CACHE_FILTER_BLOOM_FILTER_SIZE not set!" << std::endl;
+            exit(0);
+          }
 
-      if (getenv("CACHE_FILTER_NUM_HASHES")) {
-				NUM_HASHES = std::stoi(getenv("CACHE_FILTER_NUM_HASHES"));
-			} else {
-				std::cerr << "CACHE_FILTER_NUM_HASHES not set!" << std::endl;
-				exit(0);
-			}
+        if (auto v = champsim::EnvVar<int>::get("CACHE_FILTER_NUM_HASHES")) {
+            NUM_HASHES = *v;
+          } else {
+            std::cerr << "CACHE_FILTER_NUM_HASHES not set!" << std::endl;
+            exit(0);
+          }
       
-      if (getenv("CACHE_FILTER_FREQ_THRESHOLD")) {
-				FREQ_THRESHOLD = std::stoull(getenv("CACHE_FILTER_FREQ_THRESHOLD"));
-			} else {
-				std::cerr << "CACHE_FILTER_FREQ_THRESHOLD not set!" << std::endl;
-				exit(0);
-			}
+        if (auto v = champsim::EnvVar<uint64_t>::get("CACHE_FILTER_FREQ_THRESHOLD")) {
+            FREQ_THRESHOLD = *v;
+          } else {
+            std::cerr << "CACHE_FILTER_FREQ_THRESHOLD not set!" << std::endl;
+            exit(0);
+          }
       
       std::cout << "CACHE_FILTER: Bloom Frequency Filter" << std::endl;
       std::cout << "\t-Bloom Filter size: " << FILTER_SIZE << " elements" << std::endl;
@@ -1488,12 +1470,12 @@ class FreqFilter : public CacheFilter {
     FreqFilter() 
     {
       
-      if (getenv("CACHE_FILTER_FREQ_THRESHOLD")) {
-				FREQ_THRESHOLD = std::stoull(getenv("CACHE_FILTER_FREQ_THRESHOLD"));
-			} else {
-				std::cerr << "CACHE_FILTER_FREQ_THRESHOLD not set!" << std::endl;
-				exit(0);
-			}
+        if (auto v = champsim::EnvVar<uint64_t>::get("CACHE_FILTER_FREQ_THRESHOLD")) {
+            FREQ_THRESHOLD = *v;
+          } else {
+            std::cerr << "CACHE_FILTER_FREQ_THRESHOLD not set!" << std::endl;
+            exit(0);
+          }
       
       std::cout << "CACHE_FILTER: Frequency Filter" << std::endl;
       std::cout << "\t-Frequency threshold: " << FREQ_THRESHOLD << std::endl;

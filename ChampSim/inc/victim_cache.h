@@ -13,6 +13,7 @@
 #include <deque>
 
 #include "champsim.h"
+#include "env_var.h"
 
 
 class IndexHash
@@ -135,9 +136,8 @@ class LFU : public ReplacementPolicy
       std::cout << "\tNumber of sets: " << num_set << std::endl;
       std::cout << "\tNumber of ways: " << num_way << std::endl;
       // Read counter bits from environment variable
-      const char* bits_env = getenv("TXVC_LFU_CNTR_BITS");
-      if (bits_env != nullptr) {
-        lfu_counter_bits = std::stoi(bits_env);
+      if (auto v = champsim::EnvVar<unsigned int>::get("TXVC_LFU_CNTR_BITS")) {
+        lfu_counter_bits = *v;
         if (lfu_counter_bits == 0 || lfu_counter_bits > 64) {
           std::cerr << "TXVC_LFU_CNTR_BITS invalid or out of range (1-64), using default 8 bits." << std::endl;
           lfu_counter_bits = 8;
@@ -246,11 +246,11 @@ class LFUwDecay : public ReplacementPolicy
       std::cout << "\tNumber of ways: " << num_way << std::endl;
 
 
-			if (getenv("TXVC_REP_DECAY") != nullptr) {
-					DECAY_VALUE = std::stoi(getenv("TXVC_REP_DECAY"));
-			} else {
-          std::cerr << "TXVC_REP_DECAY not set! Using default value of 1." << std::endl;
-          DECAY_VALUE = 1;
+      if (auto v = champsim::EnvVar<int>::get("TXVC_REP_DECAY")) {
+        DECAY_VALUE = *v;
+      } else {
+        std::cerr << "TXVC_REP_DECAY not set! Using default value of 1." << std::endl;
+        DECAY_VALUE = 1;
       }
 
       std::cout << "\tDecay applied on frequency counters: " << DECAY_VALUE << std::endl;
@@ -318,8 +318,8 @@ class LRFU : public ReplacementPolicy
 
       // read decay factor from environment (TXVC_REP_DECAY used for all
       // victim-cache replacement policies). Default to 0.9
-      if (getenv("TXVC_REP_DECAY") != nullptr) {
-        DECAY_FACTOR = std::atof(getenv("TXVC_REP_DECAY"));
+      if (auto v = champsim::EnvVar<double>::get("TXVC_REP_DECAY")) {
+        DECAY_FACTOR = *v;
         if (DECAY_FACTOR <= 0.0 || DECAY_FACTOR >= 1.0) {
           std::cerr << "Invalid TXVC_REP_DECAY; must be in (0,1). Using default 0.9" << std::endl;
           DECAY_FACTOR = 0.9;
@@ -391,8 +391,8 @@ class LFU_Halving : public ReplacementPolicy
 
       freq_ctr.resize(num_set * num_way);
 
-      if (getenv("TXVC_REP_HALVE_PERIOD") != nullptr) {
-        HALVE_PERIOD = std::stoull(getenv("TXVC_REP_HALVE_PERIOD"));
+      if (auto v = champsim::EnvVar<unsigned long long>::get("TXVC_REP_HALVE_PERIOD")) {
+        HALVE_PERIOD = *v;
       } else {
         HALVE_PERIOD = 100000; // default
       }
@@ -445,8 +445,8 @@ class LRU_Halving : public ReplacementPolicy
 
       last_used_cycles.resize(num_set * num_way);
 
-      if (getenv("TXVC_REP_HALVE_PERIOD") != nullptr) {
-        HALVE_PERIOD = std::stoull(getenv("TXVC_REP_HALVE_PERIOD"));
+      if (auto v = champsim::EnvVar<unsigned long long>::get("TXVC_REP_HALVE_PERIOD")) {
+        HALVE_PERIOD = *v;
       } else {
         HALVE_PERIOD = 100000; // default
       }
@@ -498,8 +498,8 @@ class LFU_PCHot : public ReplacementPolicy {
       freq_ctr.resize(num_set * num_way);
       slot_pc.resize(num_set * num_way);
       // read reset interval from environment
-      if (getenv("TXVC_REP_PC_RESET_INTERVAL") != nullptr) {
-        reset_interval = std::stoull(getenv("TXVC_REP_PC_RESET_INTERVAL"));
+      if (auto v = champsim::EnvVar<unsigned long long>::get("TXVC_REP_PC_RESET_INTERVAL")) {
+        reset_interval = *v;
       } else {
         reset_interval = 100000; // default value
       }
@@ -597,32 +597,20 @@ class LRFU_WSS : public ReplacementPolicy
 
       std::cout << "\tNumber of ways: " << num_way << std::endl;
 
-      if (getenv("TXVC_REP_THRESHOLD") != nullptr) {
-
-        threshold = std::atof(getenv("TXVC_REP_THRESHOLD"));
-
+      if (auto v = champsim::EnvVar<double>::get("TXVC_REP_THRESHOLD")) {
+        threshold = *v;
         if (threshold < 0.0 || threshold > 1.0) {
-
           std::cerr << "Invalid TXVC_REP_THRESHOLD; must be in [0,1]. Using default 0.5" << std::endl;
-
           threshold = 0.5;
-
         }
-
       } else {
-
         threshold = 0.5;
-
       }
 
-      if (getenv("TXVC_REP_WINDOW_SIZE") != nullptr) {
-
-        window_size = std::stoull(getenv("TXVC_REP_WINDOW_SIZE"));
-
+      if (auto v2 = champsim::EnvVar<unsigned long long>::get("TXVC_REP_WINDOW_SIZE")) {
+        window_size = *v2;
       } else {
-
         window_size = 1000;
-
       }
 
       std::cout << "\tHit rate threshold: " << threshold << std::endl;
@@ -799,29 +787,26 @@ class LFU_Leaf : public ReplacementPolicy // always prefer to evict the leaf pte
 
     LFU_Leaf(uint64_t _num_set, uint64_t _num_way) : num_set(_num_set), num_way(_num_way) 
     {
-			if (getenv("TXVC_REP_PTE_THRESHOLD") != nullptr) {
-					PTE_THRESHOLD = std::stoi(getenv("TXVC_REP_PTE_THRESHOLD"));
-			} else {
+  		if (auto v = champsim::EnvVar<int>::get("TXVC_REP_PTE_THRESHOLD")) {
+          PTE_THRESHOLD = *v;
+        } else {
           std::cerr << "TXVC_REP_PTE_THRESHOLD not set! Using default value of 2." << std::endl;
           PTE_THRESHOLD = 2;
-      }
+        }
 
       evict_leaf_nodes = false;
-      if (getenv("TXVC_REP_EVICT_LEAF_NODES") != nullptr) {
-				char* cache_filtering_flag = getenv("TXVC_REP_EVICT_LEAF_NODES");
-				if (strcmp(cache_filtering_flag, "true") == 0) {
-					evict_leaf_nodes = true;
-				}
+      if (auto v = champsim::EnvVar<bool>::get("TXVC_REP_EVICT_LEAF_NODES")) {
+        evict_leaf_nodes = *v;
       } else {
         std::cerr << "TXVC_REP_EVICT_LEAF_NODES not defined!" << std::endl;
       }
 
-			if (getenv("TXVC_REP_ALLOWED_FREQ_DELTA") != nullptr) {
-					ALLOWED_FREQ_DELTA = std::stoi(getenv("TXVC_REP_ALLOWED_FREQ_DELTA"));
-			} else {
+  		if (auto v = champsim::EnvVar<int>::get("TXVC_REP_ALLOWED_FREQ_DELTA")) {
+          ALLOWED_FREQ_DELTA = *v;
+        } else {
           std::cerr << "TXVC_REP_ALLOWED_FREQ_DELTA not set! Using default value of 2." << std::endl;
           ALLOWED_FREQ_DELTA = 10;
-      }
+        }
 
       std::cout << "Using LFU_Leaf replacement policy for Victim Cache" << std::endl;
       std::cout << "\tPTE threshold for leaf classification: " << PTE_THRESHOLD << std::endl;
@@ -952,22 +937,19 @@ class SRRIP_Leaf: public ReplacementPolicy
     SRRIP_Leaf(uint64_t _num_set, uint64_t _num_way, int _maxRRPV) : num_set(_num_set), num_way(_num_way), maxRRPV(_maxRRPV)
     {
 
-			if (getenv("TXVC_REP_PTE_THRESHOLD") != nullptr) {
-					PTE_THRESHOLD = std::stoi(getenv("TXVC_REP_PTE_THRESHOLD"));
-			} else {
+  		if (auto v = champsim::EnvVar<int>::get("TXVC_REP_PTE_THRESHOLD")) {
+          PTE_THRESHOLD = *v;
+        } else {
           std::cerr << "TXVC_REP_PTE_THRESHOLD not set! Using default value of 2." << std::endl;
           PTE_THRESHOLD = 2;
-      }
+        }
 
-      evict_leaf_nodes = false;
-      if (getenv("TXVC_REP_EVICT_LEAF_NODES") != nullptr) {
-				char* cache_filtering_flag = getenv("TXVC_REP_EVICT_LEAF_NODES");
-				if (strcmp(cache_filtering_flag, "true") == 0) {
-					evict_leaf_nodes = true;
-				}
-      } else {
-        std::cerr << "TXVC_REP_EVICT_LEAF_NODES not defined!" << std::endl;
-      }
+        evict_leaf_nodes = false;
+        if (auto v2 = champsim::EnvVar<bool>::get("TXVC_REP_EVICT_LEAF_NODES")) {
+          evict_leaf_nodes = *v2;
+        } else {
+          std::cerr << "TXVC_REP_EVICT_LEAF_NODES not defined!" << std::endl;
+        }
 
       std::cout << "Using SRRIP_Leaf replacement policy for Victim Cache" << std::endl;
       std::cout << "\tPTE threshold for leaf classification: " << PTE_THRESHOLD << std::endl;
@@ -1080,21 +1062,21 @@ class PACIPV: public ReplacementPolicy
     bool parse_ipv_from_file(const char* file_env, const char* idx_env,
                              std::array<uint8_t, 5>& out_ipv) const
     {
-      const char* file_path = std::getenv(file_env);
-      const char* idx_str   = std::getenv(idx_env);
-      if (!file_path || !idx_str) {
+      auto file_path_opt = champsim::EnvVar<std::string>::get(file_env);
+      auto idx_str_opt = champsim::EnvVar<std::string>::get(idx_env);
+      if (!file_path_opt || !idx_str_opt) {
         std::cerr << "PACIPV: " << file_env << " or " << idx_env << " not set. Using defaults." << std::endl;
         return false;
       }
       int target_idx = -1;
-      try { target_idx = std::stoi(idx_str); }
+      try { target_idx = std::stoi(*idx_str_opt); }
       catch (...) {
         std::cerr << "PACIPV: Invalid index value in " << idx_env << ". Using defaults." << std::endl;
         return false;
       }
-      std::ifstream infile(file_path);
+      std::ifstream infile(*file_path_opt);
       if (!infile) {
-        std::cerr << "PACIPV: Could not open IPV pairs file: " << file_path << ". Using defaults." << std::endl;
+        std::cerr << "PACIPV: Could not open IPV pairs file: " << *file_path_opt << ". Using defaults." << std::endl;
         return false;
       }
       std::string line;
@@ -1133,9 +1115,8 @@ class PACIPV: public ReplacementPolicy
       if (!parse_ipv_from_file("TXVC_PACIPV_DEMAND_VECTOR_FILE",
                                "TXVC_PACIPV_DEMAND_VECTOR_IDX",
                                IPV)) {
-        const char* env_value = std::getenv("TXVC_PACIPV_DEMAND_VEC");
-        if (env_value != nullptr) {
-          IPV = parse_ipv_bracket(env_value, DEFAULT_IPV, -1);
+        if (auto env_value = champsim::EnvVar<std::string>::get("TXVC_PACIPV_DEMAND_VEC")) {
+          IPV = parse_ipv_bracket(env_value->c_str(), DEFAULT_IPV, -1);
         }
       }
 
@@ -1325,8 +1306,8 @@ class StridePrefetcher : public PrefetchPolicy
     StridePrefetcher(uint64_t _offset_bits) : offset_bits(_offset_bits)
     {
       // table size
-      if (const char* e = getenv("TXVC_PF_STRIDE_TABLE_SIZE")) {
-        std::size_t v = static_cast<std::size_t>(std::stoull(e));
+      if (auto e = champsim::EnvVar<unsigned long long>::get("TXVC_PF_STRIDE_TABLE_SIZE")) {
+        std::size_t v = static_cast<std::size_t>(*e);
         table_size = (v >= 1) ? v : 256;
         if (v < 1)
           std::cerr << "TXVC_PF_STRIDE_TABLE_SIZE must be >= 1, using default 256" << std::endl;
@@ -1335,8 +1316,8 @@ class StridePrefetcher : public PrefetchPolicy
       }
 
       // confidence threshold
-      if (const char* e = getenv("TXVC_PF_STRIDE_CONF_THRESHOLD")) {
-        int v = std::stoi(e);
+      if (auto e = champsim::EnvVar<int>::get("TXVC_PF_STRIDE_CONF_THRESHOLD")) {
+        int v = *e;
         if (v < 0 || v > 3) {
           std::cerr << "TXVC_PF_STRIDE_CONF_THRESHOLD must be 0-3, using default 2" << std::endl;
           v = 2;
@@ -1347,8 +1328,8 @@ class StridePrefetcher : public PrefetchPolicy
       }
 
       // MSHR gate percentage
-      if (const char* e = getenv("TXVC_PF_MSHR_GATE_PCT")) {
-        int v = std::stoi(e);
+      if (auto e = champsim::EnvVar<int>::get("TXVC_PF_MSHR_GATE_PCT")) {
+        int v = *e;
         if (v <= 0 || v > 100) {
           std::cerr << "TXVC_PF_MSHR_GATE_PCT must be 1-100, using default 50" << std::endl;
           v = 50;
@@ -1538,8 +1519,8 @@ class SiblingPrefetcher : public PrefetchPolicy
       for (uint64_t tmp = cls_per_page >> 1; tmp; tmp >>= 1) cls_per_page_bits++;
 
       // table size
-      if (const char* e = getenv("TXVC_PF_SBLG_TABLE_SIZE")) {
-        std::size_t v = static_cast<std::size_t>(std::stoull(e));
+      if (auto e = champsim::EnvVar<unsigned long long>::get("TXVC_PF_SBLG_TABLE_SIZE")) {
+        std::size_t v = static_cast<std::size_t>(*e);
         table_size = (v >= 1) ? v : 128;
         if (v < 1)
           std::cerr << "TXVC_PF_SBLG_TABLE_SIZE must be >= 1, using default 128" << std::endl;
@@ -1548,8 +1529,8 @@ class SiblingPrefetcher : public PrefetchPolicy
       }
 
       // confidence threshold
-      if (const char* e = getenv("TXVC_PF_SBLG_CONF_THRESHOLD")) {
-        int v = std::stoi(e);
+      if (auto e = champsim::EnvVar<int>::get("TXVC_PF_SBLG_CONF_THRESHOLD")) {
+        int v = *e;
         if (v < 0 || v > 3) {
           std::cerr << "TXVC_PF_SBLG_CONF_THRESHOLD must be 0-3, using default 2" << std::endl;
           v = 2;
@@ -1560,8 +1541,8 @@ class SiblingPrefetcher : public PrefetchPolicy
       }
 
       // MSHR gate percentage
-      if (const char* e = getenv("TXVC_PF_MSHR_GATE_PCT")) {
-        int v = std::stoi(e);
+      if (auto e = champsim::EnvVar<int>::get("TXVC_PF_MSHR_GATE_PCT")) {
+        int v = *e;
         if (v <= 0 || v > 100) {
           std::cerr << "TXVC_PF_MSHR_GATE_PCT must be 1-100, using default 50" << std::endl;
           v = 50;
@@ -1573,16 +1554,16 @@ class SiblingPrefetcher : public PrefetchPolicy
 
       // Usefulness window
       uint32_t acc_window = 32;
-      if (const char* e = getenv("TXVC_PF_SBLG_ACC_WINDOW")) {
-        int v = std::stoi(e);
+      if (auto e = champsim::EnvVar<int>::get("TXVC_PF_SBLG_ACC_WINDOW")) {
+        int v = *e;
         if (v >= 4 && v <= 64)
           acc_window = static_cast<uint32_t>(v);
         else
           std::cerr << "TXVC_PF_SBLG_ACC_WINDOW must be 4-64, using default 32" << std::endl;
       }
       uint32_t acc_threshold = 20;
-      if (const char* e = getenv("TXVC_PF_SBLG_ACC_THRESHOLD")) {
-        int v = std::stoi(e);
+      if (auto e2 = champsim::EnvVar<int>::get("TXVC_PF_SBLG_ACC_THRESHOLD")) {
+        int v = *e2;
         if (v >= 0 && v <= 100)
           acc_threshold = static_cast<uint32_t>(v);
         else
@@ -1593,8 +1574,8 @@ class SiblingPrefetcher : public PrefetchPolicy
 
       // Prefetch degree (max candidates per access)
       degree = 1;
-      if (const char* e = getenv("TXVC_PF_SBLG_DEGREE")) {
-        int v = std::stoi(e);
+      if (auto e = champsim::EnvVar<int>::get("TXVC_PF_SBLG_DEGREE")) {
+        int v = *e;
         if (v >= 1 && v <= 8)
           degree = static_cast<uint32_t>(v);
         else
@@ -1802,24 +1783,24 @@ class ChildPrefetcher : public PrefetchPolicy
   public:
     ChildPrefetcher(uint64_t _offset_bits) : offset_bits(_offset_bits)
     {
-      if (const char* e = getenv("TXVC_PF_CHILD_TABLE_SIZE")) {
-        std::size_t v = static_cast<std::size_t>(std::stoull(e));
+      if (auto e = champsim::EnvVar<unsigned long long>::get("TXVC_PF_CHILD_TABLE_SIZE")) {
+        std::size_t v = static_cast<std::size_t>(*e);
         table_size = (v >= 1) ? v : 256;
         if (v < 1) std::cerr << "TXVC_PF_CHILD_TABLE_SIZE must be >= 1, using 256" << std::endl;
       } else {
         table_size = 256;
       }
 
-      if (const char* e = getenv("TXVC_PF_CHILD_PENDING_SIZE")) {
-        std::size_t v = static_cast<std::size_t>(std::stoull(e));
+      if (auto e = champsim::EnvVar<unsigned long long>::get("TXVC_PF_CHILD_PENDING_SIZE")) {
+        std::size_t v = static_cast<std::size_t>(*e);
         pending_size = (v >= 1) ? v : 64;
         if (v < 1) std::cerr << "TXVC_PF_CHILD_PENDING_SIZE must be >= 1, using 64" << std::endl;
       } else {
         pending_size = 64;
       }
 
-      if (const char* e = getenv("TXVC_PF_CHILD_CONF_THRESHOLD")) {
-        int v = std::stoi(e);
+      if (auto e = champsim::EnvVar<int>::get("TXVC_PF_CHILD_CONF_THRESHOLD")) {
+        int v = *e;
         if (v < 0 || v > 3) {
           std::cerr << "TXVC_PF_CHILD_CONF_THRESHOLD must be 0-3, using default 2" << std::endl;
           v = 2;
@@ -1829,8 +1810,8 @@ class ChildPrefetcher : public PrefetchPolicy
         conf_threshold = 2;
       }
 
-      if (const char* e = getenv("TXVC_PF_MSHR_GATE_PCT")) {
-        int v = std::stoi(e);
+      if (auto e = champsim::EnvVar<int>::get("TXVC_PF_MSHR_GATE_PCT")) {
+        int v = *e;
         mshr_gate_pct = (v > 0 && v <= 100) ? static_cast<uint32_t>(v) : 50u;
       } else {
         mshr_gate_pct = 50;
@@ -1961,8 +1942,8 @@ class CombinedPrefetcher : public PrefetchPolicy
     CombinedPrefetcher(uint64_t offset_bits)
       : stride_pf(offset_bits), sibling_pf(offset_bits), child_pf(offset_bits)
     {
-      if (const char* e = getenv("TXVC_PF_MSHR_GATE_PCT")) {
-        int v = std::stoi(e);
+      if (auto e = champsim::EnvVar<int>::get("TXVC_PF_MSHR_GATE_PCT")) {
+        int v = *e;
         mshr_gate_pct = (v > 0 && v <= 100) ? static_cast<uint32_t>(v) : 50u;
       } else {
         mshr_gate_pct = 50;

@@ -16,6 +16,8 @@
 
 #include "cache.h"
 
+#include "env_var.h"
+
 #include <algorithm>
 #include <iomanip>
 #include <iterator>
@@ -40,9 +42,12 @@ bool txvc_prefetch_fill_to_txvc()
 {
 	static int mode = -1;
 	if (mode == -1) {
-		const char* env = getenv("TXVC_PREFETCH_FILL_TARGET");
-		// Default preserves current behavior for TXVC-generated prefetches.
-		mode = (env == nullptr || std::string(env) == "txvc") ? 1 : 0;
+			if (auto env = champsim::EnvVar<std::string>::get("TXVC_PREFETCH_FILL_TARGET")) {
+				mode = ((*env) == "txvc") ? 1 : 0;
+			} else {
+				// Default preserves current behavior for TXVC-generated prefetches.
+				mode = 1;
+			}
 	}
 	return mode == 1;
 }
@@ -51,9 +56,12 @@ bool txvc_miss_fill_to_txvc()
 {
 	static int mode = -1;
 	if (mode == -1) {
-		const char* env = getenv("TXVC_MISS_FILL_TARGET");
-		// Default preserves legacy behavior: cache fill first, TXVC on eviction.
-		mode = (env != nullptr && std::string(env) == "txvc") ? 1 : 0;
+		if (auto env = champsim::EnvVar<std::string>::get("TXVC_MISS_FILL_TARGET")) {
+			mode = ((*env) == "txvc") ? 1 : 0;
+		} else {
+			// Default preserves legacy behavior: cache fill first, TXVC on eviction.
+			mode = 0;
+		}
 	}
 	return mode == 1;
 }

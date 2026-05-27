@@ -27,6 +27,7 @@
 #include "cache.h"
 #include "champsim.h"
 #include "instruction.h"
+#include "env_var.h"
 
 
 #if defined PTP_REPLACEMENT_POLICY
@@ -123,19 +124,12 @@ void O3_CPU::initialize()
 	// init random number generator
   srand((unsigned) time(NULL));
 
-	if (getenv("INSTR_PAGE_SIZE_DIST")) {
-		INSTR_PAGE_SIZE_DIST = std::stoi(getenv("INSTR_PAGE_SIZE_DIST"));
-		std::cout << "Instruction page size distrubution: " << INSTR_PAGE_SIZE_DIST << std::endl;
-	} else {
-		INSTR_PAGE_SIZE_DIST = 0;
-		std::cout << "Instruction page size distrubution: " << INSTR_PAGE_SIZE_DIST << std::endl;
-	}
+  INSTR_PAGE_SIZE_DIST = champsim::EnvVar<int>::get_or("INSTR_PAGE_SIZE_DIST", 0);
+  std::cout << "Instruction page size distrubution: " << INSTR_PAGE_SIZE_DIST << std::endl;
 
-	if (getenv("INSTR_PAGE_DIST_FILENAME")) { 
-
-		INSTR_PAGE_DIST_FILENAME = getenv("INSTR_PAGE_DIST_FILENAME");
-
-		std::cout << "Loading instruction page size distribution from " << INSTR_PAGE_DIST_FILENAME << std::endl;
+  if (auto v = champsim::EnvVar<std::string>::get("INSTR_PAGE_DIST_FILENAME")) {
+    INSTR_PAGE_DIST_FILENAME = *v;
+    std::cout << "Loading instruction page size distribution from " << INSTR_PAGE_DIST_FILENAME << std::endl;
 		std::ifstream instr_page_dist_file(INSTR_PAGE_DIST_FILENAME, std::ifstream::in);
 
 		// check if exist to load it, elese create it
@@ -160,25 +154,17 @@ void O3_CPU::initialize()
 			}
 			instr_page_dist_file.close();
 		}
-	} else {
-		std::cerr << "ERROR: INSTR_PAGE_DIST_FILENAME not defined!" << std::endl;
-		exit(1);
-	}
+  } else {
+    std::cerr << "ERROR: INSTR_PAGE_DIST_FILENAME not defined!" << std::endl;
+    exit(1);
+  }
 
-	if (getenv("DATA_PAGE_SIZE_DIST")) {
-		DATA_PAGE_SIZE_DIST = std::stoi(getenv("DATA_PAGE_SIZE_DIST"));
-		std::cout << "Data page size distrubution: " << DATA_PAGE_SIZE_DIST << std::endl;
-		//::TLB_STRESS_THRESHOLD = 0;
-	} else {
-		DATA_PAGE_SIZE_DIST = 0;
-		std::cout << "Data page size distrubution: " << DATA_PAGE_SIZE_DIST << std::endl;
-	}
+  DATA_PAGE_SIZE_DIST = champsim::EnvVar<int>::get_or("DATA_PAGE_SIZE_DIST", 0);
+  std::cout << "Data page size distrubution: " << DATA_PAGE_SIZE_DIST << std::endl;
 
-	if (getenv("DATA_PAGE_DIST_FILENAME")) { 
-
-		DATA_PAGE_DIST_FILENAME = getenv("DATA_PAGE_DIST_FILENAME");
-
-		std::cout << "Loading data page size distribution from " << DATA_PAGE_DIST_FILENAME << std::endl;
+  if (auto v = champsim::EnvVar<std::string>::get("DATA_PAGE_DIST_FILENAME")) {
+    DATA_PAGE_DIST_FILENAME = *v;
+    std::cout << "Loading data page size distribution from " << DATA_PAGE_DIST_FILENAME << std::endl;
 		std::ifstream data_page_dist_file(DATA_PAGE_DIST_FILENAME, std::ifstream::in);
 
 		// check if exist to load it, elese create it
@@ -203,10 +189,10 @@ void O3_CPU::initialize()
 			}
 			data_page_dist_file.close();
 		}
-	} else {
-		std::cerr << "ERROR: DATA_PAGE_DIST_FILENAME not defined!" << std::endl;
-		exit(1);
-	}
+  } else {
+    std::cerr << "ERROR: DATA_PAGE_DIST_FILENAME not defined!" << std::endl;
+    exit(1);
+  }
 
 #endif
 /*

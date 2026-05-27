@@ -5,6 +5,7 @@
 
 #include "cache.h"
 #include "util.h"
+#include "env_var.h"
 
 
 /*
@@ -33,28 +34,30 @@ namespace {
 
 void CACHE::initialize_replacement() 
 {
-	if (getenv("TLB_LOWER_STRESS_THRESHOLD")) {
-		::TLB_LOWER_STRESS_THRESHOLD = std::stoi(getenv("TLB_LOWER_STRESS_THRESHOLD"));
+	if (auto v = champsim::EnvVar<int>::get("TLB_LOWER_STRESS_THRESHOLD")) {
+		::TLB_LOWER_STRESS_THRESHOLD = *v;
 		//::TLB_STRESS_THRESHOLD = 0;
 	}
 
-	if (getenv("TLB_UPPER_STRESS_THRESHOLD")) {
+	if (auto v = champsim::EnvVar<int>::get("TLB_UPPER_STRESS_THRESHOLD")) {
 		if (this->force_mon)
-			::TLB_UPPER_STRESS_THRESHOLD = std::stoi(getenv("TLB_UPPER_STRESS_THRESHOLD"));
+			::TLB_UPPER_STRESS_THRESHOLD = *v;
 		else
 			::TLB_UPPER_STRESS_THRESHOLD = 9;
 	}
 
-	if (getenv("MIN_EVICTION_POSITION")) {
-		::MIN_EVICTION_POSITION[this] = std::stoi(getenv("MIN_EVICTION_POSITION"));
+	if (auto v = champsim::EnvVar<int>::get("MIN_EVICTION_POSITION")) {
+		::MIN_EVICTION_POSITION[this] = *v;
 	}
 
-	if (getenv("MIN_EVICTION_POSITION_L1D") && (NAME.compare("cpu0_L1D") == 0)) {
-		::MIN_EVICTION_POSITION[this] = std::stoi(getenv("MIN_EVICTION_POSITION_L1D"));
+	if (auto v = champsim::EnvVar<int>::get("MIN_EVICTION_POSITION_L1D")) {
+		if (NAME.compare("cpu0_L1D") == 0)
+			::MIN_EVICTION_POSITION[this] = *v;
 	}
 
-	if (getenv("MIN_EVICTION_POSITION_L2C") && (NAME.compare("cpu0_L2C") == 0)) {
-		::MIN_EVICTION_POSITION[this] = std::stoi(getenv("MIN_EVICTION_POSITION_L2C"));
+	if (auto v = champsim::EnvVar<int>::get("MIN_EVICTION_POSITION_L2C")) {
+		if (NAME.compare("cpu0_L2C") == 0)
+			::MIN_EVICTION_POSITION[this] = *v;
 	}
 
 	std::cout << NAME << " is using xPTP/LRU" << std::endl; 

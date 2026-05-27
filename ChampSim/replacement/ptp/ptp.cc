@@ -6,6 +6,7 @@
 
 #include "cache.h"
 #include "util.h"
+#include "env_var.h"
 
 
 /*
@@ -35,12 +36,12 @@ namespace {
 
 void CACHE::initialize_replacement() 
 {
-	if (getenv("TLB_STRESS_THRESHOLD")) {
-		::TLB_STRESS_THRESHOLD = std::stoi(getenv("TLB_STRESS_THRESHOLD"));
+	if (auto v = champsim::EnvVar<int>::get("TLB_STRESS_THRESHOLD")) {
+		::TLB_STRESS_THRESHOLD = *v;
 	}
 
-	if (getenv("PTE_EVICTION_RATIO")) {
-		::PTE_EVICTION_RATIO = std::stoi(getenv("PTE_EVICTION_RATIO"));
+	if (auto v = champsim::EnvVar<double>::get("PTE_EVICTION_RATIO")) {
+		::PTE_EVICTION_RATIO = *v;
 	}
 
 	std::cout << NAME << " is using PTP replacement policy:" << std::endl; 

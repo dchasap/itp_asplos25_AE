@@ -5,6 +5,7 @@
 
 #include "cache.h"
 #include "util.h"
+#include "env_var.h"
 
 namespace {
 
@@ -24,7 +25,12 @@ namespace {
 
 void CACHE::initialize_replacement()
 {
-	instr_eviction_prob = std::stoi(getenv("PROBR_INSTR_EVICT_PROB"));
+	if (auto v = champsim::EnvVar<int>::get("PROBR_INSTR_EVICT_PROB")) {
+		instr_eviction_prob = *v;
+	} else {
+		std::cerr << "PROBR_INSTR_EVICT_PROB not set!" << std::endl;
+		exit(1);
+	}
 
 	std::cout << this->NAME << " using probabilistic eviction with instr eviction probability " 
 						<< instr_eviction_prob << "%" << std::endl;
