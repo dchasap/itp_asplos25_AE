@@ -137,6 +137,54 @@ def parse_champsim_stats(input_file, output_file):
         total_txvc_bypasses = lines[0].split()[3]
         #print(total_txvc_bypasses)
 
+    # Get TXVC prefetch lifetime stats
+    TXVC_PREFETCH_LIFETIME_STATS = {}
+    TXVC_PF_LT_STATS = [
+        'INSERTED', 'FIRST_USE', 'FIRST_USE_RATE', 'AVG_FIRST_USE_LAT',
+        'EVICTED_NO_USE', 'EVICTED_AFTER_USE', 'EVICTED_USEFUL_RATE',
+        'AVG_EVICTED_RES', 'AVG_USEFUL_EVICTED_RES',
+        'LIVE_PREF', 'LIVE_PREF_USED'
+    ]
+    line = re.search(r'TXVC\sPREFETCH-LIFETIME.*', data)
+    for stat in TXVC_PF_LT_STATS:
+        TXVC_PREFETCH_LIFETIME_STATS[stat] = 'N/A'
+    if (line != None):
+        line = line.group()
+        token_map = {
+            'INSERTED': r'INSERTED:\s+\d+',
+            'FIRST_USE': r'FIRST_USE:\s+\d+',
+            'FIRST_USE_RATE': r'FIRST_USE_RATE\(%\):\s+[\d\.]+',
+            'AVG_FIRST_USE_LAT': r'AVG_FIRST_USE_LAT\(cyc\):\s+[\d\.]+',
+            'EVICTED_NO_USE': r'EVICTED_NO_USE:\s+\d+',
+            'EVICTED_AFTER_USE': r'EVICTED_AFTER_USE:\s+\d+',
+            'EVICTED_USEFUL_RATE': r'EVICTED_USEFUL_RATE\(%\):\s+[\d\.]+',
+            'AVG_EVICTED_RES': r'AVG_EVICTED_RES\(cyc\):\s+[\d\.]+',
+            'AVG_USEFUL_EVICTED_RES': r'AVG_USEFUL_EVICTED_RES\(cyc\):\s+[\d\.]+',
+            'LIVE_PREF': r'LIVE_PREF:\s+\d+',
+            'LIVE_PREF_USED': r'LIVE_PREF_USED:\s+\d+'
+        }
+        for stat in TXVC_PF_LT_STATS:
+            _line = re.search(token_map[stat], line)
+            if (_line != None):
+                TXVC_PREFETCH_LIFETIME_STATS[stat] = re.findall(r'[\d\.]+', _line.group())[0]
+
+    # Get TXVC predictor entry lifetime stats (generic prefetcher line)
+    TXVC_ENTRY_LIFETIME_STATS = {}
+    TXVC_ENTRY_STATS = [
+        'ALLOC', 'REPL', 'REPL_BEFORE_ISSUE', 'REPL_AFTER_ISSUE',
+        'AVG_REPL_LIFETIME_TICKS', 'LIVE', 'LIVE_WITH_ISSUE'
+    ]
+    for stat in TXVC_ENTRY_STATS:
+        TXVC_ENTRY_LIFETIME_STATS[stat] = 'N/A'
+
+    lines = re.findall(r'TXVC\s+\w+\s+ENTRY-LIFETIME.*', data)
+    if (len(lines) > 0):
+        line = lines[0]
+        for stat in TXVC_ENTRY_STATS:
+            _line = re.search(stat + r':\s*[\d\.]+', line)
+            if (_line != None):
+                TXVC_ENTRY_LIFETIME_STATS[stat] = re.findall(r'[\d\.]+', _line.group())[0]
+
     # Get IPC
     lines = re.findall(r'CPU 0 cumulative IPC:\s+\d+[\.]?\d*', data)
     ipc = lines[len(lines)-1].split()[4]
@@ -170,6 +218,12 @@ def parse_champsim_stats(input_file, output_file):
     header.append('TXVC_PREDICTIONS')
     header.append('TXVC_BYPASSES')
 
+    for stat in TXVC_PF_LT_STATS:
+        header.append('TXVC_PF_LT_' + stat)
+
+    for stat in TXVC_ENTRY_STATS:
+        header.append('TXVC_PREFETCHER_ENTRY_' + stat)
+
     header.append('IPC')
     header.append('INSTRUCTIONS')
     header.append('CYCLES')
@@ -191,6 +245,13 @@ def parse_champsim_stats(input_file, output_file):
             new_row.append(cache_filter_accuracy)
             new_row.append(total_txvc_predictions)
             new_row.append(total_txvc_bypasses)
+
+            for stat in TXVC_PF_LT_STATS:
+                new_row.append(TXVC_PREFETCH_LIFETIME_STATS[stat])
+
+            for stat in TXVC_ENTRY_STATS:
+                new_row.append(TXVC_ENTRY_LIFETIME_STATS[stat])
+
             new_row.append(ipc)
             new_row.append(instructions)
             new_row.append(cycles)

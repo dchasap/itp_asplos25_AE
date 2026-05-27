@@ -64,14 +64,16 @@ def run_simulation_batch(root_dir, trace_dir, dump_dir, sim_name, exp_name, work
   if debug_run:
     print("Simulating in Debug mode.")
     #workload = 'debug'
-    debug_flags = 'gdb -batch -ex "run" -ex "bt" --args'
+    #debug_flags = 'gdb -batch -ex "run" -ex "bt" --args'
+    debug_flags = ''
     job_queue = 'gp_debug'
     sim_time = '00:00:30'
     warmup_instr = '500000'
     run_instr = '5000000'
     job_prefix = 'debug'
   else: 
-    debug_flags = 'gdb -batch -ex "run" -ex "bt" --args'
+    #debug_flags = 'gdb -batch -ex "run" -ex "bt" --args' # temporary disabled until ptrace issues are resolved
+    debug_flags = ''
     job_queue = 'gp_bsccs'
     sim_time = sim_config['time']
     warmup_instr = sim_config['warmup_instructions']

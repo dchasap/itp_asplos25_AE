@@ -2,6 +2,7 @@
 import stats
 import plotting
 import pandas as pd
+import numpy as np
 from scipy.stats import gmean
 
 
@@ -484,6 +485,200 @@ def gen_plot(benchsuite, _tags, data_files, figure_name, figure_type, file_type,
 		print(FIGURES_DIR + "/fig_vc_occupancy_" + benchsuite + ".pdf")
 		#plotting.plot_stat(means_df, tags, 'mean', output_file)
 		plotting.plot_stat(data_df, tags, 'MAX_OCCUPANCY', output_file)
+		
+
+	if (figure_type == "txvc_prefetcher_survivability"):
+
+		input_data_files, tags = get_data_files(data_files, _tags, True)
+
+		cache_types=["TXVC"]
+		op_type = "TOTAL"
+
+		df = stats.load_df(input_data_files, tags, cache_types, op_type)
+
+		entry_stats = [
+						'TXVC_PREFETCHER_ENTRY_ALLOC',
+						'TXVC_PREFETCHER_ENTRY_REPL',
+						'TXVC_PREFETCHER_ENTRY_REPL_BEFORE_ISSUE',
+						'TXVC_PREFETCHER_ENTRY_LIVE',
+						'TXVC_PREFETCHER_ENTRY_LIVE_WITH_ISSUE'
+				]
+
+		for stat in entry_stats:
+			df[stat] = pd.to_numeric(df[stat], errors='coerce').fillna(0)
+
+		df['CHURN'] = 0.0
+		df['CHURN'] = np.where(
+			df['TXVC_PREFETCHER_ENTRY_ALLOC'] > 0,
+			(df['TXVC_PREFETCHER_ENTRY_REPL'] * 100.0) / df['TXVC_PREFETCHER_ENTRY_ALLOC'],
+			0.0
+		)
+
+		df['OVERWRITE_BEFORE_LEARNING'] = 0.0
+		df['OVERWRITE_BEFORE_LEARNING'] = np.where(
+			df['TXVC_PREFETCHER_ENTRY_REPL'] > 0,
+			(df['TXVC_PREFETCHER_ENTRY_REPL_BEFORE_ISSUE'] * 100.0) / df['TXVC_PREFETCHER_ENTRY_REPL'],
+			0.0
+		)
+
+		df['EMITABILITY'] = 0.0
+		df['EMITABILITY'] = np.where(
+			df['TXVC_PREFETCHER_ENTRY_LIVE'] > 0,
+			(df['TXVC_PREFETCHER_ENTRY_LIVE_WITH_ISSUE'] * 100.0) / df['TXVC_PREFETCHER_ENTRY_LIVE'],
+			0.0
+		)
+
+		means = []
+		metrics = []
+		confs = []
+		metric_map = {
+			'CHURN': 'Replacement Rate',
+			'OVERWRITE_BEFORE_LEARNING': 'Overwrite Before Issue',
+			'EMITABILITY': 'Active Entry Rate'
+		}
+
+		for metric in metric_map:
+			for tag in tags:
+				mean = df.loc[(df['tag'] == tag)][metric].mean()
+				means.append(mean)
+				metrics.append(metric_map[metric])
+				confs.append(tag)
+
+		means_df = pd.DataFrame({'metric': metrics, 'tag': confs, 'mean': means})
+		print(means_df)
+
+		plotting.plot_conf['plot_type'] = 'bar'
+		plotting.plot_conf['plot_width'] = 8
+		plotting.plot_conf['plot_height'] = 2.5
+		plotting.plot_conf['fontsize'] = 12
+		plotting.plot_conf['ylabel'] = "Ratio (%)"
+		plotting.plot_conf['xlabel'] = None
+		plotting.plot_conf['rotation'] = 15
+		plotting.plot_conf['show_legend'] = True
+		plotting.plot_conf['legend_cols'] = len(tags)
+		plotting.plot_conf['legend_yoffset'] = 0.5
+		plotting.plot_conf['legend_xoffset'] = 1.25
+
+		fig, axes = plotting.plt.subplots(	nrows=1, ncols=1,
+														figsize=(plotting.plot_conf['plot_width'], plotting.plot_conf['plot_height']))
+		plotting.plot(means_df, x='metric', y='mean', hue='tag', axes=axes)
+
+		output_file = figure_dir + "/" + figure_name + "_txvc_prefetcher_survivability_" + benchsuite + "." + file_type
+		print(output_file)
+		fig.savefig(output_file, bbox_inches='tight')
+
+	if (figure_type == "txvc_prefetch_funnel"):
+
+		input_data_files, tags = get_data_files(data_files, _tags, True)
+
+		issued_df = stats.load_df(input_data_files, tags, "TXVC", "PREFETCH")
+
+		funnel_stats = [
+						'ISSUED',
+						'REQUESTED',
+						'TXVC_PF_LT_FIRST_USE'
+				]
+
+		for stat in funnel_stats:
+			issued_df[stat] = pd.to_numeric(issued_df[stat], errors='coerce').fillna(0)
+
+		means = []
+		stages = []
+		confs = []
+		stage_map = {
+			'ISSUED': 'ISSUED',
+			'REQUESTED': 'FILL',
+			'TXVC_PF_LT_FIRST_USE': 'FIRST_USE'
+		}
+
+		for stage in stage_map:
+			for tag in tags:
+				mean = issued_df.loc[(issued_df['tag'] == tag)][stage].mean()
+				means.append(mean)
+				stages.append(stage_map[stage])
+				confs.append(tag)
+
+		means_df = pd.DataFrame({'stage': stages, 'tag': confs, 'mean': means})
+		print(means_df)
+
+		plotting.plot_conf['plot_type'] = 'bar'
+		plotting.plot_conf['plot_width'] = 9
+		plotting.plot_conf['plot_height'] = 2.8
+		plotting.plot_conf['fontsize'] = 12
+		plotting.plot_conf['ylabel'] = "Count"
+		plotting.plot_conf['xlabel'] = None
+		plotting.plot_conf['rotation'] = 15
+		plotting.plot_conf['show_legend'] = True
+		plotting.plot_conf['legend_cols'] = len(tags)
+		plotting.plot_conf['legend_yoffset'] = 0.5
+		plotting.plot_conf['legend_xoffset'] = 1.25
+
+		fig, axes = plotting.plt.subplots(	nrows=1, ncols=1,
+														figsize=(plotting.plot_conf['plot_width'], plotting.plot_conf['plot_height']))
+		plotting.plot(means_df, x='stage', y='mean', hue='tag', axes=axes)
+
+		output_file = figure_dir + "/" + figure_name + "_txvc_prefetch_funnel_" + benchsuite + "." + file_type
+		print(output_file)
+		fig.savefig(output_file, bbox_inches='tight')
+
+
+	if (figure_type == "txvc_prefetch_failure_split"):
+
+		input_data_files, tags = get_data_files(data_files, _tags, True)
+
+		cache_types=["TXVC"]
+		op_type = "TOTAL"
+
+		df = stats.load_df(input_data_files, tags, cache_types, op_type)
+
+		failure_stats = [
+						'TXVC_PF_LT_EVICTED_NO_USE',
+						'TXVC_PF_LT_EVICTED_AFTER_USE'
+				]
+
+		for stat in failure_stats:
+			df[stat] = pd.to_numeric(df[stat], errors='coerce').fillna(0)
+
+		rows = []
+		for tag in tags:
+			tag_df = df.loc[(df['tag'] == tag)]
+			no_use = tag_df['TXVC_PF_LT_EVICTED_NO_USE'].mean()
+			after_use = tag_df['TXVC_PF_LT_EVICTED_AFTER_USE'].mean()
+			rows.append({
+				'tag': tag,
+				'EVICTED_NO_USE': no_use,
+				'EVICTED_AFTER_USE': after_use,
+			})
+
+		means_df = pd.DataFrame(rows)
+		print(means_df)
+
+		plot_df = means_df.melt(
+			id_vars='tag',
+			value_vars=['EVICTED_NO_USE', 'EVICTED_AFTER_USE' ],
+			var_name='metric',
+			value_name='mean'
+		)
+
+		plotting.plot_conf['plot_type'] = 'bar'
+		plotting.plot_conf['plot_width'] = 8
+		plotting.plot_conf['plot_height'] = 2.8
+		plotting.plot_conf['fontsize'] = 12
+		plotting.plot_conf['ylabel'] = 'Count'
+		plotting.plot_conf['xlabel'] = None
+		plotting.plot_conf['rotation'] = 15
+		plotting.plot_conf['show_legend'] = True
+		plotting.plot_conf['legend_cols'] = 3
+		plotting.plot_conf['legend_yoffset'] = 0.5
+		plotting.plot_conf['legend_xoffset'] = 1.25
+
+		fig, axes = plotting.plt.subplots(	nrows=1, ncols=1,
+														figsize=(plotting.plot_conf['plot_width'], plotting.plot_conf['plot_height']))
+		plotting.plot(plot_df, x='tag', y='mean', hue='metric', axes=axes)
+
+		output_file = figure_dir + "/" + figure_name + "_txvc_prefetch_failure_split_" + benchsuite + "." + file_type
+		print(output_file)
+		fig.savefig(output_file, bbox_inches='tight')
 		
 
 	if (figure_type == "plot_reuse_dist"):

@@ -35,11 +35,68 @@
 
 namespace {
 constexpr uint32_t TXVC_PTE_PREFETCH_METADATA = 0x54585643; // 'TXVC'
+
+bool txvc_prefetch_fill_to_txvc()
+{
+	static int mode = -1;
+	if (mode == -1) {
+		const char* env = getenv("TXVC_PREFETCH_FILL_TARGET");
+		// Default preserves current behavior for TXVC-generated prefetches.
+		mode = (env == nullptr || std::string(env) == "txvc") ? 1 : 0;
+	}
+	return mode == 1;
+}
+
+bool txvc_miss_fill_to_txvc()
+{
+	static int mode = -1;
+	if (mode == -1) {
+		const char* env = getenv("TXVC_MISS_FILL_TARGET");
+		// Default preserves legacy behavior: cache fill first, TXVC on eviction.
+		mode = (env != nullptr && std::string(env) == "txvc") ? 1 : 0;
+	}
+	return mode == 1;
+}
 }
 
 				bool CACHE::handle_fill(const PACKET& fill_mshr)
 				{
 					cpu = fill_mshr.cpu;
+
+#if defined TRANSLATION_EXCLUSIVE_CACHE
+					// TXVC prefetches should populate TXVC directly, not this cache level.
+					if (enable_tx_victim_cache && NAME.find(_CACHE_) != std::string::npos && tx_victim_cache &&
+					    txvc_prefetch_fill_to_txvc() && fill_mshr.type == PREFETCH &&
+					    fill_mshr.pf_metadata == TXVC_PTE_PREFETCH_METADATA && fill_mshr.is_pte) {
+						auto txvc_prefetch_packet = fill_mshr;
+						tx_victim_cache->add_request(txvc_prefetch_packet, current_cycle, false, 0, true);
+
+						sim_stats.back().pf_fill++;
+						tx_victim_cache->record_pf_fill();
+						sim_stats.back().total_miss_latency += current_cycle - (fill_mshr.cycle_enqueued + 1);
+
+						auto copy{fill_mshr};
+						for (auto ret : copy.to_return)
+							ret->return_data(copy);
+
+						return true;
+					}
+
+					// Optional experiment mode: place demand PTE misses directly into TXVC.
+					if (enable_tx_victim_cache && NAME.find(_CACHE_) != std::string::npos && tx_victim_cache &&
+					    txvc_miss_fill_to_txvc() && fill_mshr.type != PREFETCH && fill_mshr.is_pte) {
+						auto txvc_demand_packet = fill_mshr;
+						tx_victim_cache->add_request(txvc_demand_packet, current_cycle, false, fill_mshr.access_freq, true);
+
+						sim_stats.back().total_miss_latency += current_cycle - (fill_mshr.cycle_enqueued + 1);
+
+						auto copy{fill_mshr};
+						for (auto ret : copy.to_return)
+							ret->return_data(copy);
+
+						return true;
+					}
+#endif
 
 					// find victim
 #if defined SPLIT_STLB
@@ -146,6 +203,7 @@ constexpr uint32_t TXVC_PTE_PREFETCH_METADATA = 0x54585643; // 'TXVC'
 								victim_packet.ip = 0;
 								victim_packet.type = fill_mshr.type;
 								victim_packet.pf_metadata = way->pf_metadata;
+								victim_packet.prefetch_from_this = way->prefetch;
 
 #if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT
 								victim_packet.is_instr = way->is_instr;
@@ -826,8 +884,11 @@ constexpr uint32_t TXVC_PTE_PREFETCH_METADATA = 0x54585643; // 'TXVC'
 							
 						if (enable_tx_victim_cache && vc_entry_cond) {
 
-							std::vector<uint64_t> txvc_prefetch_candidates = tx_victim_cache->get_prefetch_candidates(handle_pkt.address, handle_pkt.translation_level, handle_pkt.ip);
-							auto [_entry, _entry_found] = tx_victim_cache->lookup(handle_pkt.address, handle_pkt.is_instr, current_cycle, handle_pkt.ip);
+							const uint64_t translated_vpn = handle_pkt.v_address >> LOG2_PAGE_SIZE;
+							std::vector<uint64_t> txvc_prefetch_candidates =
+							    tx_victim_cache->get_prefetch_candidates(handle_pkt.address, handle_pkt.translation_level, handle_pkt.ip, translated_vpn);
+							auto [_entry, _entry_found] = tx_victim_cache->lookup(handle_pkt.address, handle_pkt.is_instr, current_cycle, handle_pkt.ip,
+							                                                            handle_pkt.type == PREFETCH);
 							entry_found = _entry_found;
 							txvc_block_entry = _entry;
 
@@ -1451,6 +1512,13 @@ void CACHE::return_data(const PACKET& packet)
 #endif
 	}
 
+	// Dimitrios Fix:
+	// 	Duplicate return path: this address already has a scheduled fill event.
+	// 	This can happen when multiple lower-level responses race on the same line.
+	// 	Keep the first return and ignore late duplicates.
+	if (mshr_entry->event_cycle != std::numeric_limits<uint64_t>::max())
+		return;
+
   // MSHR holds the most updated information about this request
   mshr_entry->data = packet.data;
   mshr_entry->pf_metadata = packet.pf_metadata;
@@ -1465,7 +1533,8 @@ void CACHE::return_data(const PACKET& packet)
 
   // Order this entry after previously-returned entries, but before non-returned
   // entries
-  std::iter_swap(mshr_entry, first_unreturned);
+	if (first_unreturned != MSHR.end()) //Dimitrios Fix: only swap when there is an unreturned entry, otherwise we are swapping with the same entry
+		std::iter_swap(mshr_entry, first_unreturned);
 }
 
 std::size_t CACHE::get_occupancy(uint8_t queue_type, uint64_t)

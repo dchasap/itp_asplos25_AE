@@ -160,6 +160,8 @@ class CACHE : public champsim::operable, public MemoryRequestConsumer, public Me
 #if defined TRANSLATION_EXCLUSIVE_CACHE
 		bool is_doa = true;
     uint64_t access_freq = 0;
+  uint64_t txvc_insert_cycle = 0;
+  bool txvc_hit_by_demand = false;
 #endif 
 
 /*
@@ -360,6 +362,13 @@ public:
       uint64_t total_hits = 0, total_ithits = 0, total_dthits = 0;
       uint64_t total_misses = 0, total_itmisses = 0, total_dtmisses = 0;
       uint64_t pf_requested = 0, pf_issued = 0, pf_fill = 0, pf_useful = 0, pf_useless = 0;
+      uint64_t pf_cache_lines_inserted = 0;
+      uint64_t pf_cache_lines_first_use = 0;
+      uint64_t pf_cache_lines_evicted_without_use = 0;
+      uint64_t pf_cache_lines_evicted_after_use = 0;
+      uint64_t pf_cache_first_use_latency_sum = 0;
+      uint64_t pf_cache_residency_cycles_sum = 0;
+      uint64_t pf_cache_residency_cycles_evicted_after_use_sum = 0;
       bool roi_phase_started = false;
 
       bool save_mem_accesses;
@@ -585,10 +594,10 @@ public:
       }
 
 
-      void add_request(PACKET& request, uint64_t curr_cycle, bool seems_dead, uint64_t access_freq) 
+      void add_request(PACKET& request, uint64_t curr_cycle, bool seems_dead, uint64_t access_freq, bool skip_filter = false) 
       {
 
-        if (enable_cache_filtering) {
+        if (enable_cache_filtering && !skip_filter) {
           //std::cout << "access_freq:" << access_freq << std::endl;
           bool bypass = cacheFilter->predict(request.address, seems_dead, access_freq);
           // also check if its a demand access 
@@ -639,6 +648,18 @@ public:
           xargs.is_prefetch = request.prefetch_from_this;
           replacementPol->update_replacement_state(set_idx, way_idx, curr_cycle, false, xargs);  
         }
+
+        // Prefetched-line cache survivability at eviction time.
+        if (way->valid && way->prefetch) {
+          const uint64_t residency = curr_cycle - way->txvc_insert_cycle;
+          pf_cache_residency_cycles_sum += residency;
+          if (way->txvc_hit_by_demand) {
+            pf_cache_lines_evicted_after_use++;
+            pf_cache_residency_cycles_evicted_after_use_sum += residency;
+          } else {
+            pf_cache_lines_evicted_without_use++;
+          }
+        }
         
         //std::cout << "Filling block in set " << set_idx << " with address " << request.address << std::endl;
 
@@ -664,15 +685,24 @@ public:
 #endif
 
         way->is_doa = true;
+
+        if (request.prefetch_from_this) {
+          pf_cache_lines_inserted++;
+          way->txvc_insert_cycle = curr_cycle;
+          way->txvc_hit_by_demand = false;
+        } else {
+          way->txvc_insert_cycle = 0;
+          way->txvc_hit_by_demand = false;
+        }
 //#if defined ENABLE_EXTRA_CACHE_STATS
 //        reuseDistMon->add_access(request.address);
 //#endif
 
       }
 
-      std::vector<uint64_t> get_prefetch_candidates(uint64_t address, std::size_t translation_level, uint64_t ip)
+      std::vector<uint64_t> get_prefetch_candidates(uint64_t address, std::size_t translation_level, uint64_t ip, uint64_t translated_vpn)
       {
-        return prefetchPolicy->get_prefetch_candidates(address, translation_level, ip);
+        return prefetchPolicy->get_prefetch_candidates(address, translation_level, ip, translated_vpn);
       }
 
       uint32_t get_pf_mshr_gate_pct() const
@@ -681,7 +711,7 @@ public:
       }
 
 
-      std::pair<BLOCK, bool> lookup(uint64_t address, bool is_instr, uint64_t curr_cycle, uint64_t pc) 
+      std::pair<BLOCK, bool> lookup(uint64_t address, bool is_instr, uint64_t curr_cycle, uint64_t pc, bool is_prefetch_request = false) 
       {
         uint32_t set_idx = setIndexer->get_set(address);
         auto set_begin = std::next(blocks.begin(), set_idx * num_way);
@@ -720,6 +750,14 @@ public:
           else
             total_dthits++;
           way->is_doa = false;
+
+          // First demand hit on a prefetched TXVC line: this is cache-side usefulness latency.
+          if (way->prefetch && !is_prefetch_request && !way->txvc_hit_by_demand) {
+            way->txvc_hit_by_demand = true;
+            pf_cache_lines_first_use++;
+            pf_cache_first_use_latency_sum += (curr_cycle - way->txvc_insert_cycle);
+          }
+
           ReplacementPolicy::REP_POL_ARGS xargs;
           xargs.access_freq = way->access_freq;
           xargs.pte_level = way->pte_level;
@@ -776,6 +814,46 @@ public:
         std::cout << "USEFUL:" << std::setw(10) << pf_useful << "  ";
         std::cout << "USELESS:" << std::setw(10) << pf_useless;
         std::cout << std::endl;
+
+        uint64_t live_prefetched = 0;
+        uint64_t live_prefetched_used = 0;
+        for (const auto& block : blocks) {
+          if (!block.valid || !block.prefetch)
+          continue;
+          live_prefetched++;
+          if (block.txvc_hit_by_demand)
+          live_prefetched_used++;
+        }
+
+        const double pf_first_use_rate =
+          (pf_cache_lines_inserted != 0) ? 100.0 * static_cast<double>(pf_cache_lines_first_use) / static_cast<double>(pf_cache_lines_inserted) : 0.0;
+        const double pf_avg_first_use_latency =
+          (pf_cache_lines_first_use != 0) ? static_cast<double>(pf_cache_first_use_latency_sum) / static_cast<double>(pf_cache_lines_first_use) : 0.0;
+        const uint64_t pf_evicted_total = pf_cache_lines_evicted_without_use + pf_cache_lines_evicted_after_use;
+        const double pf_evicted_useful_rate =
+          (pf_evicted_total != 0) ? 100.0 * static_cast<double>(pf_cache_lines_evicted_after_use) / static_cast<double>(pf_evicted_total) : 0.0;
+        const double pf_avg_evicted_residency =
+          (pf_evicted_total != 0) ? static_cast<double>(pf_cache_residency_cycles_sum) / static_cast<double>(pf_evicted_total) : 0.0;
+        const double pf_avg_useful_evicted_residency =
+          (pf_cache_lines_evicted_after_use != 0)
+            ? static_cast<double>(pf_cache_residency_cycles_evicted_after_use_sum) / static_cast<double>(pf_cache_lines_evicted_after_use)
+            : 0.0;
+
+        std::cout << "TXVC PREFETCH-LIFETIME ";
+        std::cout << "INSERTED:" << std::setw(10) << pf_cache_lines_inserted << "  ";
+        std::cout << "FIRST_USE:" << std::setw(10) << pf_cache_lines_first_use << "  ";
+        std::cout << "FIRST_USE_RATE(%):" << std::setw(8) << pf_first_use_rate << "  ";
+        std::cout << "AVG_FIRST_USE_LAT(cyc):" << std::setw(10) << pf_avg_first_use_latency << "  ";
+        std::cout << "EVICTED_NO_USE:" << std::setw(10) << pf_cache_lines_evicted_without_use << "  ";
+        std::cout << "EVICTED_AFTER_USE:" << std::setw(10) << pf_cache_lines_evicted_after_use << "  ";
+        std::cout << "EVICTED_USEFUL_RATE(%):" << std::setw(8) << pf_evicted_useful_rate << "  ";
+        std::cout << "AVG_EVICTED_RES(cyc):" << std::setw(10) << pf_avg_evicted_residency << "  ";
+        std::cout << "AVG_USEFUL_EVICTED_RES(cyc):" << std::setw(10) << pf_avg_useful_evicted_residency << "  ";
+        std::cout << "LIVE_PREF:" << std::setw(10) << live_prefetched << "  ";
+        std::cout << "LIVE_PREF_USED:" << std::setw(10) << live_prefetched_used;
+        std::cout << std::endl;
+
+        prefetchPolicy->print_stats();
        
         if (enable_cache_filtering)
           cacheFilter->print_stats();
@@ -807,6 +885,13 @@ public:
         pf_fill = 0;
         pf_useful = 0;
         pf_useless = 0;
+        pf_cache_lines_inserted = 0;
+        pf_cache_lines_first_use = 0;
+        pf_cache_lines_evicted_without_use = 0;
+        pf_cache_lines_evicted_after_use = 0;
+        pf_cache_first_use_latency_sum = 0;
+        pf_cache_residency_cycles_sum = 0;
+        pf_cache_residency_cycles_evicted_after_use_sum = 0;
       }
 
       void on_phase_begin(bool in_warmup)

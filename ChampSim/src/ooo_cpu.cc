@@ -328,11 +328,9 @@ void O3_CPU::initialize_instruction()
       if (std::end(IFETCH_BUFFER) == std::find_if(std::begin(IFETCH_BUFFER), std::end(IFETCH_BUFFER), [pf_addr] (auto x){
         return ((x.fetched > 0) && ((x.ip >> LOG2_BLOCK_SIZE) == (pf_addr >> LOG2_BLOCK_SIZE)));
       } ) ){   
-        if (TARGET_CACHE->prefetch_line(IFETCH_BUFFER.front().ip, 
-                                        IFETCH_BUFFER.front().ip, 
-                                        pf_addr, 
-                                        true, 
-                                        0)) {
+        if (TARGET_CACHE->prefetch_line(pf_addr,
+                true,
+                0)) {
           fdip.issue_prefetch(instr_id, current_cycle);
         }
         sent++;

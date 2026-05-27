@@ -1253,7 +1253,8 @@ class PrefetchPolicy
     // Inner vector ordering: highest priority first. Empty vector means no prefetch.
     // translation_level: ChampSim PTW level (1=PTE leaf, 4=PGD root; 0=non-PTE).
     // ip: walker instruction pointer.
-    virtual std::vector<uint64_t> get_prefetch_candidates(uint64_t address, std::size_t translation_level, uint64_t ip) = 0;
+    // translated_vpn: virtual page number of the translation being serviced.
+    virtual std::vector<uint64_t> get_prefetch_candidates(uint64_t address, std::size_t translation_level, uint64_t ip, uint64_t translated_vpn) = 0;
 
     // Fraction (0-100) of the MSHR that must be free before a prefetch is issued.
     virtual uint32_t get_mshr_gate_pct() const = 0;
@@ -1261,6 +1262,9 @@ class PrefetchPolicy
     // Feedback from the cache: called when a prefetch was useful (demand hit) or useless (evicted).
     virtual void notify_useful()  {}
     virtual void notify_useless() {}
+
+    // Optional policy-specific stats emitted by the owner cache wrapper.
+    virtual void print_stats() const {}
 };
 
 class NonePrefetcher : public PrefetchPolicy
@@ -1271,7 +1275,7 @@ class NonePrefetcher : public PrefetchPolicy
       std::cout << "TXVC PrefetchPolicy: none" << std::endl;
     }
 
-    std::vector<uint64_t> get_prefetch_candidates(uint64_t, std::size_t, uint64_t) override
+    std::vector<uint64_t> get_prefetch_candidates(uint64_t, std::size_t, uint64_t, uint64_t) override
     {
       return {}; // prefetching disabled
     }
@@ -1294,10 +1298,13 @@ class StridePrefetcher : public PrefetchPolicy
 {
   private:
     struct Entry {
+      uint64_t owner_tag    = 0;
       uint64_t last_cl_addr = 0;
       int64_t  last_delta   = 0;
       uint8_t  confidence   = 0;
       bool     valid        = false;
+      uint64_t birth_tick   = 0;
+      uint32_t issued_prefetches = 0;
     };
 
     std::size_t table_size;
@@ -1305,6 +1312,14 @@ class StridePrefetcher : public PrefetchPolicy
     uint32_t    mshr_gate_pct;
     uint64_t    offset_bits;
     std::vector<Entry> table;
+    uint64_t    access_tick = 0;
+
+    // Predictor-structure survivability stats.
+    uint64_t    entry_allocations = 0;
+    uint64_t    entry_replacements = 0;
+    uint64_t    entry_replaced_before_issue = 0;
+    uint64_t    entry_survived_to_issue = 0;
+    uint64_t    replaced_entry_lifetime_sum = 0;
 
   public:
     StridePrefetcher(uint64_t _offset_bits) : offset_bits(_offset_bits)
@@ -1352,16 +1367,32 @@ class StridePrefetcher : public PrefetchPolicy
 
     uint32_t get_mshr_gate_pct() const override { return mshr_gate_pct; }
 
-    std::vector<uint64_t> get_prefetch_candidates(uint64_t address, std::size_t /*translation_level*/, uint64_t /*ip*/) override
+    std::vector<uint64_t> get_prefetch_candidates(uint64_t address, std::size_t /*translation_level*/, uint64_t /*ip*/, uint64_t /*translated_vpn*/) override
     {
+      access_tick++;
       const uint64_t cl_addr = address >> offset_bits;
       auto& pred = table[cl_addr % table_size];
+      const uint64_t owner_tag = cl_addr / table_size;
       std::vector<uint64_t> candidates;
+
+      if (pred.valid && pred.owner_tag != owner_tag) {
+        entry_replacements++;
+        replaced_entry_lifetime_sum += (access_tick - pred.birth_tick);
+        if (pred.issued_prefetches > 0)
+          entry_survived_to_issue++;
+        else
+          entry_replaced_before_issue++;
+        pred.owner_tag = owner_tag;
+        pred.birth_tick = access_tick;
+        pred.issued_prefetches = 0;
+      }
 
       if (pred.valid && pred.confidence >= conf_threshold) {
         const int64_t next_cl = static_cast<int64_t>(cl_addr) + pred.last_delta;
-        if (next_cl >= 0 && next_cl <= static_cast<int64_t>(std::numeric_limits<uint64_t>::max() >> offset_bits))
+        if (next_cl >= 0 && next_cl <= static_cast<int64_t>(std::numeric_limits<uint64_t>::max() >> offset_bits)) {
           candidates.push_back(static_cast<uint64_t>(next_cl) << offset_bits);
+          pred.issued_prefetches += 1;
+        }
       }
 
       if (pred.valid) {
@@ -1374,12 +1405,42 @@ class StridePrefetcher : public PrefetchPolicy
         }
       } else {
         pred.valid      = true;
+        pred.owner_tag  = owner_tag;
         pred.last_delta = 0;
         pred.confidence = 0;
+        pred.birth_tick = access_tick;
+        pred.issued_prefetches = 0;
+        entry_allocations++;
       }
 
       pred.last_cl_addr = cl_addr;
       return candidates;
+    }
+
+    void print_stats() const override
+    {
+      uint64_t live_entries = 0;
+      uint64_t live_entries_with_issue = 0;
+      for (const auto& e : table) {
+        if (!e.valid)
+          continue;
+        live_entries++;
+        if (e.issued_prefetches > 0)
+          live_entries_with_issue++;
+      }
+
+      const double avg_replaced_lifetime =
+          (entry_replacements != 0) ? static_cast<double>(replaced_entry_lifetime_sum) / static_cast<double>(entry_replacements) : 0.0;
+
+      std::cout << "TXVC STRIDE ENTRY-LIFETIME "
+                << "ALLOC:" << entry_allocations << " "
+                << "REPL:" << entry_replacements << " "
+                << "REPL_BEFORE_ISSUE:" << entry_replaced_before_issue << " "
+                << "REPL_AFTER_ISSUE:" << entry_survived_to_issue << " "
+                << "AVG_REPL_LIFETIME_TICKS:" << avg_replaced_lifetime << " "
+                << "LIVE:" << live_entries << " "
+                << "LIVE_WITH_ISSUE:" << live_entries_with_issue
+                << std::endl;
     }
 };
 
@@ -1412,6 +1473,8 @@ class SiblingPrefetcher : public PrefetchPolicy
       int16_t  last_delta  = 0;
       uint8_t  confidence  = 0;
       bool     valid       = false;
+      uint64_t birth_tick  = 0;
+      uint32_t issued_prefetches = 0;
     };
 
     struct UsefulnessController {
@@ -1456,6 +1519,14 @@ class SiblingPrefetcher : public PrefetchPolicy
     std::vector<Entry>   table;
     UsefulnessController uc;
     uint32_t             degree;
+    uint64_t             access_tick = 0;
+
+    // Predictor-structure survivability stats.
+    uint64_t             entry_allocations = 0;
+    uint64_t             entry_replacements = 0;
+    uint64_t             entry_replaced_before_issue = 0;
+    uint64_t             entry_survived_to_issue = 0;
+    uint64_t             replaced_entry_lifetime_sum = 0;
 
   public:
     SiblingPrefetcher(uint64_t _offset_bits) : offset_bits(_offset_bits)
@@ -1546,8 +1617,9 @@ class SiblingPrefetcher : public PrefetchPolicy
     void notify_useful()  override { uc.push(true);  }
     void notify_useless() override { uc.push(false); }
 
-    std::vector<uint64_t> get_prefetch_candidates(uint64_t address, std::size_t /*translation_level*/, uint64_t /*ip*/) override
+    std::vector<uint64_t> get_prefetch_candidates(uint64_t address, std::size_t /*translation_level*/, uint64_t /*ip*/, uint64_t /*translated_vpn*/) override
     {
+      access_tick++;
       if (!uc.is_enabled()) return {};
 
       const uint64_t cl_addr  = address >> offset_bits;
@@ -1566,6 +1638,7 @@ class SiblingPrefetcher : public PrefetchPolicy
             break; // stop at boundary, don't skip and continue
           candidates.push_back(((page_tag << cls_per_page_bits) | static_cast<uint64_t>(next_off)) << offset_bits);
         }
+        pred.issued_prefetches += static_cast<uint32_t>(candidates.size());
       }
 
       // Update entry
@@ -1579,14 +1652,51 @@ class SiblingPrefetcher : public PrefetchPolicy
         }
       } else {
         // Different page_tag evicts the old entry
+        if (pred.valid) {
+          entry_replacements++;
+          replaced_entry_lifetime_sum += (access_tick - pred.birth_tick);
+          if (pred.issued_prefetches > 0)
+            entry_survived_to_issue++;
+          else
+            entry_replaced_before_issue++;
+        }
         pred.page_tag   = page_tag;
         pred.last_delta = 0;
         pred.confidence = 0;
+        pred.birth_tick = access_tick;
+        pred.issued_prefetches = 0;
+        entry_allocations++;
       }
 
       pred.valid       = true;
       pred.last_cl_off = cl_off;
       return candidates;
+    }
+
+    void print_stats() const override
+    {
+      uint64_t live_entries = 0;
+      uint64_t live_entries_with_issue = 0;
+      for (const auto& e : table) {
+        if (!e.valid)
+          continue;
+        live_entries++;
+        if (e.issued_prefetches > 0)
+          live_entries_with_issue++;
+      }
+
+      const double avg_replaced_lifetime =
+          (entry_replacements != 0) ? static_cast<double>(replaced_entry_lifetime_sum) / static_cast<double>(entry_replacements) : 0.0;
+
+      std::cout << "TXVC SBLG ENTRY-LIFETIME "
+                << "ALLOC:" << entry_allocations << " "
+                << "REPL:" << entry_replacements << " "
+                << "REPL_BEFORE_ISSUE:" << entry_replaced_before_issue << " "
+                << "REPL_AFTER_ISSUE:" << entry_survived_to_issue << " "
+                << "AVG_REPL_LIFETIME_TICKS:" << avg_replaced_lifetime << " "
+                << "LIVE:" << live_entries << " "
+                << "LIVE_WITH_ISSUE:" << live_entries_with_issue
+                << std::endl;
     }
 };
 
@@ -1615,7 +1725,8 @@ class ChildPrefetcher : public PrefetchPolicy
   private:
     struct PredEntry {
       uint64_t ip             = 0;
-      uint64_t parent_cl_addr = 0;
+      uint64_t translated_vpn = 0;
+      uint64_t parent_pte_addr = 0;
       uint64_t child_cl_addr  = 0;
       uint8_t  confidence     = 0;
       bool     valid          = false;
@@ -1624,9 +1735,11 @@ class ChildPrefetcher : public PrefetchPolicy
     // Records the most recent miss at a given level for a given IP.
     struct PendingParent {
       uint64_t   ip      = 0;
-      uint64_t   cl_addr = 0;
+      uint64_t   translated_vpn = 0;
+      uint64_t   pte_addr = 0;
       std::size_t level  = 0;
       bool       valid   = false;
+      uint64_t   stamp   = 0;
     };
 
     std::size_t              table_size;
@@ -1635,12 +1748,55 @@ class ChildPrefetcher : public PrefetchPolicy
     uint32_t                 mshr_gate_pct;
     uint64_t                 offset_bits;
     std::vector<PredEntry>   table;
-    std::vector<PendingParent> pending; // indexed by ip % pending_size
+    std::vector<PendingParent> pending; // direct-mapped: (ip, translated_vpn, level) -> set
+    uint64_t                 access_tick = 0;
 
-    std::size_t pred_index(uint64_t ip, uint64_t parent_cl_addr) const
+    // Predictor-structure survivability stats.
+    uint64_t                 entry_allocations = 0;
+    uint64_t                 entry_replacements = 0;
+    uint64_t                 entry_replaced_before_issue = 0;
+    uint64_t                 entry_survived_to_issue = 0;
+    uint64_t                 replaced_entry_lifetime_sum = 0;
+
+    // Side metadata keyed like table entries (not part of prediction behavior).
+    std::vector<uint64_t>    entry_birth_tick;
+    std::vector<uint32_t>    entry_issued_prefetches;
+
+    std::size_t pred_index(uint64_t ip, uint64_t parent_pte_addr, uint64_t translated_vpn) const
     {
-      // Mix IP and parent address bits to reduce aliasing
-      return (ip ^ (parent_cl_addr * 2654435761ULL)) % table_size;
+      // Mix IP, parent PTE address, and translated VPN to reduce aliasing.
+      return (ip ^ (parent_pte_addr * 2654435761ULL) ^
+              (translated_vpn * 11400714819323198485ull)) % table_size;
+    }
+
+    std::size_t pending_set_index(uint64_t ip, uint64_t translated_vpn, std::size_t level) const
+    {
+      // Mix IP, translated VPN, and level to reduce aliasing among in-flight walks.
+      const uint64_t lvl_mix = static_cast<uint64_t>(level) * 11400714819323198485ull;
+      return (ip ^ (translated_vpn * 2654435761ULL) ^ lvl_mix) % pending_size;
+    }
+
+    PendingParent* find_pending_parent(uint64_t ip, uint64_t translated_vpn, std::size_t parent_level)
+    {
+      const std::size_t set = pending_set_index(ip, translated_vpn, parent_level);
+      PendingParent& cand = pending[set];
+      if (cand.valid && cand.ip == ip && cand.translated_vpn == translated_vpn && cand.level == parent_level)
+        return &cand;
+
+      return nullptr;
+    }
+
+    void update_pending_parent(uint64_t ip, uint64_t translated_vpn, uint64_t pte_addr, std::size_t level)
+    {
+      const std::size_t set = pending_set_index(ip, translated_vpn, level);
+      PendingParent& victim = pending[set];
+
+      victim.valid = true;
+      victim.ip = ip;
+      victim.translated_vpn = translated_vpn;
+      victim.pte_addr = pte_addr;
+      victim.level = level;
+      victim.stamp = access_tick;
     }
 
   public:
@@ -1681,7 +1837,9 @@ class ChildPrefetcher : public PrefetchPolicy
       }
 
       table.resize(table_size);
-      pending.resize(pending_size);
+    pending.resize(pending_size);
+      entry_birth_tick.resize(table_size, 0);
+      entry_issued_prefetches.resize(table_size, 0);
 
       std::cout << "TXVC ChildPrefetcher: table_size=" << table_size
                 << " pending_size=" << pending_size
@@ -1691,8 +1849,9 @@ class ChildPrefetcher : public PrefetchPolicy
 
     uint32_t get_mshr_gate_pct() const override { return mshr_gate_pct; }
 
-    std::vector<uint64_t> get_prefetch_candidates(uint64_t address, std::size_t translation_level, uint64_t ip) override
+    std::vector<uint64_t> get_prefetch_candidates(uint64_t address, std::size_t translation_level, uint64_t ip, uint64_t translated_vpn) override
     {
+      access_tick++;
       // Only operates on PTE-path accesses (level > 0)
       if (translation_level == 0) return {};
 
@@ -1702,11 +1861,11 @@ class ChildPrefetcher : public PrefetchPolicy
       // --- Training ---
       // Check if there is a pending parent at level+1 for this IP.
       // If so, this access (cl_addr at level L) is the child of that parent.
-      PendingParent& pp = pending[ip % pending_size];
-      if (pp.valid && pp.ip == ip && pp.level == translation_level + 1) {
-        const std::size_t idx = pred_index(ip, pp.cl_addr);
+      PendingParent* pp = find_pending_parent(ip, translated_vpn, translation_level + 1);
+      if (pp != nullptr) {
+        const std::size_t idx = pred_index(ip, pp->pte_addr, translated_vpn);
         PredEntry& entry = table[idx];
-        if (entry.valid && entry.ip == ip && entry.parent_cl_addr == pp.cl_addr) {
+        if (entry.valid && entry.ip == ip && entry.translated_vpn == translated_vpn && entry.parent_pte_addr == pp->pte_addr) {
           // Entry exists for this (IP, parent): update confidence
           if (entry.child_cl_addr == cl_addr) {
             if (entry.confidence < 3) entry.confidence++;
@@ -1716,32 +1875,69 @@ class ChildPrefetcher : public PrefetchPolicy
             entry.confidence    = 0;
           }
         } else {
+          if (entry.valid) {
+            entry_replacements++;
+            replaced_entry_lifetime_sum += (access_tick - entry_birth_tick[idx]);
+            if (entry_issued_prefetches[idx] > 0)
+              entry_survived_to_issue++;
+            else
+              entry_replaced_before_issue++;
+          }
           // Allocate fresh entry
           entry.valid          = true;
           entry.ip             = ip;
-          entry.parent_cl_addr = pp.cl_addr;
+          entry.translated_vpn = translated_vpn;
+          entry.parent_pte_addr = pp->pte_addr;
           entry.child_cl_addr  = cl_addr;
           entry.confidence     = 0;
+          entry_birth_tick[idx] = access_tick;
+          entry_issued_prefetches[idx] = 0;
+          entry_allocations++;
         }
       }
 
       // Update pending parent: record this miss as the new "last seen at level L" for this IP
-      pp.valid   = true;
-      pp.ip      = ip;
-      pp.cl_addr = cl_addr;
-      pp.level   = translation_level;
+      update_pending_parent(ip, translated_vpn, address, translation_level);
 
       // --- Prediction ---
       // Only prefetch if this is not a leaf (level > 1): there is a child level below.
       if (translation_level > 1) {
-        const std::size_t idx = pred_index(ip, cl_addr);
+        const std::size_t idx = pred_index(ip, address, translated_vpn);
         const PredEntry& entry = table[idx];
-        if (entry.valid && entry.ip == ip && entry.parent_cl_addr == cl_addr
-            && entry.confidence >= conf_threshold)
+        if (entry.valid && entry.ip == ip && entry.translated_vpn == translated_vpn && entry.parent_pte_addr == address
+            && entry.confidence >= conf_threshold) {
           candidates.push_back(entry.child_cl_addr << offset_bits);
+          entry_issued_prefetches[idx] += 1;
+        }
       }
 
       return candidates;
+    }
+
+    void print_stats() const override
+    {
+      uint64_t live_entries = 0;
+      uint64_t live_entries_with_issue = 0;
+      for (std::size_t i = 0; i < table.size(); ++i) {
+        if (!table[i].valid)
+          continue;
+        live_entries++;
+        if (entry_issued_prefetches[i] > 0)
+          live_entries_with_issue++;
+      }
+
+      const double avg_replaced_lifetime =
+          (entry_replacements != 0) ? static_cast<double>(replaced_entry_lifetime_sum) / static_cast<double>(entry_replacements) : 0.0;
+
+      std::cout << "TXVC CHILD ENTRY-LIFETIME "
+                << "ALLOC:" << entry_allocations << " "
+                << "REPL:" << entry_replacements << " "
+                << "REPL_BEFORE_ISSUE:" << entry_replaced_before_issue << " "
+                << "REPL_AFTER_ISSUE:" << entry_survived_to_issue << " "
+                << "AVG_REPL_LIFETIME_TICKS:" << avg_replaced_lifetime << " "
+                << "LIVE:" << live_entries << " "
+                << "LIVE_WITH_ISSUE:" << live_entries_with_issue
+                << std::endl;
     }
 };
 
@@ -1788,16 +1984,23 @@ class CombinedPrefetcher : public PrefetchPolicy
       sibling_pf.notify_useless();
     }
 
-    std::vector<uint64_t> get_prefetch_candidates(uint64_t address, std::size_t translation_level, uint64_t ip) override
+    std::vector<uint64_t> get_prefetch_candidates(uint64_t address, std::size_t translation_level, uint64_t ip, uint64_t translated_vpn) override
     {
       // Child first: cross-level prefetch (parent→child), only fires for level > 1
-      std::vector<uint64_t> child = child_pf.get_prefetch_candidates(address, translation_level, ip);
+      std::vector<uint64_t> child = child_pf.get_prefetch_candidates(address, translation_level, ip, translated_vpn);
       if (!child.empty()) return child;
       // Sibling: within-PT-page stride, fires at any level
-      std::vector<uint64_t> sblg = sibling_pf.get_prefetch_candidates(address, translation_level, ip);
+      std::vector<uint64_t> sblg = sibling_pf.get_prefetch_candidates(address, translation_level, ip, translated_vpn);
       if (!sblg.empty()) return sblg;
       // Fall back to global stride predictor
-      return stride_pf.get_prefetch_candidates(address, translation_level, ip);
+      return stride_pf.get_prefetch_candidates(address, translation_level, ip, translated_vpn);
+    }
+
+    void print_stats() const override
+    {
+      child_pf.print_stats();
+      sibling_pf.print_stats();
+      stride_pf.print_stats();
     }
 };
 
