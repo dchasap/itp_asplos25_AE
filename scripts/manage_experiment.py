@@ -24,157 +24,21 @@ except ImportError:
 
 
 
-default_enviromental_variables = { 
-	'ITP_INSTR_POS': "0", 
-	'ITP_DATA_POS': "2",
-	'ITP_MAX_LRU': "8", 
-	'MIN_EVICTION_POSITION': "4", 
-	'MIN_EVICTION_POSITION_L1D': "8", 
-	'MIN_EVICTION_POSITION_L2C': "4", 
-	'TLB_LOWER_STRESS_THRESHOLD': "1",
-	'TLB_UPPER_STRESS_THRESHOLD': "4", 
-	'INSTR_PAGE_SIZE_DIST': "0",
-	'DATA_PAGE_SIZE_DIST': "0",
-	'ENABLE_TXVC': "false",
-	'ENABLE_TXC': "false",
-	'TXVC_LATENCY': "0",
-	'TXVC_NUM_SET': "8",
-	'TXVC_NUM_WAY': "8",
-	'TXVC_SET_INDEXER': "default",
-	'TXVC_REP_POLICY': "lru",
-	'TXVC_REP_PTE_THRESHOLD': "0",
-	'TXVC_REP_EVICT_LEAF_NODES': "true",
-	'TXVC_REP_DECAY': '1',
-	'TXVC_REP_HALVE_PERIOD': '1000000',
-	'TXVC_REP_ALLOWED_FREQ_DELTA': "10",
-	'TXVC_REP_THRESHOLD': "0.5",
-	'TXVC_REP_WINDOW_SIZE': "1000",
-	'TXVC_REP_PC_RESET_INTERVAL': "1000000",
-	'TXVC_PACIPV_DEMAND_VECTOR_FILE': "srrip_vectors.ipv",
-	'TXVC_PACIPV_DEMAND_VECTOR_IDX': "0",
-	'TXVC_LFU_CNTR_BITS': "3",
-	'TXVC_INSTR_ONLY': "false",
-	'TXVC_DATA_ONLY': "false",
-	'TXVC_CACHE_FILTERING': "false",
-	'TXVC_CACHE_FILTER': "",
-	'TXVC_CACHE_LEVEL': "1",
-	'TXVC_PF_POLICY': "stride",
-	'TXVC_PF_TABLE_SIZE': "64",
-	'TXVC_PF_CONF_THRESHOLD': "2",
-	'TXVC_PF_MSHR_GATE_PCT': "50",
-	'TXVC_PF_SBLG_TABLE_SIZE': "128",
-	'TXVC_PF_SBLG_CONF_THRESHOLD': "2",
-	'TXVC_PF_SBLG_ACC_WINDOW': "32",
-	'TXVC_PF_SBLG_ACC_THRESHOLD': "20",
-	'TXVC_PF_SBLG_DEGREE': "1",
-	'TXVC_PF_CHILD_TABLE_SIZE': "256",
-	'TXVC_PF_CHILD_PENDING_SIZE': "64",
-	'TXVC_PF_CHILD_CONF_THRESHOLD': "2",
-	'TXVC_PREFETCH_FILL_TARGET': "txvc",
-	'TXVC_MISS_FILL_TARGET': "l2c",
-	'TXVC_DBPRED_CNTR_SZ': "3",
-	'TXVC_DBPRED_THRESHOLD': "0",
-	'TXVC_DBPRED_USE_BIAS': "false",
-	'TXVC_FILTER_CLEANUP_INTERVAL': "9999999999999999",
-	'TXVC_FILTER_TOP_N_FACTOR': "1.0",
-	'TXVC_MEMORY_TRACE_PATH': "./data",
-	'CACHE_FILTER_FREQ_THRESHOLD': "2",
-	'CACHE_FILTER_MEMORY_TRACE_PATH': './data',
-	'CACHE_FILTER_BLOOM_FILTER_SIZE': '1024',
-	'CACHE_FILTER_NUM_HASHES': '5',
-	'CACHE_FILTER_REUSE_DISTANCE_THRESHOLD': '1024',
-	'CACHE_FILTER_REUSE_MIN_SAMPLES': '2',
-	'CACHE_FILTER_REUSE_LONG_RATIO': '0.7',
-	'CACHE_FILTER_MEMORY_TRACE_PATH': './data',
-	'CACHE_FILTER_REUSE_PROFILE_LOG_PATH': './data/cache_filter_reuse_profile.log',
-	'CACHE_FILTER_REUSE_BYPASS_LOG_PATH': './data/cache_filter_reuse_bypass.log',
-	'REUSE_DIST_FILENAME_PREFIX': "reuse_dist",
-	'ACCESS_FREQ_STATS_FILENAME_PREFIX': "page_access_stats",
-	'SET_ACCESS_FILENAME_PREFIX': "set_access_stats"
-	}
+import scripts.params_registry as params_registry
 
-confnames_to_envars = {
-	'ooo_cpu.enable_txvc': 'ENABLE_TXVC',
-	'txvc.sets': 'TXVC_NUM_SET',
-	'txvc.ways': 'TXVC_NUM_WAY',
-	'txvc.set_indexer': 'TXVC_SET_INDEXER',
-	'txvc.replacement': 'TXVC_REP_POLICY',
-	'txvc.replacement_pte_threshold': 'TXVC_REP_PTE_THRESHOLD',
-	'txvc.replacement_evict_leaf_nodes': 'TXVC_REP_EVICT_LEAF_NODES',
-	'txvc.replacement_allowed_freq_delta': 'TXVC_REP_ALLOWED_FREQ_DELTA',
-	'txvc.replacement_decay': 'TXVC_REP_DECAY',
-	'txvc.halve_period': 'TXVC_REP_HALVE_PERIOD',
-	'txvc.replacement_threshold': 'TXVC_REP_THRESHOLD',
-	'txvc.replacement_window_size': 'TXVC_REP_WINDOW_SIZE',
-	'txvc.replacement_pc_reset_interval': 'TXVC_REP_PC_RESET_INTERVAL',
-	'txvc.pacipv_demand_vector_file': 'TXVC_PACIPV_DEMAND_VECTOR_FILE',
-	'txvc.pacipv_demand_vector_idx': 'TXVC_PACIPV_DEMAND_VECTOR_IDX',
-	'txvc.lfu_cntr_bits': 'TXVC_LFU_CNTR_BITS',
-	'txvc.instr_only': 'TXVC_INSTR_ONLY',
-	'txvc.data_only': 'TXVC_DATA_ONLY',
-	'txvc.cache_filtering': 'TXVC_CACHE_FILTERING',
-	'txvc.cache_filter': 'TXVC_CACHE_FILTER',
-	'txvc.cache_filter_reuse_distance_threshold': 'CACHE_FILTER_REUSE_DISTANCE_THRESHOLD',
-	'txvc.cache_filter_reuse_min_samples': 'CACHE_FILTER_REUSE_MIN_SAMPLES',
-	'txvc.cache_filter_reuse_long_ratio': 'CACHE_FILTER_REUSE_LONG_RATIO',
-	'txvc.cache_filter_memory_trace_path': 'CACHE_FILTER_MEMORY_TRACE_PATH',
-	'txvc.cache_filter_reuse_profile_log_path': 'CACHE_FILTER_REUSE_PROFILE_LOG_PATH',
-	'txvc.cache_filter_reuse_bypass_log_path': 'CACHE_FILTER_REUSE_BYPASS_LOG_PATH',
-	'txvc.level': 'TXVC_CACHE_LEVEL',
-	'txvc.pf_policy': 'TXVC_PF_POLICY',
-	'txvc.pf_mshr_gate_pct': 'TXVC_PF_MSHR_GATE_PCT',
-	'txvc.pf_stride_table_size': 'TXVC_PF_STRIDE_TABLE_SIZE',
-	'txvc.pf_stride_conf_threshold': 'TXVC_PF_STRIDE_CONF_THRESHOLD',
-	'txvc.pf_sblg_table_size': 'TXVC_PF_SBLG_TABLE_SIZE',
-	'txvc.pf_sblg_conf_threshold': 'TXVC_PF_SBLG_CONF_THRESHOLD',
-	'txvc.pf_sblg_acc_window': 'TXVC_PF_SBLG_ACC_WINDOW',
-	'txvc.pf_sblg_acc_threshold': 'TXVC_PF_SBLG_ACC_THRESHOLD',
-	'txvc.pf_sblg_degree': 'TXVC_PF_SBLG_DEGREE',
-	'txvc.pf_child_table_size': 'TXVC_PF_CHILD_TABLE_SIZE',
-	'txvc.pf_child_pending_size': 'TXVC_PF_CHILD_PENDING_SIZE',
-	'txvc.pf_child_conf_threshold': 'TXVC_PF_CHILD_CONF_THRESHOLD',
-	'txvc.prefetch_fill_target': 'TXVC_PREFETCH_FILL_TARGET',
-	'txvc.miss_fill_target': 'TXVC_MISS_FILL_TARGET',
-	'txvc.dbpred_use_bias': 'TXVC_DBPRED_USE_BIAS',
-	'txvc.dbpred_cntr_size': 'TXVC_DBPRED_CNTR_SZ',
-	'txvc.dbpred_threshold': 'TXVC_DBPRED_THRESHOLD',
-	'txvc.dbpred_use_bias': 'TXVC_DBPRED_USE_BIAS',
-	'txvc.filter_cleanup_interval': 'TXVC_FILTER_CLEANUP_INTERVAL',
-	'txvc.filter_top_n_factor': 'TXVC_FILTER_TOP_N_FACTOR',
-	'txvc.mem_trace_path': 'TXVC_MEMORY_TRACE_PATH',
-	'txvc.filter_frequency_threshold': 'CACHE_FILTER_FREQ_THRESHOLD',
-	'txvc.filter_size': 'CACHE_FILTER_BLOOM_FILTER_SIZE',
-	'txvc.filter_num_hashes': 'CACHE_FILTER_NUM_HASHES',
-	'txvc.filter_mem_trace_path':	"CACHE_FILTER_MEMORY_TRACE_PATH",
-	'tx.level': 'TX_SPLIT_CACHE_LEVEL',
-	'tx.sets': 'TX_NUM_SETS'
-}
+# Derived maps populated at runtime after registration
+default_enviromental_variables = None
+confnames_to_envars = None
+components = None
 
-components = ['ooo_cpu', 'itlb', 'dtlb', 'stlb', 'l1i', 'l1d', 'l2c', 'llc', 'tx', 'txvc']
+# CPU parameters (per-component json/env options)
+cpu_def_parameters = ['instruction_perfetcher']
+cpu_json_parameters = []
+cpu_env_parameters = None
 
-cpu_def_parameters = [ 'instruction_perfetcher' ]
-cpu_json_parameters = [] 
-cpu_env_parameters = [ 'enable_txvc' ]
-
-cache_json_parameters = [ 'sets', 'ways', 'prefetcher', 'replacement', 'force_hit' ]
-cache_env_parameters = [ 	'sets', 'ways', 'set_indexer', 'level',
-							'replacement', 'replacement_pte_threshold', 'replacement_evict_leaf_nodes', 
-							'replacement_allowed_freq_delta', 'replacement_decay', 'halve_period',
-							'replacement_threshold', 'replacement_window_size', 'replacement_pc_reset_interval',
-							'pacipv_demand_vector_file', 'pacipv_demand_vector_idx', 'lfu_cntr_bits',
-							'prefetch_fill_target', 'miss_fill_target', 'cache_filtering', 'cache_filter',
-							'cache_filter_reuse_distance_threshold', 'cache_filter_reuse_min_samples', 'cache_filter_reuse_long_ratio',
-							'cache_filter_memory_trace_path', 'cache_filter_reuse_profile_log_path', 'cache_filter_reuse_bypass_log_path',
-							'filter_mem_trace_path',
-							'pf_policy', 'pf_mshr_gate_pct',
-							'pf_stride_table_size', 'pf_stride_conf_threshold',
-							'pf_sblg_table_size', 'pf_sblg_conf_threshold', 'pf_sblg_acc_window', 'pf_sblg_acc_threshold', 'pf_sblg_degree',
-							'pf_child_table_size', 'pf_child_pending_size', 'pf_child_conf_threshold',
-							'dbpred_cntr_size', 'dbpred_threshold', 'dbpred_use_bias',
-							'filter_cleanup_interval', 'filter_top_n_factor', 'filter_frequency_threshold', 
-							'filter_size', 'filter_num_hashes',
-							'filter_mem_trace_path',
-							'data_only', 'instr_only' ]
+# Cache-like parameters (used for all cache components in the old code)
+cache_json_parameters = ['sets', 'ways', 'prefetcher', 'replacement', 'force_hit']
+cache_env_parameters = None
 
 
 def _split_simulations(value):
@@ -533,6 +397,18 @@ if __name__ == "__main__":
 	apply_cli_overrides(config, args.overrides)
 
 	config = conf_preprocessor.preprocess(config, args.config_file)
+
+	# Populate registry at runtime (registrations live in params_registry_data)
+	import scripts.params_registry_data as params_registry_data
+	params_registry_data.register_all()
+
+	# Generate the legacy structures from the single-source registry
+	global default_enviromental_variables, confnames_to_envars, components, cpu_env_parameters, cache_env_parameters
+	default_enviromental_variables = params_registry.generate_default_env()
+	confnames_to_envars = params_registry.generate_confnames_map()
+	components = params_registry.get_components()
+	cpu_env_parameters = params_registry.generate_param_names_for_component('ooo_cpu', 'env')
+	cache_env_parameters = params_registry.generate_common_cache_param_names()
 
 	if args.run_experiment or args.build_binaries:
 		prepare_experiment(config, args.build_binaries, args.run_experiment)
