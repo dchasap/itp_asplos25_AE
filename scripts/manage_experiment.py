@@ -24,7 +24,7 @@ except ImportError:
 
 
 
-import scripts.params_registry as params_registry
+import params_registry
 
 # Derived maps populated at runtime after registration
 default_enviromental_variables = None
@@ -399,11 +399,10 @@ if __name__ == "__main__":
 	config = conf_preprocessor.preprocess(config, args.config_file)
 
 	# Populate registry at runtime (registrations live in params_registry_data)
-	import scripts.params_registry_data as params_registry_data
+	import params_registry_data
 	params_registry_data.register_all()
 
 	# Generate the legacy structures from the single-source registry
-	global default_enviromental_variables, confnames_to_envars, components, cpu_env_parameters, cache_env_parameters
 	default_enviromental_variables = params_registry.generate_default_env()
 	confnames_to_envars = params_registry.generate_confnames_map()
 	components = params_registry.get_components()
