@@ -535,6 +535,10 @@ bool txvc_miss_fill_to_txvc()
 
 #if defined TRANSLATION_EXCLUSIVE_CACHE
 					if (handle_pkt.is_pte) {
+						if (enable_tx_victim_cache && tx_victim_cache && NAME.find(_CACHE_) != std::string::npos) {
+							const uint64_t translated_vpn = handle_pkt.v_address >> LOG2_PAGE_SIZE;
+							tx_victim_cache->observe_prefetch_access(handle_pkt.address, handle_pkt.translation_level, handle_pkt.ip, translated_vpn);
+						}
 						// we should also store the evicting address to last_pte_entry in the set (if it's pte)
 #if defined SPLIT_STLB
 						uint64_t set_idx = get_set_index(handle_pkt.address, fill_mshr.is_instr);
@@ -906,9 +910,14 @@ bool txvc_miss_fill_to_txvc()
 							if (handle_pkt.type != PREFETCH && !entry_found) {
 								for (uint64_t txvc_prefetch_addr : txvc_prefetch_candidates) {
 									if (txvc_prefetch_addr == 0) continue;
-									if (get_occupancy(0, txvc_prefetch_addr) * 100 >= get_size(0, txvc_prefetch_addr) * tx_victim_cache->get_pf_mshr_gate_pct())
+									if (get_occupancy(0, txvc_prefetch_addr) * 100 >= get_size(0, txvc_prefetch_addr) * tx_victim_cache->get_pf_mshr_gate_pct()) {
+										tx_victim_cache->notify_pf_mshr_blocked();
 										break; // MSHR pressure — stop issuing further candidates
-									prefetch_pte_line(txvc_prefetch_addr, true, handle_pkt.translation_level);
+									}
+									if (!prefetch_pte_line(txvc_prefetch_addr, true, handle_pkt.translation_level)) {
+										tx_victim_cache->notify_pf_enqueue_failed();
+										break;
+									}
 								}
 							}
 							//copy_pkt.data = _entry.data;

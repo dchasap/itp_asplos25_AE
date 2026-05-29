@@ -43,6 +43,7 @@ def register_all():
     r.register_parameter('TXVC_PF_CHILD_TABLE_SIZE', 'txvc.pf_child_table_size', components=['txvc'], category='env', ptype='int', default='256')
     r.register_parameter('TXVC_PF_CHILD_PENDING_SIZE', 'txvc.pf_child_pending_size', components=['txvc'], category='env', ptype='int', default='64')
     r.register_parameter('TXVC_PF_CHILD_CONF_THRESHOLD', 'txvc.pf_child_conf_threshold', components=['txvc'], category='env', ptype='int', default='2')
+    r.register_parameter('TXVC_PF_CHILD_TRAIN_ON_HIT', 'txvc.pf_child_train_on_hit', components=['txvc'], category='env', ptype='int', default='1')
     r.register_parameter('TXVC_PREFETCH_FILL_TARGET', 'txvc.prefetch_fill_target', components=['txvc'], category='env', ptype='str', default='txvc')
     r.register_parameter('TXVC_MISS_FILL_TARGET', 'txvc.miss_fill_target', components=['txvc'], category='env', ptype='str', default='l2c')
     r.register_parameter('TXVC_DBPRED_CNTR_SZ', 'txvc.dbpred_cntr_size', components=['txvc'], category='env', ptype='int', default='3')

@@ -1237,12 +1237,18 @@ class PrefetchPolicy
     // translated_vpn: virtual page number of the translation being serviced.
     virtual std::vector<uint64_t> get_prefetch_candidates(uint64_t address, std::size_t translation_level, uint64_t ip, uint64_t translated_vpn) = 0;
 
+    // Optional training-only observation path. Policies can update internal
+    // state without returning candidates or accounting a prediction attempt.
+    virtual void observe_access(uint64_t /*address*/, std::size_t /*translation_level*/, uint64_t /*ip*/, uint64_t /*translated_vpn*/) {}
+
     // Fraction (0-100) of the MSHR that must be free before a prefetch is issued.
     virtual uint32_t get_mshr_gate_pct() const = 0;
 
     // Feedback from the cache: called when a prefetch was useful (demand hit) or useless (evicted).
     virtual void notify_useful()  {}
     virtual void notify_useless() {}
+    virtual void notify_mshr_gate_blocked() {}
+    virtual void notify_enqueue_failed() {}
 
     // Optional policy-specific stats emitted by the owner cache wrapper.
     virtual void print_stats() const {}
@@ -1699,6 +1705,7 @@ class SiblingPrefetcher : public PrefetchPolicy
  *   TXVC_PF_CHILD_TABLE_SIZE     - prediction table entries (default 256)
  *   TXVC_PF_CHILD_PENDING_SIZE   - pending-parent table entries (default 64)
  *   TXVC_PF_CHILD_CONF_THRESHOLD - min confidence 0-3 to issue (default 2)
+ *   TXVC_PF_CHILD_TRAIN_ON_HIT   - 1: train on hits via observe_access, 0: disable (default 1)
  *   TXVC_PF_MSHR_GATE_PCT        - shared with other prefetchers (default 50)
  *************/
 class ChildPrefetcher : public PrefetchPolicy
@@ -1726,6 +1733,7 @@ class ChildPrefetcher : public PrefetchPolicy
     std::size_t              table_size;
     std::size_t              pending_size;
     uint8_t                  conf_threshold;
+    bool                     train_on_hit;
     uint32_t                 mshr_gate_pct;
     uint64_t                 offset_bits;
     std::vector<PredEntry>   table;
@@ -1742,6 +1750,19 @@ class ChildPrefetcher : public PrefetchPolicy
     // Side metadata keyed like table entries (not part of prediction behavior).
     std::vector<uint64_t>    entry_birth_tick;
     std::vector<uint32_t>    entry_issued_prefetches;
+
+    // Drop/block reason counters to diagnose why Child emits few prefetches.
+    uint64_t                 reason_level0_skipped = 0;
+    uint64_t                 reason_no_pending_parent = 0;
+    uint64_t                 reason_pending_overwrite_collision = 0;
+    uint64_t                 reason_training_replaced_mismatch = 0;
+    uint64_t                 reason_leaf_level_no_predict = 0;
+    uint64_t                 reason_predict_entry_invalid = 0;
+    uint64_t                 reason_predict_tag_mismatch = 0;
+    uint64_t                 reason_predict_conf_blocked = 0;
+    uint64_t                 reason_predict_issued = 0;
+    uint64_t                 reason_issue_mshr_blocked = 0;
+    uint64_t                 reason_issue_enqueue_failed = 0;
 
     std::size_t pred_index(uint64_t ip, uint64_t parent_pte_addr, uint64_t translated_vpn) const
     {
@@ -1771,6 +1792,9 @@ class ChildPrefetcher : public PrefetchPolicy
     {
       const std::size_t set = pending_set_index(ip, translated_vpn, level);
       PendingParent& victim = pending[set];
+
+      if (victim.valid && !(victim.ip == ip && victim.translated_vpn == translated_vpn && victim.level == level))
+        reason_pending_overwrite_collision++;
 
       victim.valid = true;
       victim.ip = ip;
@@ -1810,6 +1834,12 @@ class ChildPrefetcher : public PrefetchPolicy
         conf_threshold = 2;
       }
 
+      if (auto e = champsim::EnvVar<int>::get("TXVC_PF_CHILD_TRAIN_ON_HIT")) {
+        train_on_hit = (*e != 0);
+      } else {
+        train_on_hit = true;
+      }
+
       if (auto e = champsim::EnvVar<int>::get("TXVC_PF_MSHR_GATE_PCT")) {
         int v = *e;
         mshr_gate_pct = (v > 0 && v <= 100) ? static_cast<uint32_t>(v) : 50u;
@@ -1825,16 +1855,23 @@ class ChildPrefetcher : public PrefetchPolicy
       std::cout << "TXVC ChildPrefetcher: table_size=" << table_size
                 << " pending_size=" << pending_size
                 << " conf_threshold=" << static_cast<int>(conf_threshold)
+                << " train_on_hit=" << (train_on_hit ? 1 : 0)
                 << " mshr_gate_pct=" << mshr_gate_pct << std::endl;
     }
 
     uint32_t get_mshr_gate_pct() const override { return mshr_gate_pct; }
+    void notify_mshr_gate_blocked() override { reason_issue_mshr_blocked++; }
+    void notify_enqueue_failed() override { reason_issue_enqueue_failed++; }
 
-    std::vector<uint64_t> get_prefetch_candidates(uint64_t address, std::size_t translation_level, uint64_t ip, uint64_t translated_vpn) override
+  private:
+    std::vector<uint64_t> process_access(uint64_t address, std::size_t translation_level, uint64_t ip, uint64_t translated_vpn, bool allow_prediction)
     {
       access_tick++;
       // Only operates on PTE-path accesses (level > 0)
-      if (translation_level == 0) return {};
+      if (translation_level == 0) {
+        reason_level0_skipped++;
+        return {};
+      }
 
       const uint64_t cl_addr = address >> offset_bits;
       std::vector<uint64_t> candidates;
@@ -1857,6 +1894,7 @@ class ChildPrefetcher : public PrefetchPolicy
           }
         } else {
           if (entry.valid) {
+            reason_training_replaced_mismatch++;
             entry_replacements++;
             replaced_entry_lifetime_sum += (access_tick - entry_birth_tick[idx]);
             if (entry_issued_prefetches[idx] > 0)
@@ -1875,24 +1913,50 @@ class ChildPrefetcher : public PrefetchPolicy
           entry_issued_prefetches[idx] = 0;
           entry_allocations++;
         }
+      } else {
+        reason_no_pending_parent++;
       }
 
       // Update pending parent: record this miss as the new "last seen at level L" for this IP
       update_pending_parent(ip, translated_vpn, address, translation_level);
+
+      if (!allow_prediction)
+        return {};
 
       // --- Prediction ---
       // Only prefetch if this is not a leaf (level > 1): there is a child level below.
       if (translation_level > 1) {
         const std::size_t idx = pred_index(ip, address, translated_vpn);
         const PredEntry& entry = table[idx];
-        if (entry.valid && entry.ip == ip && entry.translated_vpn == translated_vpn && entry.parent_pte_addr == address
-            && entry.confidence >= conf_threshold) {
+        if (!entry.valid) {
+          reason_predict_entry_invalid++;
+        } else if (!(entry.ip == ip && entry.translated_vpn == translated_vpn && entry.parent_pte_addr == address)) {
+          reason_predict_tag_mismatch++;
+        } else if (entry.confidence < conf_threshold) {
+          reason_predict_conf_blocked++;
+        } else {
           candidates.push_back(entry.child_cl_addr << offset_bits);
           entry_issued_prefetches[idx] += 1;
+          reason_predict_issued++;
         }
+      } else {
+        reason_leaf_level_no_predict++;
       }
 
       return candidates;
+    }
+
+  public:
+    void observe_access(uint64_t address, std::size_t translation_level, uint64_t ip, uint64_t translated_vpn) override
+    {
+      if (!train_on_hit)
+        return;
+      process_access(address, translation_level, ip, translated_vpn, false);
+    }
+
+    std::vector<uint64_t> get_prefetch_candidates(uint64_t address, std::size_t translation_level, uint64_t ip, uint64_t translated_vpn) override
+    {
+      return process_access(address, translation_level, ip, translated_vpn, true);
     }
 
     void print_stats() const override
@@ -1918,6 +1982,20 @@ class ChildPrefetcher : public PrefetchPolicy
                 << "AVG_REPL_LIFETIME_TICKS:" << avg_replaced_lifetime << " "
                 << "LIVE:" << live_entries << " "
                 << "LIVE_WITH_ISSUE:" << live_entries_with_issue
+                << std::endl;
+
+            std::cout << "TXVC CHILD DROP-REASONS "
+                << "LEVEL0_SKIP:" << reason_level0_skipped << " "
+                << "NO_PENDING_PARENT:" << reason_no_pending_parent << " "
+                << "PENDING_OVERWRITE_COLLISION:" << reason_pending_overwrite_collision << " "
+                << "TRAIN_REPLACE_MISMATCH:" << reason_training_replaced_mismatch << " "
+                << "LEAF_NO_PREDICT:" << reason_leaf_level_no_predict << " "
+                << "PRED_INVALID:" << reason_predict_entry_invalid << " "
+                << "PRED_TAG_MISMATCH:" << reason_predict_tag_mismatch << " "
+                << "PRED_CONF_BLOCKED:" << reason_predict_conf_blocked << " "
+                << "PRED_ISSUED:" << reason_predict_issued << " "
+                << "ISSUE_MSHR_BLOCKED:" << reason_issue_mshr_blocked << " "
+                << "ISSUE_ENQUEUE_FAILED:" << reason_issue_enqueue_failed
                 << std::endl;
     }
 };

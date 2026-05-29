@@ -185,6 +185,25 @@ def parse_champsim_stats(input_file, output_file):
             if (_line != None):
                 TXVC_ENTRY_LIFETIME_STATS[stat] = re.findall(r'[\d\.]+', _line.group())[0]
 
+    # Get TXVC CHILD drop-reason stats
+    TXVC_CHILD_DROP_REASON_STATS = {}
+    TXVC_CHILD_DROP_REASON_KEYS = [
+        'LEVEL0_SKIP', 'NO_PENDING_PARENT', 'PENDING_OVERWRITE_COLLISION',
+        'TRAIN_REPLACE_MISMATCH', 'LEAF_NO_PREDICT', 'PRED_INVALID',
+        'PRED_TAG_MISMATCH', 'PRED_CONF_BLOCKED', 'PRED_ISSUED',
+        'ISSUE_MSHR_BLOCKED', 'ISSUE_ENQUEUE_FAILED'
+    ]
+    for key in TXVC_CHILD_DROP_REASON_KEYS:
+        TXVC_CHILD_DROP_REASON_STATS[key] = 'N/A'
+
+    line = re.search(r'TXVC\s+CHILD\s+DROP-REASONS.*', data)
+    if (line != None):
+        line = line.group()
+        for key in TXVC_CHILD_DROP_REASON_KEYS:
+            _line = re.search(key + r':\s*\d+', line)
+            if (_line != None):
+                TXVC_CHILD_DROP_REASON_STATS[key] = re.findall(r'\d+', _line.group())[0]
+
     # Get IPC
     lines = re.findall(r'CPU 0 cumulative IPC:\s+\d+[\.]?\d*', data)
     ipc = lines[len(lines)-1].split()[4]
@@ -224,6 +243,9 @@ def parse_champsim_stats(input_file, output_file):
     for stat in TXVC_ENTRY_STATS:
         header.append('TXVC_PREFETCHER_ENTRY_' + stat)
 
+    for key in TXVC_CHILD_DROP_REASON_KEYS:
+        header.append('TXVC_CHILD_DROP_' + key)
+
     header.append('IPC')
     header.append('INSTRUCTIONS')
     header.append('CYCLES')
@@ -251,6 +273,9 @@ def parse_champsim_stats(input_file, output_file):
 
             for stat in TXVC_ENTRY_STATS:
                 new_row.append(TXVC_ENTRY_LIFETIME_STATS[stat])
+
+            for key in TXVC_CHILD_DROP_REASON_KEYS:
+                new_row.append(TXVC_CHILD_DROP_REASON_STATS[key])
 
             new_row.append(ipc)
             new_row.append(instructions)

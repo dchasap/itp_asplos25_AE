@@ -708,9 +708,24 @@ public:
         return prefetchPolicy->get_prefetch_candidates(address, translation_level, ip, translated_vpn);
       }
 
+      void observe_prefetch_access(uint64_t address, std::size_t translation_level, uint64_t ip, uint64_t translated_vpn)
+      {
+        prefetchPolicy->observe_access(address, translation_level, ip, translated_vpn);
+      }
+
       uint32_t get_pf_mshr_gate_pct() const
       {
         return prefetchPolicy->get_mshr_gate_pct();
+      }
+
+      void notify_pf_mshr_blocked()
+      {
+        prefetchPolicy->notify_mshr_gate_blocked();
+      }
+
+      void notify_pf_enqueue_failed()
+      {
+        prefetchPolicy->notify_enqueue_failed();
       }
 
 
