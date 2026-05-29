@@ -17,8 +17,10 @@
 #ifndef CACHE_H
 #define CACHE_H
 
+#include <algorithm>
 #include <array>
 #include <bitset>
+#include <unordered_map>
 #include <cassert>
 #include <deque>
 #include <functional>
@@ -928,6 +930,88 @@ public:
   VICTIM_CACHE* tx_victim_cache;
 #endif
 
+#if defined PREFETCH_BUFFER
+  // -------------------------------------------------------------------
+  // PREFETCH_BUFFER: unlimited map-based buffer that holds prefetched
+  // lines.  Key = address >> OFFSET_BITS (cache-line granularity) so
+  // there are no collisions — every distinct cache line has its own slot.
+  // Enabled at runtime by setting PF_BUFFER_CACHE to any substring of
+  // the target cache NAME (e.g. "L2C" matches "cpu0_L2C").
+  // -------------------------------------------------------------------
+  class PREFETCH_BUFFER {
+  public:
+    struct PBEntry {
+      uint64_t data         = 0;
+      uint64_t insert_cycle = 0;
+      uint32_t pf_metadata  = 0;
+      uint8_t  type         = 0;
+#if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT || defined TRANSLATION_EXCLUSIVE_CACHE
+      bool     is_pte       = false;
+      bool     is_instr     = false;
+      uint8_t  pte_level    = 0;
+#endif
+    };
+
+  private:
+    uint32_t offset_bits;
+    std::unordered_map<uint64_t, PBEntry> entries; // key = address >> offset_bits
+
+    uint64_t stat_inserts     = 0;
+    uint64_t stat_demand_hits = 0;
+
+    uint64_t make_key(uint64_t address) const { return address >> offset_bits; }
+
+  public:
+    explicit PREFETCH_BUFFER(uint32_t _offset_bits) : offset_bits(_offset_bits)
+    {
+      std::cout << "PREFETCH_BUFFER: map-based (unbounded, collision-free)" << std::endl;
+    }
+
+    void insert(const PACKET& pkt, uint64_t cycle)
+    {
+      auto& e       = entries[make_key(pkt.address)]; // insert or overwrite
+      e.data         = pkt.data;
+      e.insert_cycle = cycle;
+      e.pf_metadata  = pkt.pf_metadata;
+      e.type         = pkt.type;
+#if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT || defined TRANSLATION_EXCLUSIVE_CACHE
+      e.is_pte       = pkt.is_pte;
+      e.is_instr     = pkt.is_instr;
+      e.pte_level    = static_cast<uint8_t>(pkt.translation_level);
+#endif
+      stat_inserts++;
+    }
+
+    PBEntry* lookup(uint64_t address)
+    {
+      auto it = entries.find(make_key(address));
+      if (it != entries.end()) {
+        stat_demand_hits++;
+        return &it->second;
+      }
+      return nullptr;
+    }
+
+    void invalidate(uint64_t address) { entries.erase(make_key(address)); }
+
+    void print_stats() const
+    {
+      const double hit_rate = (stat_inserts > 0)
+                                ? 100.0 * static_cast<double>(stat_demand_hits) / static_cast<double>(stat_inserts)
+                                : 0.0;
+      std::cout << "PREFETCH_BUFFER STATS"
+                << " INSERTS:" << stat_inserts
+                << " DEMAND_HITS:" << stat_demand_hits
+                << " HIT_RATE(%):" << hit_rate
+                << " SIZE_AT_END:" << entries.size()
+                << std::endl;
+    }
+  };
+
+  PREFETCH_BUFFER* pf_buffer        = nullptr;
+  bool             enable_pf_buffer = false;
+#endif // PREFETCH_BUFFER
+
   // functions
   bool add_rq(const PACKET& packet) override final;
   bool add_wq(const PACKET& packet) override final;
@@ -1215,6 +1299,20 @@ public:
 																						false, enable_reuseDistMon);
 #endif
   
+#if defined PREFETCH_BUFFER
+    // PF_BUFFER_CACHE: substring matched against NAME to select the target
+    // cache.  "L2C" matches "cpu0_L2C", "LLC" matches "LLC", etc.
+    // Case-sensitive. If unset, no buffer is created for any cache.
+    if (auto v = champsim::EnvVar<std::string>::get("PF_BUFFER_CACHE")) {
+      const std::string& pfb_cache_name = *v;
+      if (!pfb_cache_name.empty() && NAME.find(pfb_cache_name) != std::string::npos) {
+        enable_pf_buffer = true;
+        std::cout << NAME << " enabling PREFETCH_BUFFER (matched \"" << pfb_cache_name << "\")" << std::endl;
+        pf_buffer = new PREFETCH_BUFFER(OFFSET_BITS);
+      }
+    }
+#endif // PREFETCH_BUFFER
+
     // other debugging and stats 
     touched_indices.reserve(NUM_SET);
     for (uint32_t i = 0; i < NUM_SET; i++) {

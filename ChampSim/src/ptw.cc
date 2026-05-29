@@ -107,6 +107,7 @@ bool PageTableWalker::step_translation(uint64_t addr, std::size_t transl_level, 
   fwd_pkt.type = TRANSLATION;
   fwd_pkt.to_return = {this};
   fwd_pkt.translation_level = transl_level;
+  fwd_pkt.pf_metadata = static_cast<uint32_t>(transl_level); // encode level for standalone PTE prefetchers
 
 #if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT
 	fwd_pkt.is_pte = true;

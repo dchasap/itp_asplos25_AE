@@ -37,7 +37,7 @@ cpu_json_parameters = []
 cpu_env_parameters = None
 
 # Cache-like parameters (used for all cache components in the old code)
-cache_json_parameters = ['sets', 'ways', 'prefetcher', 'replacement', 'force_hit']
+cache_json_parameters = ['sets', 'ways', 'prefetcher', 'prefetch_activate', 'replacement', 'force_hit']
 cache_env_parameters = None
 
 

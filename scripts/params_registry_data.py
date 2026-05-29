@@ -51,7 +51,7 @@ def register_all():
     r.register_parameter('TXVC_DBPRED_USE_BIAS', 'txvc.dbpred_use_bias', components=['txvc'], category='env', ptype='bool', default='false')
     r.register_parameter('TXVC_FILTER_CLEANUP_INTERVAL', 'txvc.filter_cleanup_interval', components=['txvc'], category='env', ptype='int', default='9999999999999999')
     r.register_parameter('TXVC_FILTER_TOP_N_FACTOR', 'txvc.filter_top_n_factor', components=['txvc'], category='env', ptype='float', default='1.0')
-    r.register_parameter('TXVC_MEMORY_TRACE_PATH', 'txvc.mem_trace_path', components=['txvc'], category='env', ptype='str', default='./data')
+    r.register_parameter('TXVC_MEMORY_TRACE_PATH', 'txvc.mem_trace_path', components=['txvc'], category='env', ptype='str', default='./data') 
 
     # cache filter / reuse
     r.register_parameter('CACHE_FILTER_FREQ_THRESHOLD', 'txvc.filter_frequency_threshold', components=['txvc'], category='env', ptype='int', default='2')
@@ -75,6 +75,11 @@ def register_all():
     r.register_parameter('TLB_UPPER_STRESS_THRESHOLD', None, components=['ooo_cpu'], category='env', ptype='int', default='4')
     r.register_parameter('INSTR_PAGE_SIZE_DIST', None, components=['ooo_cpu'], category='env', ptype='int', default='0')
     r.register_parameter('DATA_PAGE_SIZE_DIST', None, components=['ooo_cpu'], category='env', ptype='int', default='0')
+
+    # Prefetch Buffer (compile flag: -DPREFETCH_BUFFER)
+    # PF_BUFFER_CACHE: substring of the target cache NAME (e.g. "L2C" matches "cpu0_L2C").
+    # Case-sensitive. If unset (None), no prefetch buffer is created for any cache.
+    r.register_parameter('PF_BUFFER_CACHE', 'pf_buffer.cache', components=['l1d', 'l2c', 'llc'], category='env', ptype='str', default=None)
 
     # other tx/tvc defaults
     r.register_parameter('TXVC_LATENCY', None, components=['txvc'], category='env', ptype='int', default='0')

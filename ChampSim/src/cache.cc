@@ -106,6 +106,20 @@ bool txvc_miss_fill_to_txvc()
 					}
 #endif
 
+	#if defined PREFETCH_BUFFER
+					// PREFETCH_BUFFER: redirect prefetch fills into the buffer so they do
+					// not pollute the main cache.
+					if (enable_pf_buffer && pf_buffer && fill_mshr.prefetch_from_this) {
+						pf_buffer->insert(fill_mshr, current_cycle);
+						sim_stats.back().pf_fill++;
+						sim_stats.back().total_miss_latency += current_cycle - (fill_mshr.cycle_enqueued + 1);
+						auto copy{fill_mshr};
+						for (auto ret : copy.to_return)
+							ret->return_data(copy);
+						return true;
+					}
+	#endif // PREFETCH_BUFFER
+
 					// find victim
 #if defined SPLIT_STLB
 					auto [set_begin, set_end] = get_set_span(fill_mshr.address, fill_mshr.is_instr);
@@ -840,6 +854,34 @@ bool txvc_miss_fill_to_txvc()
 							}
 						}
 #endif // MULTIPLE_PAGE_SIZE
+
+	#if defined PREFETCH_BUFFER
+						// PREFETCH_BUFFER: check if a previously prefetched line is waiting
+						// in the buffer. If so, serve the demand miss from there.
+						if (enable_pf_buffer && pf_buffer) {
+							if (auto* pb_entry = pf_buffer->lookup(handle_pkt.address)) {
+								sim_stats.back().pf_useful++;
+								sim_stats.back().hits[handle_pkt.type][handle_pkt.cpu]++;
+								// Serve the requester immediately
+								auto copy{handle_pkt};
+								copy.data        = pb_entry->data;
+								copy.pf_metadata = metadata_thru;
+								for (auto ret : copy.to_return)
+									ret->return_data(copy);
+								// Also install the line in the main cache so future
+								// accesses hit there directly (prefetch_from_this=false
+								// prevents the fill from being re-routed to this buffer).
+								auto fill_pkt{handle_pkt};
+								fill_pkt.data              = pb_entry->data;
+								fill_pkt.pf_metadata       = pb_entry->pf_metadata;
+								fill_pkt.prefetch_from_this = false;
+								fill_pkt.to_return.clear();
+								handle_fill(fill_pkt);
+								pf_buffer->invalidate(handle_pkt.address);
+								return true;
+							}
+						}
+	#endif // PREFETCH_BUFFER
 
 						sim_stats.back().misses[handle_pkt.type][handle_pkt.cpu]++;
 

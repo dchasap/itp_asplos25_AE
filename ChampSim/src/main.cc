@@ -243,6 +243,15 @@ int main(int argc, char** argv)
   #endif
 #endif
 
+#if defined PREFETCH_BUFFER
+  for (CACHE& cache : caches) {
+    if (cache.enable_pf_buffer && cache.pf_buffer) {
+      std::cout << cache.NAME << " ";
+      cache.pf_buffer->print_stats();
+    }
+  }
+#endif // PREFETCH_BUFFER
+
   for (CACHE& cache : caches)
     cache.impl_prefetcher_final_stats();
 
