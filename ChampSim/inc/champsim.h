@@ -37,6 +37,7 @@
 #define ENABLE_TRANSLATION_AWARE_REPLACEMENT
 #define ENABLE_FDIP
 //#define _CACHE_ "L1D"
+#define PREFETCH_BUFFER
 
 
 #define TRACK_BRANCH_HISTORY // needed for chirp

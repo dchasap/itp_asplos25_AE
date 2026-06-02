@@ -938,7 +938,7 @@ public:
   // Enabled at runtime by setting PF_BUFFER_CACHE to any substring of
   // the target cache NAME (e.g. "L2C" matches "cpu0_L2C").
   // -------------------------------------------------------------------
-  class PREFETCH_BUFFER {
+  class PrefetchBuffer {
   public:
     struct PBEntry {
       uint64_t data         = 0;
@@ -962,7 +962,7 @@ public:
     uint64_t make_key(uint64_t address) const { return address >> offset_bits; }
 
   public:
-    explicit PREFETCH_BUFFER(uint32_t _offset_bits) : offset_bits(_offset_bits)
+    explicit PrefetchBuffer(uint32_t _offset_bits) : offset_bits(_offset_bits)
     {
       std::cout << "PREFETCH_BUFFER: map-based (unbounded, collision-free)" << std::endl;
     }
@@ -1008,7 +1008,7 @@ public:
     }
   };
 
-  PREFETCH_BUFFER* pf_buffer        = nullptr;
+  PrefetchBuffer* pf_buffer         = nullptr;
   bool             enable_pf_buffer = false;
 #endif // PREFETCH_BUFFER
 
@@ -1308,7 +1308,7 @@ public:
       if (!pfb_cache_name.empty() && NAME.find(pfb_cache_name) != std::string::npos) {
         enable_pf_buffer = true;
         std::cout << NAME << " enabling PREFETCH_BUFFER (matched \"" << pfb_cache_name << "\")" << std::endl;
-        pf_buffer = new PREFETCH_BUFFER(OFFSET_BITS);
+        pf_buffer = new PrefetchBuffer(OFFSET_BITS);
       }
     }
 #endif // PREFETCH_BUFFER

@@ -81,6 +81,22 @@ def register_all():
     # Case-sensitive. If unset (None), no prefetch buffer is created for any cache.
     r.register_parameter('PF_BUFFER_CACHE', 'pf_buffer.cache', components=['l1d', 'l2c', 'llc'], category='env', ptype='str', default=None)
 
+    # Standalone page-table prefetchers attached as normal cache prefetchers.
+    # Register per cache-like component so config keys like l2c.pf_child_table_size
+    # map cleanly through the common-cache parameter path.
+    for comp in ['l1d', 'l2c', 'llc']:
+        r.register_parameter('PF_MSHR_GATE_PCT', f'{comp}.pf_mshr_gate_pct', components=[comp], category='env', ptype='int', default='50')
+        r.register_parameter('PF_SBLG_TABLE_SIZE', f'{comp}.pf_sblg_table_size', components=[comp], category='env', ptype='int', default='128')
+        r.register_parameter('PF_SBLG_CONF_THRESHOLD', f'{comp}.pf_sblg_conf_threshold', components=[comp], category='env', ptype='int', default='2')
+        r.register_parameter('PF_SBLG_ACC_WINDOW', f'{comp}.pf_sblg_acc_window', components=[comp], category='env', ptype='int', default='32')
+        r.register_parameter('PF_SBLG_ACC_THRESHOLD', f'{comp}.pf_sblg_acc_threshold', components=[comp], category='env', ptype='int', default='20')
+        r.register_parameter('PF_SBLG_DEGREE', f'{comp}.pf_sblg_degree', components=[comp], category='env', ptype='int', default='1')
+        r.register_parameter('PF_CHILD_TABLE_SIZE', f'{comp}.pf_child_table_size', components=[comp], category='env', ptype='int', default='256')
+        r.register_parameter('PF_CHILD_PENDING_SIZE', f'{comp}.pf_child_pending_size', components=[comp], category='env', ptype='int', default='64')
+        r.register_parameter('PF_CHILD_CONF_THRESHOLD', f'{comp}.pf_child_conf_threshold', components=[comp], category='env', ptype='int', default='2')
+        r.register_parameter('PF_CHILD_TRAIN_ON_HIT', f'{comp}.pf_child_train_on_hit', components=[comp], category='env', ptype='int', default='1')
+        r.register_parameter('PF_CHILD_ISSUE_ON_HIT', f'{comp}.pf_child_issue_on_hit', components=[comp], category='env', ptype='int', default='0')
+
     # other tx/tvc defaults
     r.register_parameter('TXVC_LATENCY', None, components=['txvc'], category='env', ptype='int', default='0')
     r.register_parameter('TXVC_REP_DECAY', None, components=['txvc'], category='env', ptype='int', default='1')
