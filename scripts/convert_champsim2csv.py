@@ -20,8 +20,7 @@ def parse_champsim_stats(input_file, output_file):
     OPERATIONS = ['TOTAL', 'LOAD', 'RFO', 'PREFETCH', 'WRITEBACK', 'TRANSLATION']
     STATS = [   'ACCESS', 'HIT', 'MISS', 'dACCESS', 'dHIT', 'dMISS', 'iACCESS', 'iHIT', 'iMISS', 
                 'dtHIT', 'dtMISS', 'itHIT', 'itMISS', 'itACCESS', 'dtACCESS',
-                'REQUESTED', 'ISSUED', 'USEFUL', 'USELESS',
-                'TXVC_PTE_REQUESTED', 'TXVC_PTE_ISSUED', 'TXVC_PTE_FILL', 'TXVC_PTE_USEFUL', 'TXVC_PTE_USELESS']
+                'REQUESTED', 'ISSUED', 'USEFUL', 'USELESS']
 
     CACHE_STATS = {}
     for cache in CACHES:
@@ -135,12 +134,43 @@ def parse_champsim_stats(input_file, output_file):
     header.append('PAGE_CROSS_HITS')
     header.append('PAGE_CROSS_MISSES')
 
+    # Unified Prefetcher drop-reason keys (union of child & sibling keys)
+    PF_DROP_REASON_KEYS = [
+        'LEVEL0_SKIP', 'NO_PENDING_PARENT', 'PENDING_OVERWRITE_COLLISION',
+        'TRAIN_REPLACE_MISMATCH', 'LEAF_NO_PREDICT', 'UC_DISABLED',
+        'PRED_INVALID', 'PRED_TAG_MISMATCH', 'PRED_CONF_BLOCKED', 'PRED_ZERO_DELTA',
+        'PRED_ISSUED', 'ISSUE_MSHR_BLOCKED', 'ISSUE_ENQUEUE_FAILED'
+    ]
+
+    # Add unified PF_DROP_<KEY> columns
+    for key in PF_DROP_REASON_KEYS:
+        header.append('PF_DROP_' + key)
+
     header.append('IPC')
     header.append('INSTRUCTIONS')
     header.append('CYCLES')
 
     #print(header)
     writer.writerow(header)
+    # Parse drop-reason stats from raw output (collect all key:number pairs
+    # from any prefetcher lines and aggregate). If a key is never seen, it
+    # will be exported as 'N/A'.
+    PF_DROP_REASON_STATS = {}
+    PF_DROP_SEEN = {}
+    for key in PF_DROP_REASON_KEYS:
+        PF_DROP_REASON_STATS[key] = 0
+        PF_DROP_SEEN[key] = False
+
+    # Find all drop-reasons lines from prefetcher output; match any single
+    # token after 'PF' so we don't need to special-case CHILD/SBLG names.
+    matches = re.findall(r'PF\s+DROP-REASONS.*', data)
+    for m in matches:
+        pairs = re.findall(r'([A-Z0-9_]+):(\d+)', m)
+        for k, v in pairs:
+            if k in PF_DROP_REASON_STATS:
+                PF_DROP_REASON_STATS[k] += int(v)
+                PF_DROP_SEEN[k] = True
+
     for cache in CACHE_STATS:
         for op in CACHE_STATS[cache]:
             new_row = [cache, op]
@@ -153,6 +183,13 @@ def parse_champsim_stats(input_file, output_file):
             new_row.append(AVG_MISS_LATENCIES[cache]['AVERAGE_dMISS_LATENCY'])
             new_row.append(PAGE_CROSSING[cache]['PAGE_CROSS_HITS'])
             new_row.append(PAGE_CROSSING[cache]['PAGE_CROSS_MISSES'])
+            # Append unified PF_DROP_<KEY> values (aggregate across prefetchers)
+            for key in PF_DROP_REASON_KEYS:
+                if PF_DROP_SEEN.get(key, False):
+                    new_row.append(str(PF_DROP_REASON_STATS.get(key, 0)))
+                else:
+                    new_row.append('N/A')
+
             new_row.append(ipc)
             new_row.append(instructions)
             new_row.append(cycles)

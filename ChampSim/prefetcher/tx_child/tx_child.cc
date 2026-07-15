@@ -9,7 +9,7 @@
  * Requirements:
  *   - Add "prefetch_activate": "LOAD,PREFETCH,TRANSLATION" to the target cache
  *     in champsim_config.json so that TRANSLATION-type accesses reach this hook.
- *   - ptw.cc must encode translation_level into pf_metadata (lower 8 bits).
+ *   - ptw.cc must encode translation_level (lower 8 bits) and VPN (upper 24 bits) into pf_metadata.
  *
  * Env vars:
  *   PF_CHILD_TABLE_SIZE      - prediction table entries (default 256)
@@ -327,7 +327,7 @@ void CACHE::prefetcher_initialize()
 
 void CACHE::prefetcher_cycle_operate() {}
 
-uint32_t CACHE::prefetcher_cache_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type, uint32_t metadata_in)
+uint64_t CACHE::prefetcher_cache_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type, uint64_t metadata_in)
 {
   // Only activate on TRANSLATION-type accesses (PTW probes)
   if (static_cast<access_type>(type) != access_type::TRANSLATION)
@@ -335,13 +335,10 @@ uint32_t CACHE::prefetcher_cache_operate(uint64_t addr, uint64_t ip, uint8_t cac
 
   auto* pf = child_pfs[this];
 
-  // Extract translation_level from lower 8 bits of metadata
-  // (encoded by ptw.cc step_translation)
-  const std::size_t translation_level = static_cast<std::size_t>(metadata_in & 0xFF);
-
-  // Use the physical page number of the PTE address as a proxy for the VPN.
-  // This gives per-PT-page discrimination for the pending table.
-  const uint64_t translated_vpn = addr >> LOG2_PAGE_SIZE;
+  // Extract translation_level from lower 4 bits and VPN from upper bits of metadata
+  const std::size_t translation_level = static_cast<std::size_t>(metadata_in & 0xF);
+  const uint64_t vpn_mask_60 = (1ULL << 60) - 1;
+  const uint64_t translated_vpn = (metadata_in >> 4) & vpn_mask_60;
 
   if (cache_hit) {
     if (pf->should_issue_on_hit()) {
@@ -381,7 +378,7 @@ uint32_t CACHE::prefetcher_cache_operate(uint64_t addr, uint64_t ip, uint8_t cac
   return metadata_in;
 }
 
-uint32_t CACHE::prefetcher_cache_fill(uint64_t addr, uint32_t set, uint32_t way, uint8_t prefetch, uint64_t evicted_addr, uint32_t metadata_in)
+uint64_t CACHE::prefetcher_cache_fill(uint64_t addr, uint32_t set, uint32_t way, uint8_t prefetch, uint64_t evicted_addr, uint64_t metadata_in)
 {
   return metadata_in;
 }

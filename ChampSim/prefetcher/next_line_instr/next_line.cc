@@ -6,7 +6,9 @@ void CACHE::prefetcher_initialize() { std::cout << NAME << " next line prefetche
 
 void CACHE::prefetcher_branch_operate(uint64_t ip, uint8_t branch_type, uint64_t branch_target) {}
 
-uint32_t CACHE::prefetcher_cache_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type, uint32_t metadata_in)
+
+
+uint64_t CACHE::prefetcher_cache_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type, uint64_t metadata_in)
 {
   assert(addr == ip); // Invariant for instruction prefetchers
   uint64_t pf_addr = addr + (1 << LOG2_BLOCK_SIZE);
@@ -14,11 +16,10 @@ uint32_t CACHE::prefetcher_cache_operate(uint64_t addr, uint64_t ip, uint8_t cac
   return metadata_in;
 }
 
-uint32_t CACHE::prefetcher_cache_fill(uint64_t addr, uint32_t set, uint32_t way, uint8_t prefetch, uint64_t evicted_addr, uint32_t metadata_in)
+uint64_t CACHE::prefetcher_cache_fill(uint64_t addr, uint32_t set, uint32_t way, uint8_t prefetch, uint64_t evicted_addr, uint64_t metadata_in)
 {
   return metadata_in;
 }
-
 void CACHE::prefetcher_cycle_operate() {}
 
 void CACHE::prefetcher_final_stats() {}

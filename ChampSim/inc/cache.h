@@ -36,6 +36,7 @@
 #include "memory_class.h"
 #include "operable.h"
 #include "memory_trace.h"
+#include <sstream>
 
 #if defined FORCE_HIT || defined MULTIPLE_PAGE_SIZE || defined TRANSLATION_EXCLUSIVE_CACHE
 #include "vmem.h"
@@ -92,6 +93,10 @@ struct cache_stats {
 	uint64_t total_itmiss_latency = 0;
 	uint64_t total_dtmiss_latency = 0;
   double max_cache_occupancy = 0;
+  // PTE level tracking (levels 0-4)
+  std::array<uint64_t, 5> pte_level_accesses = {};
+  std::array<uint64_t, 5> pte_level_hits = {};
+  std::array<uint64_t, 5> pte_level_misses = {};
 #endif
 
 #if defined ENABLE_PAGE_CROSSING_STATS
@@ -142,7 +147,7 @@ class CACHE : public champsim::operable, public MemoryRequestConsumer, public Me
     uint64_t v_address = 0;
     uint64_t data = 0;
 
-    uint32_t pf_metadata = 0;
+    uint64_t pf_metadata = 0;
 
 #if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT || defined TRANSLATION_EXCLUSIVE_CACHE
 		bool is_instr = false;
@@ -277,6 +282,7 @@ public:
   const bool prefetch_as_load;
   const bool match_offset_bits;
   const bool virtual_prefetch;
+  bool prefetch_use_full_address = false; // when true, pass unmasked full PTE addr for TRANSLATION
   bool ever_seen_data = false;
   const unsigned pref_activate_mask = (1 << static_cast<int>(LOAD)) | (1 << static_cast<int>(PREFETCH));
 
@@ -935,15 +941,17 @@ public:
   // PREFETCH_BUFFER: unlimited map-based buffer that holds prefetched
   // lines.  Key = address >> OFFSET_BITS (cache-line granularity) so
   // there are no collisions — every distinct cache line has its own slot.
-  // Enabled at runtime by setting PF_BUFFER_CACHE to any substring of
-  // the target cache NAME (e.g. "L2C" matches "cpu0_L2C").
+  // Enabled per cache at runtime via <cache>.enable_pf_buffer = 1
+  // (e.g., l2c.enable_pf_buffer = 1, llc.enable_pf_buffer = 0).
   // -------------------------------------------------------------------
   class PrefetchBuffer {
   public:
+    enum BufferMode { PREFETCH_MODE = 0, MISS_MODE = 1 };
+
     struct PBEntry {
       uint64_t data         = 0;
       uint64_t insert_cycle = 0;
-      uint32_t pf_metadata  = 0;
+      uint64_t pf_metadata  = 0;
       uint8_t  type         = 0;
 #if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT || defined TRANSLATION_EXCLUSIVE_CACHE
       bool     is_pte       = false;
@@ -954,6 +962,9 @@ public:
 
   private:
     uint32_t offset_bits;
+    BufferMode mode = PREFETCH_MODE;
+    bool fill_cache_on_hit = false;
+    static constexpr uint64_t MAX_ENTRIES = 100000;  // Safeguard against unbounded growth
     std::unordered_map<uint64_t, PBEntry> entries; // key = address >> offset_bits
 
     uint64_t stat_inserts     = 0;
@@ -962,13 +973,32 @@ public:
     uint64_t make_key(uint64_t address) const { return address >> offset_bits; }
 
   public:
-    explicit PrefetchBuffer(uint32_t _offset_bits) : offset_bits(_offset_bits)
+    explicit PrefetchBuffer(uint32_t _offset_bits, BufferMode _mode = PREFETCH_MODE, bool _fill_cache_on_hit=true) 
+      : offset_bits(_offset_bits), mode(_mode), fill_cache_on_hit(_fill_cache_on_hit)
     {
-      std::cout << "PREFETCH_BUFFER: map-based (unbounded, collision-free)" << std::endl;
+      const char* mode_str = (mode == MISS_MODE) ? "MISS_MODE" : "PREFETCH_MODE";
+      std::cout << "[DEBUG] PrefetchBuffer constructor: offset_bits=" << _offset_bits << ", mode=" << mode_str << std::endl;
+      std::cout << "PREFETCH_BUFFER: map-based (unbounded, collision-free) mode=" << mode_str << ", fill_cache_on_hit=" << std::boolalpha << fill_cache_on_hit << std::noboolalpha << std::endl;
+      std::cout << "[DEBUG] PrefetchBuffer constructor completed successfully" << std::endl;
     }
+
+    BufferMode get_mode() const { return mode; }
+    void set_mode(BufferMode _mode) { mode = _mode; }
+    bool fill_cache_on_hit_enabled() const { return fill_cache_on_hit; }
 
     void insert(const PACKET& pkt, uint64_t cycle)
     {
+      // In MISS_MODE, buffer can grow unbounded with demand misses.
+      // Safeguard: stop inserting if buffer exceeds MAX_ENTRIES.
+      if (mode == MISS_MODE && entries.size() >= MAX_ENTRIES) {
+        // Buffer is full, skip insertion in MISS_MODE to prevent memory exhaustion
+        if (stat_inserts == MAX_ENTRIES) {
+          std::cerr << "WARNING: PREFETCH_BUFFER MISS_MODE reached capacity (" << MAX_ENTRIES << " entries). "
+                    << "Stopping insertions to prevent OOM. Consider increasing MAX_ENTRIES or using PREFETCH_MODE." << std::endl;
+        }
+        return;
+      }
+      
       auto& e       = entries[make_key(pkt.address)]; // insert or overwrite
       e.data         = pkt.data;
       e.insert_cycle = cycle;
@@ -999,7 +1029,8 @@ public:
       const double hit_rate = (stat_inserts > 0)
                                 ? 100.0 * static_cast<double>(stat_demand_hits) / static_cast<double>(stat_inserts)
                                 : 0.0;
-      std::cout << "PREFETCH_BUFFER STATS"
+      const char* mode_str = (mode == MISS_MODE) ? "MISS_MODE" : "PREFETCH_MODE";
+      std::cout << "PREFETCH_BUFFER STATS (mode=" << mode_str << ")"
                 << " INSERTS:" << stat_inserts
                 << " DEMAND_HITS:" << stat_demand_hits
                 << " HIT_RATE(%):" << hit_rate
@@ -1086,6 +1117,30 @@ public:
         pref_activate_mask(pref_mask), queues(queue_set), repl_type(repl), pref_type(pref)
 #endif
   {
+
+    // Read environment variables to control whether this cache should pass
+    // the unmasked full PTE address to prefetchers for TRANSLATION packets.
+    // Per-cache variable (preferred):
+    //   - L1D_PF_PREFETCH_FULL_ADDR, L2C_PF_PREFETCH_FULL_ADDR, LLC_PF_PREFETCH_FULL_ADDR
+    //     set to a non-zero value to enable passing raw full PTE addresses for that cache.
+    std::string per_cache_var;
+    if (NAME.find("L1D") != std::string::npos) {
+      per_cache_var = "L1D_PF_PREFETCH_FULL_ADDR";
+    } else if (NAME.find("L2C") != std::string::npos) {
+      per_cache_var = "L2C_PF_PREFETCH_FULL_ADDR";
+    } else if (NAME.find("LLC") != std::string::npos) {
+      per_cache_var = "LLC_PF_PREFETCH_FULL_ADDR";
+    }
+
+    if (!per_cache_var.empty()) {
+      if (auto vv = champsim::EnvVar<int>::get(per_cache_var.c_str())) {
+        if (*vv != 0) {
+          prefetch_use_full_address = true;
+        }
+      }
+    }
+
+    if (prefetch_use_full_address) std::cout << NAME << ": PF_PREFETCH_FULL_ADDR per-cache enabled via " << per_cache_var << std::endl;
 
 #if defined FORCE_HIT 
 		if (force_hit) {
@@ -1300,15 +1355,59 @@ public:
 #endif
   
 #if defined PREFETCH_BUFFER
-    // PF_BUFFER_CACHE: substring matched against NAME to select the target
-    // cache.  "L2C" matches "cpu0_L2C", "LLC" matches "LLC", etc.
-    // Case-sensitive. If unset, no buffer is created for any cache.
-    if (auto v = champsim::EnvVar<std::string>::get("PF_BUFFER_CACHE")) {
-      const std::string& pfb_cache_name = *v;
-      if (!pfb_cache_name.empty() && NAME.find(pfb_cache_name) != std::string::npos) {
-        enable_pf_buffer = true;
-        std::cout << NAME << " enabling PREFETCH_BUFFER (matched \"" << pfb_cache_name << "\")" << std::endl;
-        pf_buffer = new PrefetchBuffer(OFFSET_BITS);
+    // ENABLE_PF_BUFFER: runtime flag (0 or 1) to enable prefetch buffer.
+    // Set via config: <cache>.enable_pf_buffer = 1
+    // Environment variable is cache-specific: L1D_ENABLE_PF_BUFFER, L2C_ENABLE_PF_BUFFER, LLC_ENABLE_PF_BUFFER
+    // PF_BUFFER_MODE: "PREFETCH" (default) or "MISS" to switch behavior
+    std::string env_var_name;
+    if (NAME.find("L1D") != std::string::npos) {
+      env_var_name = "L1D_ENABLE_PF_BUFFER";
+    } else if (NAME.find("L2C") != std::string::npos) {
+      env_var_name = "L2C_ENABLE_PF_BUFFER";
+    } else if (NAME.find("LLC") != std::string::npos) {
+      env_var_name = "LLC_ENABLE_PF_BUFFER";
+    }
+    
+    std::cerr << "[DEBUG] " << NAME << " checking env var: '" << env_var_name << "'" << std::endl;
+    if (!env_var_name.empty()) {
+      if (auto v = champsim::EnvVar<int>::get(env_var_name.c_str())) {
+        std::cerr << "[DEBUG] " << NAME << " found env var " << env_var_name << " = " << *v << std::endl;
+        if (*v != 0) {
+          enable_pf_buffer = true;
+          
+          // Determine buffer mode from environment
+          PrefetchBuffer::BufferMode mode = PrefetchBuffer::PREFETCH_MODE;
+          
+          // Check for specific mode env var
+          std::string cache_prefix;
+          if (NAME.find("L1D") != std::string::npos) {
+            cache_prefix = "L1D_PF_BUFFER_MODE";
+          } else if (NAME.find("L2C") != std::string::npos) {
+            cache_prefix = "L2C_PF_BUFFER_MODE";
+          } else if (NAME.find("LLC") != std::string::npos) {
+            cache_prefix = "LLC_PF_BUFFER_MODE";
+          }
+          
+          if (!cache_prefix.empty()) {
+            if (auto mode_str = champsim::EnvVar<std::string>::get(cache_prefix.c_str())) {
+              if (*mode_str == "MISS") {
+                mode = PrefetchBuffer::MISS_MODE;
+              }
+            }
+          }
+          
+          bool fill_cache_on_hit = true;
+          if (auto vv = champsim::EnvVar<bool>::get("PF_BUFFER_FILL_CACHE_ON_HIT")) {
+              fill_cache_on_hit = *vv;
+          }
+
+          std::cout << "[DEBUG] " << NAME << " about to create PrefetchBuffer with OFFSET_BITS=" << OFFSET_BITS << std::endl;
+          std::cout << NAME << " enabling PREFETCH_BUFFER (mode=" 
+                    << (mode == PrefetchBuffer::MISS_MODE ? "MISS" : "PREFETCH") << ", fill_cache_on_hit=" << std::boolalpha << fill_cache_on_hit << std::noboolalpha << ")" << std::endl;
+          pf_buffer = new PrefetchBuffer(OFFSET_BITS, mode, fill_cache_on_hit);
+          std::cout << "[DEBUG] " << NAME << " PrefetchBuffer created at address " << pf_buffer << ", enable_pf_buffer=" << enable_pf_buffer << std::endl;
+          std::cout << "[DEBUG] " << NAME << " Buffer allocation and initialization complete" << std::endl;
+        }
       }
     }
 #endif // PREFETCH_BUFFER

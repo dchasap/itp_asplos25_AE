@@ -107,7 +107,12 @@ bool PageTableWalker::step_translation(uint64_t addr, std::size_t transl_level, 
   fwd_pkt.type = TRANSLATION;
   fwd_pkt.to_return = {this};
   fwd_pkt.translation_level = transl_level;
-  fwd_pkt.pf_metadata = static_cast<uint32_t>(transl_level); // encode level for standalone PTE prefetchers
+  // Encode both translation_level (lower 4 bits) and VPN (upper bits) for standalone PTE prefetchers.
+  // Use a 64-bit metadata field: lower 4 bits hold the level, upper 60 bits hold the VPN.
+  // Levels only range 0-4, so 4 bits are sufficient and we can preserve up to 60 bits of VPN.
+  const uint64_t vpn = source.v_address >> LOG2_PAGE_SIZE;
+  const uint64_t vpn_mask_60 = (1ULL << 60) - 1;
+  fwd_pkt.pf_metadata = ((static_cast<uint64_t>(vpn) & vpn_mask_60) << 4) | (static_cast<uint64_t>(transl_level) & 0xF);
 
 #if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT
 	fwd_pkt.is_pte = true;
@@ -127,7 +132,7 @@ bool PageTableWalker::step_translation(uint64_t addr, std::size_t transl_level, 
     fwd_pkt.type = source.type;
     fwd_pkt.event_cycle = std::numeric_limits<uint64_t>::max();
 #if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT || defined ENABLE_TRANSLATION_AWARE_REPLACEMENT
-		fwd_pkt.is_pte = false;
+		fwd_pkt.is_pte = true;
 #endif
     MSHR.push_back(fwd_pkt);
   }

@@ -175,7 +175,7 @@ def prepare_experiment(config, build_champsim, run):
 		champsimconf.set_entry(new_json_conf, None, 'executable_name', exp_name + '/champsim_' + sim)
 
 		# Setup simulation parameters
-		enviromental_variables = default_enviromental_variables # FIXME: is this a swallow copy?
+		enviromental_variables = default_enviromental_variables.copy()
 
 		for component in components:
 

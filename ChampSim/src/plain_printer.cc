@@ -135,8 +135,9 @@ void champsim::plain_printer::print(CACHE::stats_type stats)
       stream << "dtHIT: " << std::setw(10) << stats.dthits[type.second][cpu] << "  ";
       stream << "dtMISS: " << std::setw(10) << stats.dtmisses[type.second][cpu];
 #endif
-			stream << std::endl;
+stream << std::endl;
     }
+
 
     stream << stats.name << " PREFETCH  ";
     stream << "REQUESTED: " << std::setw(10) << stats.pf_requested << "  ";
@@ -144,6 +145,27 @@ void champsim::plain_printer::print(CACHE::stats_type stats)
     stream << "CROSSED: " << std::setw(10) << stats.pf_crossed << "  ";
     stream << "USEFUL: " << std::setw(10) << stats.pf_useful << "  ";
     stream << "USELESS: " << std::setw(10) << stats.pf_useless << std::endl;
+
+#if defined ENABLE_EXTRA_CACHE_STATS
+    // Print PTE level breakdown
+    if ((stats.pte_level_accesses[0] + stats.pte_level_accesses[1] + stats.pte_level_accesses[2] + stats.pte_level_accesses[3] + stats.pte_level_accesses[4]) > 0) {
+      stream << stats.name << " ";
+      for (int lvl = 0; lvl < 5; lvl++) {
+        stream << "pte_level_accesses " << lvl << ": " << std::setw(10) << stats.pte_level_accesses[lvl] << "  ";
+      }
+      stream << std::endl;
+      stream << stats.name << " ";
+      for (int lvl = 0; lvl < 5; lvl++) {
+        stream << "pte_level_hits " << lvl << ": " << std::setw(10) << stats.pte_level_hits[lvl] << "  ";
+      }
+      stream << std::endl;
+      stream << stats.name << " ";
+      for (int lvl = 0; lvl < 5; lvl++) {
+        stream << "pte_level_misses " << lvl << ": " << std::setw(10) << stats.pte_level_misses[lvl] << "  ";
+      }
+      stream << std::endl;
+    }
+#endif
 
 #if defined ENABLE_EXTRA_CACHE_STATS
     stream << stats.name << " MAX OCCUPANCY: " << stats.max_cache_occupancy << std::endl;

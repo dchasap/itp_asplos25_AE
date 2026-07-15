@@ -77,9 +77,12 @@ def register_all():
     r.register_parameter('DATA_PAGE_SIZE_DIST', None, components=['ooo_cpu'], category='env', ptype='int', default='0')
 
     # Prefetch Buffer (compile flag: -DPREFETCH_BUFFER)
-    # PF_BUFFER_CACHE: substring of the target cache NAME (e.g. "L2C" matches "cpu0_L2C").
-    # Case-sensitive. If unset (None), no prefetch buffer is created for any cache.
-    r.register_parameter('PF_BUFFER_CACHE', 'pf_buffer.cache', components=['l1d', 'l2c', 'llc'], category='env', ptype='str', default=None)
+    # ENABLE_PF_BUFFER: per-cache boolean flag to enable prefetch buffer for that cache.
+    # Set to 1 (or true) to enable, 0 (or false/None) to disable.
+    # PF_BUFFER_MODE: "PREFETCH" (default, prefetch fills go to buffer) or "MISS" (demand misses go to buffer)
+    for comp in ['l1d', 'l2c', 'llc']:
+        r.register_parameter(f'{comp.upper()}_ENABLE_PF_BUFFER', f'{comp}.enable_pf_buffer', components=[comp], category='env', ptype='int', default='0')
+        r.register_parameter(f'{comp.upper()}_PF_BUFFER_MODE', f'{comp}.pf_buffer_mode', components=[comp], category='env', ptype='str', default='PREFETCH')
 
     # Standalone page-table prefetchers attached as normal cache prefetchers.
     # Register per cache-like component so config keys like l2c.pf_child_table_size
@@ -96,6 +99,9 @@ def register_all():
         r.register_parameter('PF_CHILD_CONF_THRESHOLD', f'{comp}.pf_child_conf_threshold', components=[comp], category='env', ptype='int', default='2')
         r.register_parameter('PF_CHILD_TRAIN_ON_HIT', f'{comp}.pf_child_train_on_hit', components=[comp], category='env', ptype='int', default='1')
         r.register_parameter('PF_CHILD_ISSUE_ON_HIT', f'{comp}.pf_child_issue_on_hit', components=[comp], category='env', ptype='int', default='0')
+        # Per-cache control to enable passing the full unmasked PTE address to prefetchers
+        r.register_parameter(f'{comp.upper()}_PF_PREFETCH_FULL_ADDR', f'{comp}.pf_prefetch_full_addr', components=[comp], category='env', ptype='int', default='0')
+        r.register_parameter('PF_BUFFER_FILL_CACHE_ON_HIT', f'{comp}.pf_buffer_fill_cache_on_hit', components=[comp], category='env', ptype='int', default='1')
 
     # other tx/tvc defaults
     r.register_parameter('TXVC_LATENCY', None, components=['txvc'], category='env', ptype='int', default='0')

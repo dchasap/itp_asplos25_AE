@@ -106,19 +106,24 @@ bool txvc_miss_fill_to_txvc()
 					}
 #endif
 
-	#if defined PREFETCH_BUFFER
-					// PREFETCH_BUFFER: redirect prefetch fills into the buffer so they do
-					// not pollute the main cache.
-					if (enable_pf_buffer && pf_buffer && fill_mshr.prefetch_from_this) {
-						pf_buffer->insert(fill_mshr, current_cycle);
-						sim_stats.back().pf_fill++;
-						sim_stats.back().total_miss_latency += current_cycle - (fill_mshr.cycle_enqueued + 1);
-						auto copy{fill_mshr};
-						for (auto ret : copy.to_return)
-							ret->return_data(copy);
-						return true;
+
+#if defined PREFETCH_BUFFER
+					if (enable_pf_buffer && pf_buffer) {
+						if (pf_buffer->get_mode() == PrefetchBuffer::PREFETCH_MODE && fill_mshr.prefetch_from_this && fill_mshr.is_pte) {
+							// PREFETCH_MODE: redirect prefetch fills into the buffer so they do not pollute the main cache.
+							pf_buffer->insert(fill_mshr, current_cycle);
+							sim_stats.back().pf_fill++;
+							sim_stats.back().total_miss_latency += current_cycle - (fill_mshr.cycle_enqueued + 1);
+							auto copy{fill_mshr};
+							for (auto ret : copy.to_return)
+								ret->return_data(copy);
+							return true;
+						} else if (pf_buffer->get_mode() == PrefetchBuffer::MISS_MODE && fill_mshr.type != PREFETCH && fill_mshr.is_pte) {
+							// MISS_MODE: cache any returned fills in the prefetch buffer in miss_mode
+							pf_buffer->insert(fill_mshr, current_cycle);
+						}
 					}
-	#endif // PREFETCH_BUFFER
+#endif // PREFETCH_BUFFER
 
 					// find victim
 #if defined SPLIT_STLB
@@ -543,7 +548,13 @@ bool txvc_miss_fill_to_txvc()
 					// update prefetcher on load instructions and prefetches from upper levels
 					auto metadata_thru = handle_pkt.pf_metadata;
 					if (should_activate_prefetcher(handle_pkt)) {
-						uint64_t pf_base_addr = (virtual_prefetch ? handle_pkt.v_address : handle_pkt.address) & ~champsim::bitmask(match_offset_bits ? 0 : OFFSET_BITS);
+						uint64_t pf_base_addr;
+						if (static_cast<access_type>(handle_pkt.type) == access_type::TRANSLATION && prefetch_use_full_address) {
+							// Pass the raw, unmasked full PTE address (or v_address when virtual_prefetch)
+							pf_base_addr = (virtual_prefetch ? handle_pkt.v_address : handle_pkt.address);
+						} else {
+							pf_base_addr = (virtual_prefetch ? handle_pkt.v_address : handle_pkt.address) & ~champsim::bitmask(match_offset_bits ? 0 : OFFSET_BITS);
+						}
 						metadata_thru = impl_prefetcher_cache_operate(pf_base_addr, handle_pkt.ip, hit, handle_pkt.type, metadata_thru);
 					}
 
@@ -837,9 +848,9 @@ bool txvc_miss_fill_to_txvc()
 
 										sim_stats.back().hits[handle_pkt.type][handle_pkt.cpu]++;
 	
-										#if defined ENABLE_EXTRA_CACHE_STATS
+#if defined ENABLE_EXTRA_CACHE_STATS
 										hit_hook(handle_pkt);
-	#endif
+#endif
 
 										copy.pf_metadata = metadata_thru;
 										for (auto ret : copy.to_return)
@@ -854,11 +865,27 @@ bool txvc_miss_fill_to_txvc()
 							}
 						}
 #endif // MULTIPLE_PAGE_SIZE
-
-	#if defined PREFETCH_BUFFER
+#if  0
+					// PREFETCH_MODE: redirect prefetch fills into the buffer so they do
+					// not pollute the main cache.
+					if (enable_pf_buffer && pf_buffer && fill_mshr.prefetch_from_this) {
+						pf_buffer->insert(fill_mshr, current_cycle);
+						sim_stats.back().pf_fill++;
+						sim_stats.back().total_miss_latency += current_cycle - (fill_mshr.cycle_enqueued + 1);
+						auto copy{fill_mshr};
+						for (auto ret : copy.to_return)
+							ret->return_data(copy);
+						return true;
+					} else if (pf_buffer && pf_buffer->get_mode() == PrefetchBuffer::MISS_MODE && fill_mshr.type != PREFETCH) {
+    				// MISS_MODE: also cache demand fills for re-access
+   	 				pf_buffer->insert(fill_mshr, current_cycle);
+   	 				// Fall through to normal cache filling
+					}	
+#endif // PREFETCH_BUFFER
+#if defined PREFETCH_BUFFER
 						// PREFETCH_BUFFER: check if a previously prefetched line is waiting
 						// in the buffer. If so, serve the demand miss from there.
-						if (enable_pf_buffer && pf_buffer) {
+						if (enable_pf_buffer && pf_buffer && handle_pkt.is_pte) {
 							if (auto* pb_entry = pf_buffer->lookup(handle_pkt.address)) {
 								sim_stats.back().pf_useful++;
 								sim_stats.back().hits[handle_pkt.type][handle_pkt.cpu]++;
@@ -871,17 +898,20 @@ bool txvc_miss_fill_to_txvc()
 								// Also install the line in the main cache so future
 								// accesses hit there directly (prefetch_from_this=false
 								// prevents the fill from being re-routed to this buffer).
-								auto fill_pkt{handle_pkt};
-								fill_pkt.data              = pb_entry->data;
-								fill_pkt.pf_metadata       = pb_entry->pf_metadata;
-								fill_pkt.prefetch_from_this = false;
-								fill_pkt.to_return.clear();
-								handle_fill(fill_pkt);
-								pf_buffer->invalidate(handle_pkt.address);
+								//auto fill_pkt{handle_pkt};
+								if (pf_buffer->fill_cache_on_hit_enabled()) {
+									auto copy2{handle_pkt};
+									copy2.data              = pb_entry->data;
+									copy2.pf_metadata       = pb_entry->pf_metadata;
+									copy2.prefetch_from_this = false;
+									copy2.to_return.clear();
+									handle_fill(copy2);
+									//pf_buffer->invalidate(handle_pkt.address);
+								}
 								return true;
-							}
 						}
-	#endif // PREFETCH_BUFFER
+					}
+#endif // PREFETCH_BUFFER
 
 						sim_stats.back().misses[handle_pkt.type][handle_pkt.cpu]++;
 

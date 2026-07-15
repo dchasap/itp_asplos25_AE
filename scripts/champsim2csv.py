@@ -105,6 +105,29 @@ def parse_champsim_stats(input_file, output_file):
         #print(cache + ":" + avg_occupancy)
         AVG_OCCUPANCY[cache] = avg_occupancy
 
+    # Get PTE level statistics (levels 0-4).
+    # Note: in output only the first token is prefixed by cache name, e.g.
+    # "cpu0_L1D pte_level_accesses 0: ...  pte_level_accesses 1: ..."
+    # so we must parse all level/value pairs from that single line.
+    PTE_LEVEL_STATS = {}
+    PTE_STAT_TYPES = ['pte_level_accesses', 'pte_level_hits', 'pte_level_misses']
+    for cache in CACHES:
+        PTE_LEVEL_STATS[cache] = {}
+        for stat_type in PTE_STAT_TYPES:
+            # Initialize defaults first
+            for level in range(5):
+                PTE_LEVEL_STATS[cache][f'{stat_type}_{level}'] = 'N/A'
+
+            line = re.search(cache + r'\s+' + stat_type + r'.*', data)
+            if line is None:
+                continue
+
+            # Extract all pairs like: pte_level_accesses 2: 436
+            for lvl_str, value in re.findall(stat_type + r'\s+(\d+):\s*(\d+)', line.group()):
+                lvl = int(lvl_str)
+                if 0 <= lvl < 5:
+                    PTE_LEVEL_STATS[cache][f'{stat_type}_{lvl}'] = value
+
     # Get CACHE FILTER stats
     lines = re.findall(r'DBPRED: prediction accuracy:\s+\d+[\.]?\d*%', data)
     if (len(lines) == 0):
@@ -138,71 +161,103 @@ def parse_champsim_stats(input_file, output_file):
         #print(total_txvc_bypasses)
 
     # Get TXVC prefetch lifetime stats
-    TXVC_PREFETCH_LIFETIME_STATS = {}
-    TXVC_PF_LT_STATS = [
-        'INSERTED', 'FIRST_USE', 'FIRST_USE_RATE', 'AVG_FIRST_USE_LAT',
-        'EVICTED_NO_USE', 'EVICTED_AFTER_USE', 'EVICTED_USEFUL_RATE',
-        'AVG_EVICTED_RES', 'AVG_USEFUL_EVICTED_RES',
-        'LIVE_PREF', 'LIVE_PREF_USED'
-    ]
-    line = re.search(r'TXVC\sPREFETCH-LIFETIME.*', data)
-    for stat in TXVC_PF_LT_STATS:
-        TXVC_PREFETCH_LIFETIME_STATS[stat] = 'N/A'
-    if (line != None):
-        line = line.group()
-        token_map = {
-            'INSERTED': r'INSERTED:\s+\d+',
-            'FIRST_USE': r'FIRST_USE:\s+\d+',
-            'FIRST_USE_RATE': r'FIRST_USE_RATE\(%\):\s+[\d\.]+',
-            'AVG_FIRST_USE_LAT': r'AVG_FIRST_USE_LAT\(cyc\):\s+[\d\.]+',
-            'EVICTED_NO_USE': r'EVICTED_NO_USE:\s+\d+',
-            'EVICTED_AFTER_USE': r'EVICTED_AFTER_USE:\s+\d+',
-            'EVICTED_USEFUL_RATE': r'EVICTED_USEFUL_RATE\(%\):\s+[\d\.]+',
-            'AVG_EVICTED_RES': r'AVG_EVICTED_RES\(cyc\):\s+[\d\.]+',
-            'AVG_USEFUL_EVICTED_RES': r'AVG_USEFUL_EVICTED_RES\(cyc\):\s+[\d\.]+',
-            'LIVE_PREF': r'LIVE_PREF:\s+\d+',
-            'LIVE_PREF_USED': r'LIVE_PREF_USED:\s+\d+'
-        }
-        for stat in TXVC_PF_LT_STATS:
-            _line = re.search(token_map[stat], line)
-            if (_line != None):
-                TXVC_PREFETCH_LIFETIME_STATS[stat] = re.findall(r'[\d\.]+', _line.group())[0]
+#    TXVC_PREFETCH_LIFETIME_STATS = {}
+#    TXVC_PF_LT_STATS = [
+#        'INSERTED', 'FIRST_USE', 'FIRST_USE_RATE', 'AVG_FIRST_USE_LAT',
+#        'EVICTED_NO_USE', 'EVICTED_AFTER_USE', 'EVICTED_USEFUL_RATE',
+#        'AVG_EVICTED_RES', 'AVG_USEFUL_EVICTED_RES',
+#        'LIVE_PREF', 'LIVE_PREF_USED'
+#    ]
+#    line = re.search(r'TXVC\sPREFETCH-LIFETIME.*', data)
+#    for stat in TXVC_PF_LT_STATS:
+#        TXVC_PREFETCH_LIFETIME_STATS[stat] = 'N/A'
+#    if (line != None):
+#       line = line.group()
+    #     token_map = {
+    #         'INSERTED': r'INSERTED:\s+\d+',
+    #         'FIRST_USE': r'FIRST_USE:\s+\d+',
+    #         'FIRST_USE_RATE': r'FIRST_USE_RATE\(%\):\s+[\d\.]+',
+    #         'AVG_FIRST_USE_LAT': r'AVG_FIRST_USE_LAT\(cyc\):\s+[\d\.]+',
+    #         'EVICTED_NO_USE': r'EVICTED_NO_USE:\s+\d+',
+    #         'EVICTED_AFTER_USE': r'EVICTED_AFTER_USE:\s+\d+',
+    #         'EVICTED_USEFUL_RATE': r'EVICTED_USEFUL_RATE\(%\):\s+[\d\.]+',
+    #         'AVG_EVICTED_RES': r'AVG_EVICTED_RES\(cyc\):\s+[\d\.]+',
+    #         'AVG_USEFUL_EVICTED_RES': r'AVG_USEFUL_EVICTED_RES\(cyc\):\s+[\d\.]+',
+    #         'LIVE_PREF': r'LIVE_PREF:\s+\d+',
+    #         'LIVE_PREF_USED': r'LIVE_PREF_USED:\s+\d+'
+    #     }
+    #     for stat in TXVC_PF_LT_STATS:
+    #         _line = re.search(token_map[stat], line)
+    #         if (_line != None):
+    #             TXVC_PREFETCH_LIFETIME_STATS[stat] = re.findall(r'[\d\.]+', _line.group())[0]
 
-    # Get TXVC predictor entry lifetime stats (generic prefetcher line)
-    TXVC_ENTRY_LIFETIME_STATS = {}
-    TXVC_ENTRY_STATS = [
+    # # Get TXVC predictor entry lifetime stats (generic prefetcher line)
+    # TXVC_ENTRY_LIFETIME_STATS = {}
+    # TXVC_ENTRY_STATS = [
+    #     'ALLOC', 'REPL', 'REPL_BEFORE_ISSUE', 'REPL_AFTER_ISSUE',
+    #     'AVG_REPL_LIFETIME_TICKS', 'LIVE', 'LIVE_WITH_ISSUE'
+    # ]
+    # for stat in TXVC_ENTRY_STATS:
+    #     TXVC_ENTRY_LIFETIME_STATS[stat] = 'N/A'
+
+    # lines = re.findall(r'(?:TXVC\s+\w+|PF\s+CHILD|PF\s+SBLG)\s+ENTRY-LIFETIME.*', data)
+    # if (len(lines) > 0):
+    #     line = lines[0]
+    #     for stat in TXVC_ENTRY_STATS:
+    #         _line = re.search(stat + r':\s*[\d\.]+', line)
+    #         if (_line != None):
+    #             TXVC_ENTRY_LIFETIME_STATS[stat] = re.findall(r'[\d\.]+', _line.group())[0]
+
+    # Parse unified PF drop-reason stats (collect all key:number pairs
+    # from any prefetcher "PF ... DROP-REASONS" lines and aggregate). If
+    # a key is never seen, export 'N/A'. This mirrors logic in
+    # convert_champsim2csv.py.
+    # Unified Prefetcher drop-reason keys (union of child & sibling keys)
+    PF_DROP_REASON_KEYS = [
+        'NO_PENDING_PARENT', 'PENDING_OVERWRITE_COLLISION',
+        'TRAIN_REPLACE_MISMATCH', 'LEAF_NO_PREDICT', 'UC_DISABLED',
+        'PRED_INVALID', 'PRED_TAG_MISMATCH', 'PRED_CONF_BLOCKED', 'PRED_ZERO_DELTA',
+        'PRED_ISSUED', 'ISSUE_MSHR_BLOCKED', 'ISSUE_ENQUEUE_FAILED'
+    ]
+
+    PF_DROP_REASON_STATS = {}
+    PF_DROP_SEEN = {}
+    for key in PF_DROP_REASON_KEYS:
+        PF_DROP_REASON_STATS[key] = 0
+        PF_DROP_SEEN[key] = False
+
+    matches = re.findall(r'PF\s+DROP-REASONS.*', data)
+    for m in matches:
+        pairs = re.findall(r'([A-Z0-9_]+):(\d+)', m)
+        for k, v in pairs:
+            if k in PF_DROP_REASON_STATS:
+                PF_DROP_REASON_STATS[k] += int(v)
+                PF_DROP_SEEN[k] = True
+
+    # Parse ENTRY-LIFETIME lines (match PF ENTRY-LIFETIME, PF CHILD/SBLG, or TXVC <name> ENTRY-LIFETIME)
+    PF_ENTRY_STATS = [
         'ALLOC', 'REPL', 'REPL_BEFORE_ISSUE', 'REPL_AFTER_ISSUE',
         'AVG_REPL_LIFETIME_TICKS', 'LIVE', 'LIVE_WITH_ISSUE'
     ]
-    for stat in TXVC_ENTRY_STATS:
-        TXVC_ENTRY_LIFETIME_STATS[stat] = 'N/A'
+    PF_ENTRY_LIFETIME_STATS = {}
+    for stat in PF_ENTRY_STATS:
+        PF_ENTRY_LIFETIME_STATS[stat] = 'N/A'
 
-    lines = re.findall(r'TXVC\s+\w+\s+ENTRY-LIFETIME.*', data)
+    lines = re.findall(r'(?:TXVC\s+\w+|PF(?:\s+\w+)?)\s+ENTRY-LIFETIME.*', data)
     if (len(lines) > 0):
         line = lines[0]
-        for stat in TXVC_ENTRY_STATS:
+        for stat in PF_ENTRY_STATS:
             _line = re.search(stat + r':\s*[\d\.]+', line)
             if (_line != None):
-                TXVC_ENTRY_LIFETIME_STATS[stat] = re.findall(r'[\d\.]+', _line.group())[0]
+                PF_ENTRY_LIFETIME_STATS[stat] = re.findall(r'[\d\.]+', _line.group())[0]
 
-    # Get TXVC CHILD drop-reason stats
-    TXVC_CHILD_DROP_REASON_STATS = {}
-    TXVC_CHILD_DROP_REASON_KEYS = [
-        'LEVEL0_SKIP', 'NO_PENDING_PARENT', 'PENDING_OVERWRITE_COLLISION',
-        'TRAIN_REPLACE_MISMATCH', 'LEAF_NO_PREDICT', 'PRED_INVALID',
-        'PRED_TAG_MISMATCH', 'PRED_CONF_BLOCKED', 'PRED_ISSUED',
-        'ISSUE_MSHR_BLOCKED', 'ISSUE_ENQUEUE_FAILED'
-    ]
-    for key in TXVC_CHILD_DROP_REASON_KEYS:
-        TXVC_CHILD_DROP_REASON_STATS[key] = 'N/A'
-
-    line = re.search(r'TXVC\s+CHILD\s+DROP-REASONS.*', data)
-    if (line != None):
-        line = line.group()
-        for key in TXVC_CHILD_DROP_REASON_KEYS:
-            _line = re.search(key + r':\s*\d+', line)
-            if (_line != None):
-                TXVC_CHILD_DROP_REASON_STATS[key] = re.findall(r'\d+', _line.group())[0]
+    # Parse PF TABLES DIAGNOSTIC lines (ZERO_ENTRIES, KEYS_NOT_IN_UNIQUE_PTES)
+    zero_entries = 'N/A'
+    keys_not_in_unique = 'N/A'
+    m = re.search(r'PF TABLES DIAGNOSTIC .*ZERO_ENTRIES:(\d+) .*KEYS_NOT_IN_UNIQUE_PTES:(\d+)', data)
+    if m:
+        zero_entries = m.group(1)
+        keys_not_in_unique = m.group(2)
 
     # Get IPC
     lines = re.findall(r'CPU 0 cumulative IPC:\s+\d+[\.]?\d*', data)
@@ -237,14 +292,20 @@ def parse_champsim_stats(input_file, output_file):
     header.append('TXVC_PREDICTIONS')
     header.append('TXVC_BYPASSES')
 
-    for stat in TXVC_PF_LT_STATS:
-        header.append('TXVC_PF_LT_' + stat)
+    for stat in PF_ENTRY_STATS:
+        header.append('PF_PREFETCHER_ENTRY_' + stat)
 
-    for stat in TXVC_ENTRY_STATS:
-        header.append('TXVC_PREFETCHER_ENTRY_' + stat)
+    # PF tables diagnostic fields
+    header.append('PF_TABLES_ZERO_ENTRIES')
+    header.append('PF_TABLES_KEYS_NOT_IN_UNIQUE_PTES')
 
-    for key in TXVC_CHILD_DROP_REASON_KEYS:
-        header.append('TXVC_CHILD_DROP_' + key)
+    for key in PF_DROP_REASON_KEYS:
+        header.append('PF_DROP_' + key)
+
+    # Add PTE level statistics columns
+    for stat_type in ['pte_level_accesses', 'pte_level_hits', 'pte_level_misses']:
+        for level in range(5):  # PTE levels 0-4
+            header.append(f'{stat_type}_{level}')
 
     header.append('IPC')
     header.append('INSTRUCTIONS')
@@ -268,14 +329,30 @@ def parse_champsim_stats(input_file, output_file):
             new_row.append(total_txvc_predictions)
             new_row.append(total_txvc_bypasses)
 
-            for stat in TXVC_PF_LT_STATS:
-                new_row.append(TXVC_PREFETCH_LIFETIME_STATS[stat])
+            for stat in PF_ENTRY_STATS:
+                new_row.append(PF_ENTRY_LIFETIME_STATS[stat])
 
-            for stat in TXVC_ENTRY_STATS:
-                new_row.append(TXVC_ENTRY_LIFETIME_STATS[stat])
+            # PF tables diagnostic values (same for all rows)
+            new_row.append(zero_entries)
+            new_row.append(keys_not_in_unique)
 
-            for key in TXVC_CHILD_DROP_REASON_KEYS:
-                new_row.append(TXVC_CHILD_DROP_REASON_STATS[key])
+            # for stat in TXVC_PF_LT_STATS:
+            #     new_row.append(TXVC_PREFETCH_LIFETIME_STATS[stat])
+
+            # for stat in TXVC_ENTRY_STATS:
+            #     new_row.append(TXVC_ENTRY_LIFETIME_STATS[stat])
+
+            # Append unified PF_DROP_<KEY> values (aggregate across prefetchers)
+            for key in PF_DROP_REASON_KEYS:
+                if PF_DROP_SEEN.get(key, False):
+                    new_row.append(str(PF_DROP_REASON_STATS.get(key, 0)))
+                else:
+                    new_row.append('N/A')
+
+            # Add PTE level statistics values
+            for stat_type in ['pte_level_accesses', 'pte_level_hits', 'pte_level_misses']:
+                for level in range(5):  # PTE levels 0-4
+                    new_row.append(PTE_LEVEL_STATS[cache][f'{stat_type}_{level}'])
 
             new_row.append(ipc)
             new_row.append(instructions)

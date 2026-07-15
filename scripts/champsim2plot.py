@@ -4,6 +4,8 @@ import plotting
 import pandas as pd
 import numpy as np
 from scipy.stats import gmean
+import os
+from pathlib import Path
 
 
 xlabels = {	
@@ -167,7 +169,7 @@ def gen_plot(benchsuite, _tags, data_files, figure_name, figure_type, file_type,
 		input_data_files, tags = get_data_files(data_files, _tags, False)
 
 		cache_types=["cpu0_L1I", "cpu0_L1D", "cpu0_L2C", "LLC"]
-		cache_types=["cpu0_L2C", "TXVC", "LLC"]
+		cache_types=["cpu0_L1D", "cpu0_L2C", "LLC"]
 		#cache_types=["LLC"]	
 		op_type = "TOTAL"
 
@@ -404,6 +406,221 @@ def gen_plot(benchsuite, _tags, data_files, figure_name, figure_type, file_type,
 		#plotting.plot_stat(df, tags, 'CACHE_FILTER_ACCURACY', output_file)
 		plotting.plot_average_single_cache(input_data_files, means_df, tags, cache_types, 
 																			op_type, stat_names, output_file)
+		
+	# Prefetch accuracy: useful / issued (per-tag boxplot)
+	if (figure_type == "prefetch_accuracy"):
+
+		input_data_files, tags = get_data_files(data_files, _tags, True)  # filter_baseline=True
+		op_type = "PREFETCH"
+
+		# Infer cache level from tag and load data per-tag with appropriate cache type
+		df_list = []
+		for i, tag in enumerate(tags):
+			tag_lower = tag.lower()
+			if 'l1d' in tag_lower or 'l1i' in tag_lower:
+				cache_type = "cpu0_L1D"
+			elif 'llc' in tag_lower:
+				cache_type = "LLC"
+			else:
+				cache_type = "cpu0_L2C"  # default to L2C
+			
+			df_tag = stats.load_df([input_data_files[i]], [tag], cache_type, op_type)
+			df_list.append(df_tag)
+		
+		df_pref = pd.concat(df_list, ignore_index=True)
+
+		# Compute per-benchmark accuracy
+		df_pref['ISSUED'] = pd.to_numeric(df_pref['ISSUED'], errors='coerce').fillna(0)
+		df_pref['USEFUL'] = pd.to_numeric(df_pref['USEFUL'], errors='coerce').fillna(0)
+		df_pref['PREFETCH_ACCURACY'] = df_pref.apply(lambda r: (100.0 * r['USEFUL'] / r['ISSUED']) if r['ISSUED'] > 0 else float('nan'), axis=1)
+
+		plotting.plot_conf['plot_type'] = 'box'
+		plotting.plot_conf['plot_width'] = 8
+		plotting.plot_conf['plot_height'] = 3
+		plotting.plot_conf['ylabel'] = 'Prefetch Accuracy (%)'
+		plotting.plot_conf['rotation'] = 45
+
+		output_file = figure_dir + "/" + figure_name + "_prefetch_accuracy_" + benchsuite + "." + file_type
+		print(output_file)
+		# Keep only rows with numeric accuracy
+		df_plot = df_pref[[ 'benchmarks', 'tag', 'PREFETCH_ACCURACY' ]].copy()
+		df_plot = df_plot.dropna(subset=['PREFETCH_ACCURACY'])
+		if df_plot.empty:
+			print("No PREFETCH_ACCURACY values available to plot.")
+		else:
+			# Print boxplot statistics
+			print("\n=== PREFETCH_ACCURACY Statistics (%) ===")
+			for tag in tags:
+				tag_data = df_plot[df_plot['tag'] == tag]['PREFETCH_ACCURACY']
+				if not tag_data.empty:
+					print(f"{tag:20} count={len(tag_data):3d}  min={tag_data.min():6.2f}  q1={tag_data.quantile(0.25):6.2f}  median={tag_data.median():6.2f}  q3={tag_data.quantile(0.75):6.2f}  max={tag_data.max():6.2f}  mean={tag_data.mean():6.2f}")
+			print("")
+			plotting.plot_stat(df_plot, tags, 'PREFETCH_ACCURACY', output_file)
+
+	# Prefetch coverage proxy: useful / translation misses (per-tag boxplot)
+	if (figure_type == "prefetch_coverage"):
+
+		input_data_files, tags = get_data_files(data_files, _tags, True)  # filter_baseline=True
+		
+		# Load PREFETCH and TRANSLATION data per-tag with appropriate cache type
+		df_pref_list = []
+		df_trans_list = []
+		for i, tag in enumerate(tags):
+			tag_lower = tag.lower()
+			if 'l1d' in tag_lower or 'l1i' in tag_lower:
+				cache_type = "cpu0_L1D"
+			elif 'llc' in tag_lower:
+				cache_type = "LLC"
+			else:
+				cache_type = "cpu0_L2C"  # default to L2C
+			
+			df_pref_tag = stats.load_df([input_data_files[i]], [tag], cache_type, "PREFETCH")
+			df_trans_tag = stats.load_df([input_data_files[i]], [tag], cache_type, "TRANSLATION")
+			df_pref_list.append(df_pref_tag)
+			df_trans_list.append(df_trans_tag)
+		
+		df_pref = pd.concat(df_pref_list, ignore_index=True)
+		df_trans = pd.concat(df_trans_list, ignore_index=True)
+
+		# Prepare merge on benchmarks and tag
+		# Ensure 'benchmarks' is a column (not ambiguous index)
+		# Ensure 'benchmarks' exists as a column (some dataframes already have it)
+		df_pref = df_pref.copy()
+		# ensure index is unnamed to avoid ambiguity when merging
+		df_pref.index.name = None
+		if 'benchmarks' not in df_pref.columns:
+			df_pref['benchmarks'] = df_pref.index
+		df_trans = df_trans.copy()
+		df_trans.index.name = None
+		if 'benchmarks' not in df_trans.columns:
+			df_trans['benchmarks'] = df_trans.index
+		left = df_pref[['benchmarks','tag','USEFUL']].rename(columns={'USEFUL':'PREFETCH_USEFUL'})
+		right = df_trans[['benchmarks','tag','MISS']].rename(columns={'MISS':'TRANSLATION_MISS'})
+		merged = pd.merge(left, right, on=['benchmarks','tag'], how='inner')
+		merged['PREFETCH_USEFUL'] = pd.to_numeric(merged['PREFETCH_USEFUL'], errors='coerce').fillna(0)
+		merged['TRANSLATION_MISS'] = pd.to_numeric(merged['TRANSLATION_MISS'], errors='coerce').fillna(0)
+		merged['PREFETCH_COVERAGE'] = merged.apply(lambda r: (100.0 * r['PREFETCH_USEFUL'] / r['TRANSLATION_MISS']) if r['TRANSLATION_MISS'] > 0 else float('nan'), axis=1)
+
+		plotting.plot_conf['plot_type'] = 'box'
+		plotting.plot_conf['plot_width'] = 8
+		plotting.plot_conf['plot_height'] = 3
+		plotting.plot_conf['ylabel'] = 'Coverage Proxy (%)'
+		plotting.plot_conf['rotation'] = 45
+
+		output_file = figure_dir + "/" + figure_name + "_prefetch_coverage_" + benchsuite + "." + file_type
+		print(output_file)
+		# Keep only rows with numeric coverage
+		df_plot = merged[['benchmarks','tag','PREFETCH_COVERAGE']].copy()
+		df_plot = df_plot.dropna(subset=['PREFETCH_COVERAGE'])
+		if df_plot.empty:
+			print("No PREFETCH_COVERAGE values available to plot.")
+		else:
+			# Print boxplot statistics
+			print("\n=== PREFETCH_COVERAGE Statistics (%) ===")
+			for tag in tags:
+				tag_data = df_plot[df_plot['tag'] == tag]['PREFETCH_COVERAGE']
+				if not tag_data.empty:
+					print(f"{tag:20} count={len(tag_data):3d}  min={tag_data.min():6.2f}  q1={tag_data.quantile(0.25):6.2f}  median={tag_data.median():6.2f}  q3={tag_data.quantile(0.75):6.2f}  max={tag_data.max():6.2f}  mean={tag_data.mean():6.2f}")
+			print("")
+			plotting.plot_stat(df_plot, tags, 'PREFETCH_COVERAGE', output_file)
+
+	# Actual prefetch coverage: (baseline_misses - prefetcher_misses) / baseline_misses
+	if (figure_type == "prefetch_coverage_true"):
+
+		input_data_files, tags = get_data_files(data_files, _tags, True)  # filter_baseline=True
+		
+		# Need to find BASELINE data files - match them by replacing tag directory with BASELINE
+		baseline_data_files = []
+		for data_file in data_files:
+			# Convert to Path for easier manipulation
+			p = Path(data_file)
+			# Replace the parent directory (which contains the tag) with BASELINE
+			# E.g., stats/exp/childpf_l2c/file.csv -> stats/exp/BASELINE/file.csv
+			baseline_path = p.parent.parent / "BASELINE" / p.name
+			if baseline_path.exists():
+				baseline_data_files.append(str(baseline_path))
+		
+		if not baseline_data_files:
+			print("No BASELINE files found for actual coverage computation")
+			print(f"Searched for baseline files by replacing tag directories with BASELINE")
+			if data_files:
+				print(f"Example: {data_files[0]} -> {Path(data_files[0]).parent.parent / 'BASELINE' / Path(data_files[0]).name}")
+		else:
+			# Load TRANSLATION misses per-tag with appropriate cache type
+			df_baseline_list = []
+			df_prefetch_list = []
+			
+			for i, tag in enumerate(tags):
+				tag_lower = tag.lower()
+				if 'l1d' in tag_lower or 'l1i' in tag_lower:
+					cache_type = "cpu0_L1D"
+				elif 'llc' in tag_lower:
+					cache_type = "LLC"
+				else:
+					cache_type = "cpu0_L2C"  # default to L2C
+				
+				# Load baseline translation misses
+				df_base_tag = stats.load_df([baseline_data_files[i] if i < len(baseline_data_files) else baseline_data_files[0]], 
+											 ["BASELINE"], cache_type, "TRANSLATION")
+				df_base_tag['tag_prefetcher'] = tag  # Track which prefetcher to compare against
+				df_baseline_list.append(df_base_tag)
+				
+				# Load prefetcher translation misses
+				df_pref_tag = stats.load_df([input_data_files[i]], [tag], cache_type, "TRANSLATION")
+				df_prefetch_list.append(df_pref_tag)
+			
+			df_baseline = pd.concat(df_baseline_list, ignore_index=True)
+			df_prefetch = pd.concat(df_prefetch_list, ignore_index=True)
+
+			# Prepare merge on benchmarks
+			df_baseline = df_baseline.copy()
+			df_baseline.index.name = None
+			if 'benchmarks' not in df_baseline.columns:
+				df_baseline['benchmarks'] = df_baseline.index
+			
+			df_prefetch = df_prefetch.copy()
+			df_prefetch.index.name = None
+			if 'benchmarks' not in df_prefetch.columns:
+				df_prefetch['benchmarks'] = df_prefetch.index
+			
+			# Merge baseline and prefetcher data
+			left = df_baseline[['benchmarks','tag_prefetcher','MISS']].rename(columns={'MISS':'BASELINE_MISS'})
+			right = df_prefetch[['benchmarks','tag','MISS']].rename(columns={'MISS':'PREFETCHER_MISS'})
+			merged = pd.merge(left, right, left_on=['benchmarks','tag_prefetcher'], 
+							  right_on=['benchmarks','tag'], how='inner')
+			
+			merged['BASELINE_MISS'] = pd.to_numeric(merged['BASELINE_MISS'], errors='coerce').fillna(0)
+			merged['PREFETCHER_MISS'] = pd.to_numeric(merged['PREFETCHER_MISS'], errors='coerce').fillna(0)
+			merged['MISS_REDUCTION'] = merged['BASELINE_MISS'] - merged['PREFETCHER_MISS']
+			merged['ACTUAL_COVERAGE'] = merged.apply(
+				lambda r: (100.0 * r['MISS_REDUCTION'] / r['BASELINE_MISS']) if r['BASELINE_MISS'] > 0 else float('nan'), 
+				axis=1
+			)
+
+			plotting.plot_conf['plot_type'] = 'box'
+			plotting.plot_conf['plot_width'] = 8
+			plotting.plot_conf['plot_height'] = 3
+			plotting.plot_conf['ylabel'] = 'Actual Coverage (%)'
+			plotting.plot_conf['rotation'] = 45
+
+			output_file = figure_dir + "/" + figure_name + "_prefetch_coverage_true_" + benchsuite + "." + file_type
+			print(output_file)
+			
+			# Keep only rows with numeric coverage
+			df_plot = merged[['benchmarks','tag','ACTUAL_COVERAGE']].copy()
+			df_plot = df_plot.dropna(subset=['ACTUAL_COVERAGE'])
+			
+			if df_plot.empty:
+				print("No ACTUAL_COVERAGE values available to plot.")
+			else:
+				# Print boxplot statistics
+				print("\n=== ACTUAL_COVERAGE Statistics (%) ===")
+				for tag in tags:
+					tag_data = df_plot[df_plot['tag'] == tag]['ACTUAL_COVERAGE']
+					if not tag_data.empty:
+						print(f"{tag:20} count={len(tag_data):3d}  min={tag_data.min():6.2f}  q1={tag_data.quantile(0.25):6.2f}  median={tag_data.median():6.2f}  q3={tag_data.quantile(0.75):6.2f}  max={tag_data.max():6.2f}  mean={tag_data.mean():6.2f}")
+				print("")
+				plotting.plot_stat(df_plot, tags, 'ACTUAL_COVERAGE', output_file)
 
 
 	if (figure_type == "txvc_bypass"):
