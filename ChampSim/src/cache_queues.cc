@@ -72,6 +72,8 @@ bool do_collision_for_return(Iter begin, Iter end, PACKET& packet, unsigned sham
   return do_collision_for(begin, end, packet, shamt, [](PACKET& source, PACKET& destination) {
     source.data = destination.data;
     source.pf_metadata = destination.pf_metadata;
+    source.pf_prefetch_tag = destination.pf_prefetch_tag;
+    source.pf_origin_cache = destination.pf_origin_cache;
     for (auto ret : source.to_return)
       ret->return_data(source);
   });

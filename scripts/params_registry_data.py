@@ -99,9 +99,16 @@ def register_all():
         r.register_parameter('PF_CHILD_CONF_THRESHOLD', f'{comp}.pf_child_conf_threshold', components=[comp], category='env', ptype='int', default='2')
         r.register_parameter('PF_CHILD_TRAIN_ON_HIT', f'{comp}.pf_child_train_on_hit', components=[comp], category='env', ptype='int', default='1')
         r.register_parameter('PF_CHILD_ISSUE_ON_HIT', f'{comp}.pf_child_issue_on_hit', components=[comp], category='env', ptype='int', default='0')
+        r.register_parameter('PF_CHILD_FILL_THIS_LEVEL', f'{comp}.pf_child_fill_this_level', components=[comp], category='env', ptype='int', default='1')
+        # PF_CHILD_POPULATE_VC removed; routing decided by cache at runtime
+        # PF_CHILD_POPULATE_PB removed; routing decided by cache at runtime
         # Per-cache control to enable passing the full unmasked PTE address to prefetchers
         r.register_parameter(f'{comp.upper()}_PF_PREFETCH_FULL_ADDR', f'{comp}.pf_prefetch_full_addr', components=[comp], category='env', ptype='int', default='0')
         r.register_parameter('PF_BUFFER_FILL_CACHE_ON_HIT', f'{comp}.pf_buffer_fill_cache_on_hit', components=[comp], category='env', ptype='int', default='1')
+        # Per-cache configuration for bounded set-associative prefetch buffer
+        r.register_parameter('PF_BUFFER_SETS', f'{comp}.pf_buffer_sets', components=[comp], category='env', ptype='int', default='0', doc='Prefetch buffer table sets (0 = map-based)')
+        r.register_parameter('PF_BUFFER_WAYS', f'{comp}.pf_buffer_ways', components=[comp], category='env', ptype='int', default='0', doc='Prefetch buffer table ways (used when PF_BUFFER_SETS>0)')
+        r.register_parameter('PF_BUFFER_REPL_POLICY', f'{comp}.pf_buffer_repl_policy', components=[comp], category='env', ptype='int', default='0', doc='Prefetch buffer replacement (0=LRU, 1=LFU)')
 
     # other tx/tvc defaults
     r.register_parameter('TXVC_LATENCY', None, components=['txvc'], category='env', ptype='int', default='0')

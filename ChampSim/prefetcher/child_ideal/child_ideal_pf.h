@@ -23,6 +23,8 @@ private:
 
   bool train_on_hit;
   bool issue_on_hit;
+  bool fill_this_level;  // Control where prefetches install: true=this cache, false=lower level only
+  
   uint32_t mshr_gate_pct;
   uint64_t offset_bits;
 
@@ -92,6 +94,12 @@ public:
     else
       issue_on_hit = false;
 
+    // Control where prefetches install: true=this cache level, false=lower level only
+    if (auto e = champsim::EnvVar<int>::get("PF_CHILD_FILL_THIS_LEVEL"))
+      fill_this_level = (*e != 0);
+    else
+      fill_this_level = true;  // Default: fill this level (backward compatible)
+
     if (auto e = champsim::EnvVar<int>::get("PF_MSHR_GATE_PCT")) {
       int value = *e;
       mshr_gate_pct = (value > 0 && value <= 100) ? static_cast<uint32_t>(value) : 50u;
@@ -100,14 +108,18 @@ public:
     }
 
     std::cout << "PF ChildIdealPrefetcher: "
-              << "train_on_hit=" << (train_on_hit ? 1 : 0)
-              << " issue_on_hit=" << (issue_on_hit ? 1 : 0)
-              << " mshr_gate_pct=" << mshr_gate_pct << std::endl;
+          << "train_on_hit=" << (train_on_hit ? 1 : 0)
+          << " issue_on_hit=" << (issue_on_hit ? 1 : 0)
+          << " fill_this_level=" << (fill_this_level ? 1 : 0)
+          << " mshr_gate_pct=" << mshr_gate_pct << std::endl;
   }
 
   uint32_t get_mshr_gate_pct() const { return mshr_gate_pct; }
   bool should_issue_on_hit() const { return issue_on_hit; }
   bool should_train_on_hit() const { return train_on_hit; }
+  bool get_fill_this_level() const { return fill_this_level; }
+  
+  
   void notify_mshr_gate_blocked() { mshr_gate_blocked++; reason_issue_mshr_blocked++; }
   void notify_enqueue_failed() { reason_issue_enqueue_failed++; }
 

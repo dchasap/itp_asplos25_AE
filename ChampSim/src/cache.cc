@@ -35,9 +35,6 @@
 				extern double STLB_MPKI;
 #endif
 
-namespace {
-constexpr uint32_t TXVC_PTE_PREFETCH_METADATA = 0x54585643; // 'TXVC'
-
 bool txvc_prefetch_fill_to_txvc()
 {
 	static int mode = -1;
@@ -65,17 +62,16 @@ bool txvc_miss_fill_to_txvc()
 	}
 	return mode == 1;
 }
-}
 
 				bool CACHE::handle_fill(const PACKET& fill_mshr)
 				{
 					cpu = fill_mshr.cpu;
 
 #if defined TRANSLATION_EXCLUSIVE_CACHE
-					// TXVC prefetches should populate TXVC directly, not this cache level.
+					// VC-targeted prefetches should populate the victim cache directly, not this cache level.
 					if (enable_tx_victim_cache && NAME.find(_CACHE_) != std::string::npos && tx_victim_cache &&
-					    txvc_prefetch_fill_to_txvc() && fill_mshr.type == PREFETCH &&
-					    fill_mshr.pf_metadata == TXVC_PTE_PREFETCH_METADATA && fill_mshr.is_pte) {
+						txvc_prefetch_fill_to_txvc() && fill_mshr.type == PREFETCH &&
+						fill_mshr.pf_prefetch_tag == VC_PTE_PREFETCH_METADATA && fill_mshr.is_pte) {
 						auto txvc_prefetch_packet = fill_mshr;
 						tx_victim_cache->add_request(txvc_prefetch_packet, current_cycle, false, 0, true);
 
@@ -104,12 +100,32 @@ bool txvc_miss_fill_to_txvc()
 
 						return true;
 					}
+
+					// If this is a VC-targeted prefetch but we don't own the VC, skip installation.
+					// This prevents higher-level caches (e.g., L1D) from installing VC-targeted prefetches.
+					if (fill_mshr.type == PREFETCH && fill_mshr.pf_prefetch_tag == VC_PTE_PREFETCH_METADATA &&
+					    fill_mshr.is_pte && !(enable_tx_victim_cache && tx_victim_cache)) {
+						sim_stats.back().pf_fill++;
+						sim_stats.back().total_miss_latency += current_cycle - (fill_mshr.cycle_enqueued + 1);
+
+						auto copy{fill_mshr};
+						for (auto ret : copy.to_return)
+							ret->return_data(copy);
+
+						return true;
+					}
 #endif
 
 
 #if defined PREFETCH_BUFFER
 					if (enable_pf_buffer && pf_buffer) {
-						if (pf_buffer->get_mode() == PrefetchBuffer::PREFETCH_MODE && fill_mshr.prefetch_from_this && fill_mshr.is_pte) {
+						// Accept either locally-originated prefetches, explicitly-tagged PB prefetches,
+						// or prefetches that originated at a different cache level (pf_origin_cache != this).
+						// Use pf_origin_cache because forwarded packets typically clear prefetch_from_this.
+						bool originated_elsewhere = (fill_mshr.pf_origin_cache && fill_mshr.pf_origin_cache != this);
+						if (pf_buffer->get_mode() == PrefetchBuffer::PREFETCH_MODE &&
+							(fill_mshr.prefetch_from_this || originated_elsewhere || fill_mshr.pf_prefetch_tag == PB_PTE_PREFETCH_METADATA) &&
+							fill_mshr.is_pte) {
 							// PREFETCH_MODE: redirect prefetch fills into the buffer so they do not pollute the main cache.
 							pf_buffer->insert(fill_mshr, current_cycle);
 							sim_stats.back().pf_fill++;
@@ -124,6 +140,23 @@ bool txvc_miss_fill_to_txvc()
 						}
 					}
 #endif // PREFETCH_BUFFER
+
+		#if defined PREFETCH_BUFFER
+					// If this fill is a PREFETCH that originated at a different cache level
+					// and this cache level does NOT have a prefetch buffer, do not install the line
+					// into this cache. Instead return the data to any requestors and stop here.
+					// We check pf_origin_cache because forwarded packets often clear prefetch_from_this.
+					bool originated_elsewhere = (fill_mshr.pf_origin_cache && fill_mshr.pf_origin_cache != this);
+					if (fill_mshr.type == PREFETCH && originated_elsewhere && !(enable_pf_buffer && pf_buffer)) {
+						// update pf stats and latency accounting similar to other pf handling
+						sim_stats.back().pf_fill++;
+						sim_stats.back().total_miss_latency += current_cycle - (fill_mshr.cycle_enqueued + 1);
+						auto copy{fill_mshr};
+						for (auto ret : copy.to_return)
+							ret->return_data(copy);
+						return true;
+					}
+		#endif
 
 					// find victim
 #if defined SPLIT_STLB
@@ -183,6 +216,7 @@ bool txvc_miss_fill_to_txvc()
 
 					bool success = true;
 					auto metadata_thru = fill_mshr.pf_metadata;
+					auto metadata_tag_thru = fill_mshr.pf_prefetch_tag;
 					auto pkt_address = (virtual_prefetch ? fill_mshr.v_address : fill_mshr.address) & ~champsim::bitmask(match_offset_bits ? 0 : OFFSET_BITS);
 
 					if (way != set_end) {
@@ -196,6 +230,8 @@ bool txvc_miss_fill_to_txvc()
 							writeback_packet.ip = 0;
 							writeback_packet.type = WRITE;
 							writeback_packet.pf_metadata = way->pf_metadata;
+							writeback_packet.pf_prefetch_tag = way->pf_prefetch_tag;
+							writeback_packet.pf_origin_cache = way->pf_origin_cache;
 
 #if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT
 							writeback_packet.is_instr = way->is_instr;
@@ -230,6 +266,8 @@ bool txvc_miss_fill_to_txvc()
 								victim_packet.ip = 0;
 								victim_packet.type = fill_mshr.type;
 								victim_packet.pf_metadata = way->pf_metadata;
+								victim_packet.pf_prefetch_tag = way->pf_prefetch_tag;
+								victim_packet.pf_origin_cache = way->pf_origin_cache;
 								victim_packet.prefetch_from_this = way->prefetch;
 
 #if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT
@@ -304,19 +342,19 @@ bool txvc_miss_fill_to_txvc()
 							//TODO: we don't handle really writes, writebacks because pte are never written to
 #endif	
 
-							if (way->prefetch) {
-								sim_stats.back().pf_useless++;
-								if (way->pf_metadata == TXVC_PTE_PREFETCH_METADATA) {
-#if defined TRANSLATION_EXCLUSIVE_CACHE
-									if (enable_tx_victim_cache && NAME.find(_CACHE_) != std::string::npos && tx_victim_cache)
-										tx_victim_cache->record_pf_useless();
-#endif
-								}
-							}
+										if (way->prefetch) {
+											sim_stats.back().pf_useless++;
+											if (way->pf_prefetch_tag == VC_PTE_PREFETCH_METADATA) {
+			#if defined TRANSLATION_EXCLUSIVE_CACHE
+												if (enable_tx_victim_cache && NAME.find(_CACHE_) != std::string::npos && tx_victim_cache)
+													tx_victim_cache->record_pf_useless();
+			#endif
+											}
+										}
 
 							if (fill_mshr.type == PREFETCH) {
 								sim_stats.back().pf_fill++;
-								if (fill_mshr.pf_metadata == TXVC_PTE_PREFETCH_METADATA) {
+								if (fill_mshr.pf_prefetch_tag == VC_PTE_PREFETCH_METADATA) {
 #if defined TRANSLATION_EXCLUSIVE_CACHE
 									if (enable_tx_victim_cache && NAME.find(_CACHE_) != std::string::npos && tx_victim_cache)
 										tx_victim_cache->record_pf_fill();
@@ -389,6 +427,8 @@ bool txvc_miss_fill_to_txvc()
 																						false);
 #endif
 							way->pf_metadata = metadata_thru;
+							way->pf_prefetch_tag = metadata_tag_thru;
+							way->pf_origin_cache = fill_mshr.pf_origin_cache;
 						}
 					} else {
 						// Bypass
@@ -462,6 +502,10 @@ bool txvc_miss_fill_to_txvc()
 						auto copy{fill_mshr};
 						//std::cout << "checkpoint 8.1" << std::endl;
 						copy.pf_metadata = metadata_thru;
+						copy.pf_prefetch_tag = metadata_tag_thru;
+						copy.pf_origin_cache = fill_mshr.pf_origin_cache;
+						copy.pf_prefetch_tag = metadata_tag_thru;
+						copy.pf_prefetch_tag = metadata_tag_thru;
 						for (auto ret : copy.to_return) {
 						//std::cout << "checkpoint 8.2" << std::endl;
 							ret->return_data(copy);
@@ -547,6 +591,7 @@ bool txvc_miss_fill_to_txvc()
 
 					// update prefetcher on load instructions and prefetches from upper levels
 					auto metadata_thru = handle_pkt.pf_metadata;
+					auto metadata_tag_thru = handle_pkt.pf_prefetch_tag;
 					if (should_activate_prefetcher(handle_pkt)) {
 						uint64_t pf_base_addr;
 						if (static_cast<access_type>(handle_pkt.type) == access_type::TRANSLATION && prefetch_use_full_address) {
@@ -585,52 +630,72 @@ bool txvc_miss_fill_to_txvc()
 						hit_hook(handle_pkt);
 #endif
 
-						// update replacement policy
-						const auto way_idx = static_cast<std::size_t>(std::distance(set_begin, way)); // cast protected by earlier assertion
+						// Skip replacement updates only for special PB PTE prefetch hits that originated elsewhere.
+						bool originated_elsewhere_hit = (handle_pkt.pf_origin_cache && handle_pkt.pf_origin_cache != this);
+						bool is_pb_pte_prefetch = (handle_pkt.type == PREFETCH && handle_pkt.is_pte && handle_pkt.pf_prefetch_tag == PB_PTE_PREFETCH_METADATA);
+						bool skip_replacement_update = (is_pb_pte_prefetch && originated_elsewhere_hit);
+						if (!skip_replacement_update) {
+							// update replacement policy
+							const auto way_idx = static_cast<std::size_t>(std::distance(set_begin, way)); // cast protected by earlier assertion
 #if defined ENABLE_TRANSLATION_AWARE_REPLACEMENT
-						REP_POL_XARGS xargs;
-						xargs.is_instr = handle_pkt.is_instr;
-						xargs.is_pte = handle_pkt.is_pte;
-						xargs.is_replay = !handle_pkt.is_translated;
-						xargs.translation_level = handle_pkt.translation_level;
-						xargs.access_freq = handle_pkt.access_freq;
-	#if defined SPLIT_STLB
-						impl_update_replacement_state(handle_pkt.cpu, get_set_index(handle_pkt.address, handle_pkt.is_instr), way_idx, 
-																					handle_pkt.address, handle_pkt.ip, 0, 
-																					handle_pkt.type, false, xargs);
-	#elif defined TX_SPLIT_CACHE
-						impl_update_replacement_state(handle_pkt.cpu, get_set_index(handle_pkt.address, handle_pkt.is_pte), way_idx, 
-																					handle_pkt.address, handle_pkt.ip, 0, 
-																					handle_pkt.type, false, xargs);
-	#else 
-						impl_update_replacement_state(handle_pkt.cpu, get_set_index(handle_pkt.address), way_idx, 
-																					handle_pkt.address, handle_pkt.ip, 0, 
-																					handle_pkt.type, false, xargs);
-	#endif
+							REP_POL_XARGS xargs;
+							xargs.is_instr = handle_pkt.is_instr;
+							xargs.is_pte = handle_pkt.is_pte;
+							xargs.is_replay = !handle_pkt.is_translated;
+							xargs.translation_level = handle_pkt.translation_level;
+							xargs.access_freq = handle_pkt.access_freq;
+		#if defined SPLIT_STLB
+							impl_update_replacement_state(handle_pkt.cpu, get_set_index(handle_pkt.address, handle_pkt.is_instr), way_idx, 
+																						handle_pkt.address, handle_pkt.ip, 0, 
+																						handle_pkt.type, false, xargs);
+		#elif defined TX_SPLIT_CACHE
+							impl_update_replacement_state(handle_pkt.cpu, get_set_index(handle_pkt.address, handle_pkt.is_pte), way_idx, 
+																						handle_pkt.address, handle_pkt.ip, 0, 
+																						handle_pkt.type, false, xargs);
+		#else 
+							impl_update_replacement_state(handle_pkt.cpu, get_set_index(handle_pkt.address), way_idx, 
+																						handle_pkt.address, handle_pkt.ip, 0, 
+																						handle_pkt.type, false, xargs);
+		#endif
 
 #else
 
-	#if defined SPLIT_STLB
-						impl_update_replacement_state(handle_pkt.cpu, get_set_index(handle_pkt.address, handle_pkt.is_instr), way_idx, way->address, handle_pkt.ip, 0, handle_pkt.type, true);
-	#elif defined TX_SPLIT_CACHE
-						impl_update_replacement_state(handle_pkt.cpu, get_set_index(handle_pkt.address, handle_pkt.is_pte), way_idx, way->address, handle_pkt.ip, 0, handle_pkt.type, true);
-	#else
-						impl_update_replacement_state(handle_pkt.cpu, get_set_index(handle_pkt.address), way_idx, way->address, handle_pkt.ip, 0, handle_pkt.type, true);
-	#endif 
+		#if defined SPLIT_STLB
+							impl_update_replacement_state(handle_pkt.cpu, get_set_index(handle_pkt.address, handle_pkt.is_instr), way_idx, way->address, handle_pkt.ip, 0, handle_pkt.type, true);
+		#elif defined TX_SPLIT_CACHE
+							impl_update_replacement_state(handle_pkt.cpu, get_set_index(handle_pkt.address, handle_pkt.is_pte), way_idx, way->address, handle_pkt.ip, 0, handle_pkt.type, true);
+		#else
+							impl_update_replacement_state(handle_pkt.cpu, get_set_index(handle_pkt.address), way_idx, way->address, handle_pkt.ip, 0, handle_pkt.type, true);
+		#endif 
 
 #endif
+						}
 
 						auto copy{handle_pkt};
 						copy.data = way->data;
 						copy.pf_metadata = metadata_thru;
+						copy.pf_prefetch_tag = metadata_tag_thru;
+						copy.pf_origin_cache = way->pf_origin_cache;
 
 #if defined ENABLE_PAGE_CROSSING_STATS
 						if ((NAME.find("STLB") != std::string::npos) && (handle_pkt.page_crossing == 2)) {
 
 							copy.page_crossing = 1;
 						}
-#endif  
-
+#endif
+/*
+						// If this is a VC-targeted prefetch hit at the VC-owning cache, forward to TXVC.
+						if (handle_pkt.type == PREFETCH && handle_pkt.pf_prefetch_tag == VC_PTE_PREFETCH_METADATA &&
+						    handle_pkt.is_pte && enable_tx_victim_cache && tx_victim_cache) {
+							PACKET txvc_pkt = handle_pkt;
+							txvc_pkt.data = way->data;
+							txvc_pkt.pf_metadata = way->pf_metadata;
+							txvc_pkt.pf_prefetch_tag = way->pf_prefetch_tag;
+							tx_victim_cache->add_request(txvc_pkt, current_cycle, false, 0, true);
+							sim_stats.back().pf_fill++;
+							tx_victim_cache->record_pf_fill();
+						}
+*/
 						for (auto ret : copy.to_return)
 							ret->return_data(copy);
 
@@ -638,7 +703,7 @@ bool txvc_miss_fill_to_txvc()
 						// update prefetch stats and reset prefetch bit
 						if (way->prefetch && !handle_pkt.prefetch_from_this) {
 							sim_stats.back().pf_useful++;
-							if (way->pf_metadata == TXVC_PTE_PREFETCH_METADATA) {
+							if (way->pf_prefetch_tag == VC_PTE_PREFETCH_METADATA) {
 #if defined TRANSLATION_EXCLUSIVE_CACHE
 								if (enable_tx_victim_cache && NAME.find(_CACHE_) != std::string::npos && tx_victim_cache)
 									tx_victim_cache->record_pf_useful();
@@ -707,6 +772,7 @@ bool txvc_miss_fill_to_txvc()
 	#endif
 							
 							copy_pkt.pf_metadata = metadata_thru;
+							copy_pkt.pf_prefetch_tag = metadata_tag_thru;
 							for (auto ret : copy_pkt.to_return)
 								ret->return_data(copy_pkt);
 
@@ -815,6 +881,7 @@ bool txvc_miss_fill_to_txvc()
 	#endif
 					
 								txc_copy_pkt.pf_metadata = metadata_thru;
+								txc_copy_pkt.pf_prefetch_tag = metadata_tag_thru;
 								for (auto ret : txc_copy_pkt.to_return)
 									ret->return_data(txc_copy_pkt);
 								
@@ -893,6 +960,8 @@ bool txvc_miss_fill_to_txvc()
 								auto copy{handle_pkt};
 								copy.data        = pb_entry->data;
 								copy.pf_metadata = metadata_thru;
+								copy.pf_prefetch_tag = pb_entry->pf_prefetch_tag;
+								copy.pf_origin_cache = pb_entry->pf_origin_cache;
 								for (auto ret : copy.to_return)
 									ret->return_data(copy);
 								// Also install the line in the main cache so future
@@ -901,12 +970,14 @@ bool txvc_miss_fill_to_txvc()
 								//auto fill_pkt{handle_pkt};
 								if (pf_buffer->fill_cache_on_hit_enabled()) {
 									auto copy2{handle_pkt};
-									copy2.data              = pb_entry->data;
-									copy2.pf_metadata       = pb_entry->pf_metadata;
-									copy2.prefetch_from_this = false;
+									copy2.data            = pb_entry->data;
+									copy2.pf_metadata     = pb_entry->pf_metadata;
+									// Preserve the original prefetch tag (revert recent change)
+									copy2.pf_prefetch_tag = pb_entry->pf_prefetch_tag;
+									copy2.pf_origin_cache = pb_entry->pf_origin_cache;
 									copy2.to_return.clear();
+									// Note: do not invalidate the PB entry here; let existing PB semantics remain
 									handle_fill(copy2);
-									//pf_buffer->invalidate(handle_pkt.address);
 								}
 								return true;
 						}
@@ -1015,7 +1086,7 @@ bool txvc_miss_fill_to_txvc()
 							// Mark the prefetch as useful
 							if (mshr_entry->prefetch_from_this) {
 								sim_stats.back().pf_useful++;
-								if (mshr_entry->pf_metadata == TXVC_PTE_PREFETCH_METADATA) {
+								if (mshr_entry->pf_prefetch_tag == VC_PTE_PREFETCH_METADATA) {
 #if defined TRANSLATION_EXCLUSIVE_CACHE
 									if (enable_tx_victim_cache && NAME.find(_CACHE_) != std::string::npos && tx_victim_cache)
 										tx_victim_cache->record_pf_useful();
@@ -1472,6 +1543,7 @@ int CACHE::prefetch_line(uint64_t pf_addr, bool fill_this_level, uint32_t prefet
   pf_packet.fill_this_level = fill_this_level;
   pf_packet.pf_metadata = prefetch_metadata;
   pf_packet.cpu = cpu;
+	pf_packet.pf_origin_cache = this;
   pf_packet.address = pf_addr;
   pf_packet.v_address = virtual_prefetch ? pf_addr : 0;
 
@@ -1511,7 +1583,7 @@ int CACHE::prefetch_line(uint64_t pf_addr, bool fill_this_level, uint32_t prefet
 	}
 #endif
 
-  auto success = this->add_pq(pf_packet);
+	auto success = this->add_pq(pf_packet);
   if (success) {
     ++sim_stats.back().pf_issued;
 		if (pf_packet.pf_metadata == 1)
@@ -1520,7 +1592,7 @@ int CACHE::prefetch_line(uint64_t pf_addr, bool fill_this_level, uint32_t prefet
   return success;
 }
 
-int CACHE::prefetch_pte_line(uint64_t pf_addr, bool fill_this_level, std::size_t translation_level)
+int CACHE::prefetch_pte_line(uint64_t pf_addr, bool fill_this_level, std::size_t translation_level, uint64_t prefetch_metadata, uint32_t prefetch_tag)
 {
 	sim_stats.back().pf_requested++;
 
@@ -1536,8 +1608,12 @@ int CACHE::prefetch_pte_line(uint64_t pf_addr, bool fill_this_level, std::size_t
 	pf_packet.cpu = cpu;
 	pf_packet.address = pf_addr;
 	pf_packet.v_address = virtual_prefetch ? pf_addr : 0;
-	pf_packet.pf_metadata = TXVC_PTE_PREFETCH_METADATA;
+	// Preserve provided prefetch metadata (VPN+level) if supplied; otherwise
+	// default to legacy VC marker for backward compatibility.
+	pf_packet.pf_metadata = (prefetch_metadata != 0) ? prefetch_metadata : VC_PTE_PREFETCH_METADATA;
+	pf_packet.pf_prefetch_tag = prefetch_tag;
 	pf_packet.translation_level = translation_level;
+	pf_packet.pf_origin_cache = this;
 
 #if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT || defined TRANSLATION_EXCLUSIVE_CACHE
 	pf_packet.is_pte = true;
@@ -1608,9 +1684,11 @@ void CACHE::return_data(const PACKET& packet)
 	if (mshr_entry->event_cycle != std::numeric_limits<uint64_t>::max())
 		return;
 
-  // MSHR holds the most updated information about this request
-  mshr_entry->data = packet.data;
-  mshr_entry->pf_metadata = packet.pf_metadata;
+	// MSHR holds the most updated information about this request
+	mshr_entry->data = packet.data;
+	mshr_entry->pf_metadata = packet.pf_metadata;
+	mshr_entry->pf_prefetch_tag = packet.pf_prefetch_tag;
+	mshr_entry->pf_origin_cache = packet.pf_origin_cache;
   mshr_entry->event_cycle = current_cycle + (warmup ? 0 : FILL_LATENCY);
 
   if constexpr (champsim::debug_print) {

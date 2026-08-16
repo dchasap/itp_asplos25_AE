@@ -358,7 +358,7 @@ def fetch_experiment_data(root_dir, exp_name, sim):
 	local = f"{root_dir}/data/{exp_name}"
 	
 	cmd = [
-			"rsync", "-av",
+			"rsync", "-avz", "--no-checksum", "--ignore-errors",
 			"--include=*/",
 			"--include=*.out",
 			"--exclude=*",

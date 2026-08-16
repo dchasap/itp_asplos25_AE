@@ -1094,6 +1094,7 @@ SELECTED_TXVC_TOP200_QUALCOMM_SRV_AP = [
 "srv726_ap.champsimtrace.xz"
 ]
 
+
 SELECTED_TXVC_TOP100_QUALCOMM_SRV_AP = [
 "srv461_ap.champsimtrace.xz",
 "srv366_ap.champsimtrace.xz",

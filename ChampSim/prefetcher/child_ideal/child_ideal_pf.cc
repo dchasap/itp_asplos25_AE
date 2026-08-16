@@ -74,7 +74,7 @@ uint64_t CACHE::prefetcher_cache_operate(uint64_t addr, uint64_t ip, uint8_t cac
       for (auto pf_addr : candidates) {
         if (pf_addr == 0) continue;  // Skip invalid addresses
         const std::size_t child_level = (translation_level > 0) ? translation_level - 1 : 0;
-        if (prefetch_pte_line(pf_addr, /*fill_this_level=*/true, child_level)) {
+          if (prefetch_pte_line(pf_addr, pf->get_fill_this_level(), child_level, 0, PB_PTE_PREFETCH_METADATA)) {
             pf->record_prefetch_issued(pf_addr);
         } else {
           pf->notify_enqueue_failed();
@@ -96,7 +96,7 @@ uint64_t CACHE::prefetcher_cache_operate(uint64_t addr, uint64_t ip, uint8_t cac
       for (auto pf_addr : candidates) {
       if (pf_addr == 0) continue;  // Skip invalid addresses
       const std::size_t child_level = (translation_level > 0) ? translation_level - 1 : 0;
-      if (prefetch_pte_line(pf_addr, /*fill_this_level=*/true, child_level)) {
+        if (prefetch_pte_line(pf_addr, pf->get_fill_this_level(), child_level, 0, PB_PTE_PREFETCH_METADATA)) {
           pf->record_prefetch_issued(pf_addr);
       } else {
         pf->notify_enqueue_failed();

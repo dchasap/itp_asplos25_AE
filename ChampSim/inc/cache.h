@@ -107,6 +107,12 @@ struct cache_stats {
   uint64_t total_miss_latency = 0;
 };
 
+// Public tag for VC-targeted prefetches. Prefetchers can set
+// PACKET::pf_prefetch_tag to this value to mark fills for the VC.
+inline constexpr uint32_t VC_PTE_PREFETCH_METADATA = 0x54585643; // 'TXVC' (kept value for compatibility)
+// Public tag for Prefetch-Buffer-targeted prefetches.
+inline constexpr uint32_t PB_PTE_PREFETCH_METADATA = 0x50504246; // 'PBUF'
+
 struct cache_queue_stats {
   uint64_t RQ_ACCESS = 0;
   uint64_t RQ_MERGED = 0;
@@ -148,6 +154,8 @@ class CACHE : public champsim::operable, public MemoryRequestConsumer, public Me
     uint64_t data = 0;
 
     uint64_t pf_metadata = 0;
+    uint32_t pf_prefetch_tag = 0;
+    CACHE* pf_origin_cache = nullptr;
 
 #if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT || defined TRANSLATION_EXCLUSIVE_CACHE
 		bool is_instr = false;
@@ -782,6 +790,10 @@ public:
             way->txvc_hit_by_demand = true;
             pf_cache_lines_first_use++;
             pf_cache_first_use_latency_sum += (curr_cycle - way->txvc_insert_cycle);
+            // Attribute usefulness to originating cache/prefetcher if available
+            if (way->pf_origin_cache) {
+              way->pf_origin_cache->sim_stats.back().pf_useful++;
+            }
           }
 
           ReplacementPolicy::REP_POL_ARGS xargs;
@@ -947,11 +959,18 @@ public:
   class PrefetchBuffer {
   public:
     enum BufferMode { PREFETCH_MODE = 0, MISS_MODE = 1 };
+    enum ReplacementPolicy { LRU = 0, LFU = 1 };
 
     struct PBEntry {
+      bool     valid        = false;
+      bool     ever_accessed = false; // Track if entry was ever used for accuracy
+      uint64_t tag          = 0; // key tag when using set-assoc table
       uint64_t data         = 0;
       uint64_t insert_cycle = 0;
+      uint32_t frequency    = 0; // access frequency for LFU replacement
       uint64_t pf_metadata  = 0;
+      uint32_t pf_prefetch_tag = 0;
+      CACHE* pf_origin_cache = nullptr;
       uint8_t  type         = 0;
 #if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT || defined TRANSLATION_EXCLUSIVE_CACHE
       bool     is_pte       = false;
@@ -963,22 +982,51 @@ public:
   private:
     uint32_t offset_bits;
     BufferMode mode = PREFETCH_MODE;
+    ReplacementPolicy repl_policy = LRU;
     bool fill_cache_on_hit = false;
     static constexpr uint64_t MAX_ENTRIES = 100000;  // Safeguard against unbounded growth
+
+    // Set-associative table parameters (optional). If num_sets>0 and num_ways>0,
+    // the PrefetchBuffer will operate as a bounded set-associative table.
+    uint32_t num_sets = 0;
+    uint32_t num_ways = 0;
+    // table[set][way]
+    std::vector<std::vector<PBEntry>> table;
+
+    // Fallback (original) map-based storage when not using table-mode
     std::unordered_map<uint64_t, PBEntry> entries; // key = address >> offset_bits
 
     uint64_t stat_inserts     = 0;
     uint64_t stat_demand_hits = 0;
+    uint64_t stat_evicted_unused = 0;  // Track useless prefetches (evicted without use)
+    uint64_t stat_late_demand = 0;     // Track prefetches evicted then later demanded (subset of useless)
+
+    // Track evicted entries to detect late demands (unbounded for accurate stats)
+    std::map<uint64_t, uint64_t> evicted_addresses;  // key -> eviction_cycle
 
     uint64_t make_key(uint64_t address) const { return address >> offset_bits; }
 
   public:
-    explicit PrefetchBuffer(uint32_t _offset_bits, BufferMode _mode = PREFETCH_MODE, bool _fill_cache_on_hit=true) 
-      : offset_bits(_offset_bits), mode(_mode), fill_cache_on_hit(_fill_cache_on_hit)
+    // Optional: pass non-zero _num_sets/_num_ways to enable set-associative table mode.
+    explicit PrefetchBuffer(uint32_t _offset_bits, BufferMode _mode = PREFETCH_MODE, bool _fill_cache_on_hit=true, uint32_t _num_sets=0, uint32_t _num_ways=0)
+      : offset_bits(_offset_bits), mode(_mode), fill_cache_on_hit(_fill_cache_on_hit), num_sets(_num_sets), num_ways(_num_ways)
     {
+      // Read replacement policy from env var (LRU=0, LFU=1)
+      if (auto e = champsim::EnvVar<int>::get("PF_BUFFER_REPL_POLICY")) {
+        repl_policy = (*e == 1) ? LFU : LRU;
+      } else {
+        repl_policy = LRU;
+      }
+
       const char* mode_str = (mode == MISS_MODE) ? "MISS_MODE" : "PREFETCH_MODE";
+      const char* repl_str = (repl_policy == LFU) ? "LFU" : "LRU";
       std::cout << "[DEBUG] PrefetchBuffer constructor: offset_bits=" << _offset_bits << ", mode=" << mode_str << std::endl;
-      std::cout << "PREFETCH_BUFFER: map-based (unbounded, collision-free) mode=" << mode_str << ", fill_cache_on_hit=" << std::boolalpha << fill_cache_on_hit << std::noboolalpha << std::endl;
+      if (num_sets > 0 && num_ways > 0) {
+        table.assign(num_sets, std::vector<PBEntry>(num_ways));
+        std::cout << "PREFETCH_BUFFER: set-assoc table mode: sets=" << num_sets << " ways=" << num_ways << " mode=" << mode_str << " repl=" << repl_str << ", fill_cache_on_hit=" << std::boolalpha << fill_cache_on_hit << std::noboolalpha << std::endl;
+      } else {
+        std::cout << "PREFETCH_BUFFER: map-based (unbounded, collision-free) mode=" << mode_str << ", fill_cache_on_hit=" << std::boolalpha << fill_cache_on_hit << std::noboolalpha << std::endl;
+      }
       std::cout << "[DEBUG] PrefetchBuffer constructor completed successfully" << std::endl;
     }
 
@@ -988,21 +1036,94 @@ public:
 
     void insert(const PACKET& pkt, uint64_t cycle)
     {
+      uint64_t key = make_key(pkt.address);
+
+      // Table-mode (bounded set-associative)
+      if (num_sets > 0 && num_ways > 0) {
+        const uint64_t set_idx = key % num_sets;
+        const uint64_t tag = key / num_sets;
+
+        // Search for an existing tag in the set
+        int free_way = -1;
+        int victim_way = 0;
+        uint64_t victim_metric = UINT64_MAX;
+        for (uint32_t w = 0; w < num_ways; ++w) {
+          auto &way = table[set_idx][w];
+          if (way.valid && way.tag == tag) {
+            // overwrite existing
+            way.data = pkt.data;
+            way.insert_cycle = cycle;
+            way.pf_metadata = pkt.pf_metadata;
+            way.pf_prefetch_tag = pkt.pf_prefetch_tag;
+            way.pf_origin_cache = pkt.pf_origin_cache;
+            way.type = pkt.type;
+#if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT || defined TRANSLATION_EXCLUSIVE_CACHE
+            way.is_pte = pkt.is_pte;
+            way.is_instr = pkt.is_instr;
+            way.pte_level = static_cast<uint8_t>(pkt.translation_level);
+#endif
+            stat_inserts++;
+            return;
+          }
+          if (!way.valid && free_way == -1)
+            free_way = static_cast<int>(w);
+          if (!way.valid) {
+            // treat invalid as best victim candidate
+            if (victim_metric == UINT64_MAX) { victim_way = w; victim_metric = 0; }
+          } else {
+            // Select victim based on replacement policy
+            uint64_t metric = (repl_policy == LFU) ? way.frequency : way.insert_cycle;
+            if (metric < victim_metric) {
+              victim_way = w;
+              victim_metric = metric;
+            }
+          }
+        }
+
+        int use_way = (free_way != -1) ? free_way : victim_way;
+        auto &victim = table[set_idx][use_way];
+        // Track useless prefetch: evicting a valid, never-accessed entry
+        if (victim.valid && !victim.ever_accessed) {
+          stat_evicted_unused++;
+          // Record evicted address for late-demand tracking (unbounded)
+          evicted_addresses[key] = cycle;
+        }
+        victim.valid = true;
+        victim.ever_accessed = false;  // Reset access tracking
+        victim.tag = tag;
+        victim.data = pkt.data;
+        victim.insert_cycle = cycle;
+        victim.frequency = 0;  // Reset frequency on new insertion
+        victim.pf_metadata = pkt.pf_metadata;
+        victim.pf_prefetch_tag = pkt.pf_prefetch_tag;
+        victim.pf_origin_cache = pkt.pf_origin_cache;
+        victim.type = pkt.type;
+#if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT || defined TRANSLATION_EXCLUSIVE_CACHE
+        victim.is_pte = pkt.is_pte;
+        victim.is_instr = pkt.is_instr;
+        victim.pte_level = static_cast<uint8_t>(pkt.translation_level);
+#endif
+        stat_inserts++;
+        return;
+      }
+
+      // Map-based fallback (original behavior)
       // In MISS_MODE, buffer can grow unbounded with demand misses.
       // Safeguard: stop inserting if buffer exceeds MAX_ENTRIES.
       if (mode == MISS_MODE && entries.size() >= MAX_ENTRIES) {
-        // Buffer is full, skip insertion in MISS_MODE to prevent memory exhaustion
         if (stat_inserts == MAX_ENTRIES) {
           std::cerr << "WARNING: PREFETCH_BUFFER MISS_MODE reached capacity (" << MAX_ENTRIES << " entries). "
                     << "Stopping insertions to prevent OOM. Consider increasing MAX_ENTRIES or using PREFETCH_MODE." << std::endl;
         }
         return;
       }
-      
-      auto& e       = entries[make_key(pkt.address)]; // insert or overwrite
+
+      auto& e       = entries[key]; // insert or overwrite
       e.data         = pkt.data;
       e.insert_cycle = cycle;
       e.pf_metadata  = pkt.pf_metadata;
+      e.pf_prefetch_tag = pkt.pf_prefetch_tag;
+      e.pf_origin_cache = pkt.pf_origin_cache;
       e.type         = pkt.type;
 #if defined ENABLE_EXTRA_CACHE_STATS || defined FORCE_HIT || defined TRANSLATION_EXCLUSIVE_CACHE
       e.is_pte       = pkt.is_pte;
@@ -1014,7 +1135,34 @@ public:
 
     PBEntry* lookup(uint64_t address)
     {
-      auto it = entries.find(make_key(address));
+      uint64_t key = make_key(address);
+
+      // Check if this address was previously evicted (late demand)
+      auto evicted_it = evicted_addresses.find(key);
+      if (evicted_it != evicted_addresses.end()) {
+        stat_late_demand++;
+        evicted_addresses.erase(evicted_it);  // Remove to avoid double-counting
+      }
+
+      // Table-mode (bounded set-associative)
+      if (num_sets > 0 && num_ways > 0) {
+        const uint64_t set_idx = key % num_sets;
+        const uint64_t tag = key / num_sets;
+        for (uint32_t w = 0; w < num_ways; ++w) {
+          auto &way = table[set_idx][w];
+          if (way.valid && way.tag == tag) {
+            stat_demand_hits++;
+            way.ever_accessed = true;  // Mark as accessed for accuracy tracking
+            // Increment frequency for LFU replacement (saturate at max uint32_max)
+            if (way.frequency < UINT32_MAX)
+              way.frequency++;
+            return &way;
+          }
+        }
+        return nullptr;
+      }
+
+      auto it = entries.find(key);
       if (it != entries.end()) {
         stat_demand_hits++;
         return &it->second;
@@ -1022,19 +1170,59 @@ public:
       return nullptr;
     }
 
-    void invalidate(uint64_t address) { entries.erase(make_key(address)); }
+    void invalidate(uint64_t address)
+    {
+      uint64_t key = make_key(address);
+      if (num_sets > 0 && num_ways > 0) {
+        const uint64_t set_idx = key % num_sets;
+        const uint64_t tag = key / num_sets;
+        for (uint32_t w = 0; w < num_ways; ++w) {
+          auto &way = table[set_idx][w];
+          if (way.valid && way.tag == tag) {
+            way.valid = false;
+            return;
+          }
+        }
+        return;
+      }
+
+      entries.erase(key);
+    }
 
     void print_stats() const
     {
       const double hit_rate = (stat_inserts > 0)
                                 ? 100.0 * static_cast<double>(stat_demand_hits) / static_cast<double>(stat_inserts)
                                 : 0.0;
+      const uint64_t useful = stat_demand_hits;
+      const uint64_t useless = stat_evicted_unused;
+      const uint64_t total_known = useful + useless;
+      const double accuracy = (total_known > 0)
+                                ? 100.0 * static_cast<double>(useful) / static_cast<double>(total_known)
+                                : 0.0;
       const char* mode_str = (mode == MISS_MODE) ? "MISS_MODE" : "PREFETCH_MODE";
-      std::cout << "PREFETCH_BUFFER STATS (mode=" << mode_str << ")"
-                << " INSERTS:" << stat_inserts
-                << " DEMAND_HITS:" << stat_demand_hits
-                << " HIT_RATE(%):" << hit_rate
-                << " SIZE_AT_END:" << entries.size()
+      const char* repl_str = (repl_policy == LFU) ? "LFU" : "LRU";
+      size_t size_at_end = 0;
+      if (num_sets > 0 && num_ways > 0) {
+        for (uint32_t s = 0; s < num_sets; ++s)
+          for (uint32_t w = 0; w < num_ways; ++w)
+            if (table[s][w].valid)
+              ++size_at_end;
+      } else {
+        size_at_end = entries.size();
+      }
+
+      // Format matches ChampSim stat patterns for easy parsing: CACHE_NAME already printed by caller
+      std::cout << "PREFETCH_BUFFER"
+                << " INSERTS: " << stat_inserts
+                << " USEFUL: " << useful
+                << " USELESS: " << useless
+                << " LATE_DEMAND: " << stat_late_demand
+                << " ACCURACY: " << std::fixed << std::setprecision(2) << accuracy
+                << " COVERAGE: " << hit_rate
+                << " MODE: " << mode_str
+                << " REPL: " << repl_str
+                << " SIZE_AT_END: " << size_at_end
                 << std::endl;
     }
   };
@@ -1073,7 +1261,7 @@ public:
 #endif
 
   int prefetch_line(uint64_t pf_addr, bool fill_this_level, uint32_t prefetch_metadata);
-  int prefetch_pte_line(uint64_t pf_addr, bool fill_this_level, std::size_t translation_level);
+  int prefetch_pte_line(uint64_t pf_addr, bool fill_this_level, std::size_t translation_level, uint64_t prefetch_metadata = 0, uint32_t prefetch_tag = 0);
 
   [[deprecated("Use CACHE::prefetch_line(pf_addr, fill_this_level, prefetch_metadata) instead.")]] int
   prefetch_line(uint64_t ip, uint64_t base_addr, uint64_t pf_addr, bool fill_this_level, uint32_t prefetch_metadata);
@@ -1404,7 +1592,19 @@ public:
           std::cout << "[DEBUG] " << NAME << " about to create PrefetchBuffer with OFFSET_BITS=" << OFFSET_BITS << std::endl;
           std::cout << NAME << " enabling PREFETCH_BUFFER (mode=" 
                     << (mode == PrefetchBuffer::MISS_MODE ? "MISS" : "PREFETCH") << ", fill_cache_on_hit=" << std::boolalpha << fill_cache_on_hit << std::noboolalpha << ")" << std::endl;
-          pf_buffer = new PrefetchBuffer(OFFSET_BITS, mode, fill_cache_on_hit);
+
+          // Optional set-associative parameters from environment
+          uint32_t pf_buf_sets = 0;
+          uint32_t pf_buf_ways = 0;
+          if (auto s = champsim::EnvVar<uint32_t>::get("PF_BUFFER_SETS"))
+            pf_buf_sets = *s;
+          if (auto w = champsim::EnvVar<uint32_t>::get("PF_BUFFER_WAYS"))
+            pf_buf_ways = *w;
+
+          if (pf_buf_sets > 0 && pf_buf_ways > 0)
+            std::cout << "[DEBUG] " << NAME << " PREFETCH_BUFFER: using set-assoc table sets=" << pf_buf_sets << " ways=" << pf_buf_ways << std::endl;
+
+          pf_buffer = new PrefetchBuffer(OFFSET_BITS, mode, fill_cache_on_hit, pf_buf_sets, pf_buf_ways);
           std::cout << "[DEBUG] " << NAME << " PrefetchBuffer created at address " << pf_buffer << ", enable_pf_buffer=" << enable_pf_buffer << std::endl;
           std::cout << "[DEBUG] " << NAME << " Buffer allocation and initialization complete" << std::endl;
         }

@@ -18,6 +18,7 @@ private:
     int16_t last_delta = 0;
     uint8_t confidence = 0;
     bool valid = false;
+    bool delta_established = false;  // Track if we've seen at least one delta
     uint64_t birth_tick = 0;
     uint32_t issued_prefetches = 0;
   };
@@ -94,12 +95,18 @@ private:
 
     if (pred.valid && pred.page_tag == page_tag) {
       const int16_t delta = cl_off - pred.last_cl_off;
-      if (delta == pred.last_delta) {
+      if (!pred.delta_established) {
+        // First delta observation - establish it with initial confidence
+        pred.last_delta = delta;
+        pred.delta_established = true;
+        pred.confidence = (delta != 0) ? 1 : 0;  // Give credit if non-zero delta
+      } else if (delta == pred.last_delta) {
         if (pred.confidence < 3)
           pred.confidence++;
       } else {
+        // Pattern changed - reset but keep delta_established
         pred.last_delta = delta;
-        pred.confidence = 0;
+        pred.confidence = (delta != 0) ? 1 : 0;
       }
     } else {
       if (pred.valid) {
@@ -113,6 +120,7 @@ private:
       pred.page_tag = page_tag;
       pred.last_delta = 0;
       pred.confidence = 0;
+      pred.delta_established = false;
       pred.birth_tick = access_tick;
       pred.issued_prefetches = 0;
       entry_allocations++;
@@ -241,12 +249,18 @@ public:
 
     if (pred.valid && pred.page_tag == page_tag) {
       const int16_t delta = cl_off - pred.last_cl_off;
-      if (delta == pred.last_delta) {
+      if (!pred.delta_established) {
+        // First delta observation - establish it with initial confidence
+        pred.last_delta = delta;
+        pred.delta_established = true;
+        pred.confidence = (delta != 0) ? 1 : 0;  // Give credit if non-zero delta
+      } else if (delta == pred.last_delta) {
         if (pred.confidence < 3)
           pred.confidence++;
       } else {
+        // Pattern changed - reset but keep delta_established
         pred.last_delta = delta;
-        pred.confidence = 0;
+        pred.confidence = (delta != 0) ? 1 : 0;
       }
     } else {
       if (pred.valid) {
@@ -260,6 +274,7 @@ public:
       pred.page_tag = page_tag;
       pred.last_delta = 0;
       pred.confidence = 0;
+      pred.delta_established = false;
       pred.birth_tick = access_tick;
       pred.issued_prefetches = 0;
       entry_allocations++;
